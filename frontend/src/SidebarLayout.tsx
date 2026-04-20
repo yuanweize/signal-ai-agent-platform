@@ -33,6 +33,12 @@ export default function SidebarLayout({ children, title }: SidebarLayoutProps) {
           <NavLink to="/logs" className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
             <span>💬</span> Chat Logs
           </NavLink>
+          <NavLink to="/campaigns" className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
+            <span>📣</span> Campaigns
+          </NavLink>
+          <NavLink to="/users" className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
+            <span>👤</span> Users
+          </NavLink>
           <NavLink to="/settings" className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
             <span>⚙️</span> Settings
           </NavLink>

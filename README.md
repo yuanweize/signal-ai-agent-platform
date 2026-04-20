@@ -1,164 +1,101 @@
 # 🤖 Signal Market Bot
 
-A production-ready, open-source **Signal group market bot** with AI-powered customer service, automated sales, and a web admin dashboard.
+Signal 群营销机器人（FastAPI + React），支持 AI 自动回复、人工接管、群发投放、用户管理、审计追踪、保留期清理，以及 Docker 一键部署。
 
-## ✨ Features
+## 当前版本
 
-- **Signal Integration** — Connects to Signal via [signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api) gateway. Verified and connected!
-- **Multi-AI Provider** — Supports OpenAI, Azure, Tailscale AI Gateway, OpenRouter, Ollama, and any OpenAI-compatible API
-- **Smart Sales** — AI assistant queries product catalog, handles inquiries, and processes orders (Fallback to generic text menu if AI is disabled)
-- **Natural Language** — Localized conversational AI (Czech default) that sounds human, not robotic
-- **Multi-Group** — Monitor and manage multiple Signal groups simultaneously
-- **Memory** — Per-user conversation context for personalized interactions
-- **Admin Dashboard** — Premium React Web UI featuring:
-  - Sidebar Navigation with Overview, Products, Chat Logs, and Settings
-  - Full CRUD Product Management
-  - Mockups ready for real-time Chat Auditing and Manual Takeover
-  - Dynamic AI settings toggle interface
-- **Secure Admin** — Password authentication with TOTP 2FA fully implemented
-- **Docker-First** — Fully containerized with Docker Compose for easy deployment
+- 单一版本源：`backend/pyproject.toml` 的 `[project].version`
+- 运行时 API 版本读取：`backend/app/version.py`
+- 当前：请以 `python3 scripts/get_version.py` 输出为准
 
-## 🏗️ Architecture
+## ✨ 核心能力
 
-```
-┌─────────────────┐    ┌──────────────────────┐    ┌─────────────────┐
-│  Signal Network  │◄──►│  secured-signal-api   │◄──►│  Signal Market   │
-│                  │    │  (signal-cli gateway) │    │     Bot          │
-└─────────────────┘    └──────────────────────┘    │                  │
-                                                    │  ┌──────────┐   │
-                                                    │  │ AI Engine │   │
-                                                    │  └──────────┘   │
-                                                    │  ┌──────────┐   │
-                                                    │  │  SQLite   │   │
-                                                    │  └──────────┘   │
-                                                    │  ┌──────────┐   │
-                                                    │  │ Admin UI  │   │
-                                                    │  └──────────┘   │
-                                                    └─────────────────┘
-```
+- Signal Gateway 接入（轮询 + WS 回退）
+- AI 回复（运行时配置、加密 API Key、动态开关）
+- 商品管理（Products CRUD）
+- 聊天审计（会话分页、手动接管发送、重试）
+- 群投放 Campaign（dry-run、静默时段、最小间隔、黑名单）
+- 用户管理 Users（分页搜索、编辑、批量封禁/解封、活动详情）
+- 审计日志（登录、设置、接管、批量用户动作、投放）
+- 指标与告警快照（拉取失败率、5xx 比例、处理时延）
+- 数据治理（保留期清理 + 一键清空）
 
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Docker & Docker Compose
-- A running [signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api) instance
-- An AI API key (OpenAI, or any compatible provider)
-
-### 1. Clone & Configure
+## 🚀 快速启动
 
 ```bash
 git clone https://github.com/yuanweize/signal-market-bot.git
 cd signal-market-bot
 cp .env.example .env
-```
-
-Edit `.env` with your values:
-
-```env
-SIGNAL_API_URL=http://your-signal-api:8880
-SIGNAL_API_TOKEN=your-bearer-token
-SIGNAL_PHONE_NUMBER=+420123456789
-
-AI_API_BASE_URL=https://api.openai.com/v1
-AI_API_KEY=sk-your-key
-AI_MODEL=gpt-4o
-
-ADMIN_PASSWORD=your-secure-password
-JWT_SECRET_KEY=your-random-secret
-```
-
-### 2. Launch
-
-```bash
-docker compose up -d
-```
-
-### 3. Access
-
-| Service | URL |
-|---------|-----|
-| Admin Dashboard | http://localhost:3000 |
-| Backend API | http://localhost:8000 |
-| API Docs (Swagger) | http://localhost:8000/docs |
-| Health Check | http://localhost:8000/health |
-
-### 4. Initialize Database
-
-```bash
+docker compose up -d --build
 docker compose exec backend alembic upgrade head
 ```
 
-## 🔧 Configuration
+访问：
 
-### AI Provider Setup
+- Admin: http://localhost:3000
+- API: http://localhost:8000
+- Docs: http://localhost:8000/docs
 
-The bot supports **any OpenAI-compatible API**. Simply change `AI_API_BASE_URL`:
+## ⚙️ 版本与发布规范
 
-| Provider | Base URL |
-|----------|----------|
-| OpenAI | `https://api.openai.com/v1` |
-| Azure OpenAI | `https://your-resource.openai.azure.com/openai/deployments/your-model` |
-| Tailscale AI | `https://your-tailnet.ts.net/ai/v1` |
-| OpenRouter | `https://openrouter.ai/api/v1` |
-| Ollama (local) | `http://localhost:11434/v1` |
-| vLLM | `http://localhost:8080/v1` |
+### 1) 版本只改一个地方
 
-### Admin 2FA Setup
+只修改 `backend/pyproject.toml`：
+
+```toml
+[project]
+version = "<new-version>"
+```
+
+### 2) 本地检查
 
 ```bash
-# Generate TOTP secret
-python -c "import pyotp; print(pyotp.random_base32())"
-# Add the output to ADMIN_TOTP_SECRET in .env
-# Scan the QR code with your authenticator app
+python3 scripts/get_version.py
+python3 -m compileall backend/app
+cd frontend && npm run build
 ```
 
-## 🛠️ Development
-
-### Backend (Python)
+### 3) 本地容器重建
 
 ```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+./scripts/redeploy.sh
 ```
 
-### Frontend (React)
+### 4) 镜像发布（GitHub Actions）
 
-```bash
-cd frontend
-npm install
-npm run dev
+仓库已提供：
+
+- `.github/workflows/ci.yml`：后端编译 + 前端构建
+- `.github/workflows/docker-publish.yml`：推送到 GHCR
+
+发布触发：
+
+- push 到 `main`（发布 `latest` + 当前版本）
+- push tag（如 `v<new-version>`）
+
+GHCR 镜像：
+
+- `ghcr.io/<owner>/signal-market-bot-backend`
+- `ghcr.io/<owner>/signal-market-bot-frontend`
+
+## 🧪 运行审计建议
+
+- 未登录访问管理接口应返回 `401`
+- `/health` 中 `version` 与 `backend/pyproject.toml` 保持一致
+- Settings 修改 `bot_name` 后，`/health` 立即反映
+- Users 批量封禁/解封后审计日志可检索
+- Campaign dry-run 与实际发送结果可在 summary 中追踪
+
+## 📁 目录说明
+
+```text
+backend/                 FastAPI 服务与业务逻辑
+frontend/                React 管理台
+scripts/get_version.py   统一版本读取脚本
+scripts/redeploy.sh      本地重建部署脚本
+.github/workflows/       CI + Docker 发布
 ```
 
-## 📁 Project Structure
+## 📄 License
 
-```
-signal-market-bot/
-├── docker-compose.yml
-├── .env.example
-├── backend/
-│   ├── Dockerfile
-│   ├── pyproject.toml
-│   ├── alembic.ini
-│   ├── alembic/
-│   └── app/
-│       ├── main.py          # FastAPI entry
-│       ├── config.py         # Settings
-│       ├── database.py       # SQLAlchemy
-│       ├── models/           # ORM models
-│       ├── schemas/          # Pydantic schemas
-│       ├── services/         # Business logic
-│       └── api/              # REST endpoints
-├── frontend/
-│   ├── Dockerfile
-│   ├── nginx.conf
-│   └── src/                  # React app
-└── data/                     # SQLite (mounted volume)
-```
-
-## 📝 License
-
-[MIT](LICENSE) © IYUANWEIZE
+[MIT](LICENSE)

@@ -5,6 +5,8 @@
 
 FROM python:3.12-slim AS base
 
+ARG APP_VERSION=dev
+
 # Prevent Python from writing .pyc and enable unbuffered output
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -25,6 +27,11 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 # ---- Runtime stage ----
 FROM base AS runtime
+
+ARG APP_VERSION=dev
+LABEL org.opencontainers.image.title="signal-market-bot-backend"
+LABEL org.opencontainers.image.version="${APP_VERSION}"
+LABEL org.opencontainers.image.description="Signal Market Bot backend API"
 
 # Copy installed packages from deps stage
 COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages

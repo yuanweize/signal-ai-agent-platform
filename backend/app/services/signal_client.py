@@ -21,6 +21,7 @@ from websockets.exceptions import ConnectionClosed, InvalidURI, WebSocketExcepti
 
 from app.config import settings
 from app.schemas.signal import SignalIncomingMessage, SignalSendRequest
+from app.services.metrics import runtime_metrics
 
 logger = logging.getLogger("signal.client")
 
@@ -268,6 +269,7 @@ class SignalClient:
 
         while self._running and empty_polls < max_empty_polls:
             try:
+                runtime_metrics.inc("signal.pull.total")
                 response = await client.get(poll_url)
 
                 if response.status_code == 200:
@@ -284,12 +286,18 @@ class SignalClient:
                     # No content — no new messages
                     empty_polls += 1
                 else:
+                    runtime_metrics.inc("signal.pull.fail")
+                    if response.status_code == 401:
+                        runtime_metrics.inc("signal.pull.401")
+                    if response.status_code >= 500:
+                        runtime_metrics.inc("signal.pull.5xx")
                     logger.warning(
                         f"⚠️  Poll response: HTTP {response.status_code}"
                     )
                     empty_polls += 1
 
             except httpx.HTTPError as e:
+                runtime_metrics.inc("signal.pull.fail")
                 logger.warning(f"⚠️  Poll error: {e}")
                 raise  # Let the outer loop handle reconnection
 

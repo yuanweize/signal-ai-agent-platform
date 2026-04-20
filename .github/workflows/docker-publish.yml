@@ -1,0 +1,80 @@
+name: Docker Publish
+
+on:
+  push:
+    branches: ["main"]
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve app version
+        id: version
+        run: |
+          APP_VERSION=$(python3 scripts/get_version.py)
+          echo "app_version=${APP_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract backend metadata
+        id: backend-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/signal-market-bot-backend
+          tags: |
+            type=raw,value=${{ steps.version.outputs.app_version }}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=tag
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          labels: ${{ steps.backend-meta.outputs.labels }}
+          tags: ${{ steps.backend-meta.outputs.tags }}
+          build-args: |
+            APP_VERSION=${{ steps.version.outputs.app_version }}
+
+      - name: Extract frontend metadata
+        id: frontend-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/signal-market-bot-frontend
+          tags: |
+            type=raw,value=${{ steps.version.outputs.app_version }}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=tag
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          labels: ${{ steps.frontend-meta.outputs.labels }}
+          tags: ${{ steps.frontend-meta.outputs.tags }}
+          build-args: |
+            APP_VERSION=${{ steps.version.outputs.app_version }}

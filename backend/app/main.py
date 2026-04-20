@@ -5,13 +5,18 @@ Registers lifespan events, CORS, routes, and health check.
 """
 
 import logging
+import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.database import close_db, init_db
+from app.database import async_session, close_db, init_db
+from app.services.data_retention import cleanup_expired_data
+from app.services.metrics import runtime_metrics
+from app.services.runtime_config import get_runtime_settings
+from app.version import get_app_version
 
 # ---- Logging setup ----
 logging.basicConfig(
@@ -20,6 +25,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("signal-market-bot")
+APP_VERSION = get_app_version()
 
 
 @asynccontextmanager
@@ -38,6 +44,16 @@ async def lifespan(app: FastAPI):
     # Initialize database tables
     await init_db()
     logger.info("✅ Database initialized")
+
+    # Startup retention cleanup
+    async with async_session() as session:
+        cleanup_result = await cleanup_expired_data(session)
+        logger.info(
+            "🧹 Retention cleanup: "
+            f"messages={cleanup_result['messages_deleted']}, "
+            f"conversations={cleanup_result['conversations_deleted']}, "
+            f"audit_logs={cleanup_result['audit_logs_deleted']}"
+        )
 
     # Wire up Signal message pipeline
     from app.services.signal_client import signal_client
@@ -74,11 +90,26 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Signal Market Bot",
     description="AI-powered Signal group market bot with admin dashboard",
-    version="0.1.0",
+    version=APP_VERSION,
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    duration = time.perf_counter() - start
+
+    runtime_metrics.inc("api.requests.total")
+    if response.status_code == 401:
+        runtime_metrics.inc("api.requests.401")
+    if response.status_code >= 500:
+        runtime_metrics.inc("api.requests.5xx")
+    runtime_metrics.observe_latency("api.request", duration)
+    return response
 
 # ---- CORS ----
 app.add_middleware(
@@ -94,10 +125,18 @@ app.add_middleware(
 @app.get("/health", tags=["System"])
 async def health_check():
     """Health check with module status for frontend dashboard."""
+    bot_name = settings.bot_name
+    try:
+        async with async_session() as session:
+            runtime = await get_runtime_settings(session)
+            bot_name = runtime.get("bot_name", bot_name)
+    except Exception:
+        pass
+
     return {
         "status": "ok",
-        "version": "0.1.0",
-        "bot_name": settings.bot_name,
+        "version": APP_VERSION,
+        "bot_name": bot_name,
         "features": settings.features_summary,
     }
 
@@ -108,7 +147,7 @@ async def root():
     """API root — basic info."""
     return {
         "name": "Signal Market Bot API",
-        "version": "0.1.0",
+        "version": APP_VERSION,
         "docs": "/docs",
         "health": "/health",
     }

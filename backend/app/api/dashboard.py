@@ -18,6 +18,8 @@ from app.models.group import Group
 from app.models.order import Order
 from app.models.product import Product
 from app.models.user import User
+from app.services.metrics import runtime_metrics
+from app.services.runtime_config import get_runtime_settings
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
@@ -48,6 +50,7 @@ async def get_stats(
     orders = (
         await session.execute(select(func.count(Order.id)))
     ).scalar() or 0
+    runtime = await get_runtime_settings(session)
 
     return {
         "users": users,
@@ -56,5 +59,18 @@ async def get_stats(
         "messages": messages,
         "groups": groups,
         "orders": orders,
-        "features": settings.features_summary,
+        "features": {
+            "signal": bool(settings.signal_phone_number),
+            "ai": runtime["is_ai_enabled"] and runtime["has_ai_api_key"],
+            "market": runtime["is_market_enabled"],
+            "admin_2fa": settings.is_2fa_enabled,
+        },
     }
+
+
+@router.get("/metrics")
+async def get_metrics(
+    _admin: AdminUser = Depends(get_current_admin),
+):
+    """Runtime metrics and alert snapshot for ops dashboard."""
+    return runtime_metrics.snapshot()

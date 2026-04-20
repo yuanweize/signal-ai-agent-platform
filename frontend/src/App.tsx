@@ -5,6 +5,8 @@ import DashboardPage from './DashboardPage';
 import ProductsPage from './ProductsPage';
 import SettingsPage from './SettingsPage';
 import ChatLogsPage from './ChatLogsPage';
+import CampaignsPage from './CampaignsPage';
+import UsersPage from './UsersPage';
 
 /**
  * Auth guard — redirects to /login if no JWT token present.
@@ -50,6 +52,22 @@ function App() {
           element={
             <ProtectedRoute>
               <ChatLogsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/campaigns"
+          element={
+            <ProtectedRoute>
+              <CampaignsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/users"
+          element={
+            <ProtectedRoute>
+              <UsersPage />
             </ProtectedRoute>
           }
         />

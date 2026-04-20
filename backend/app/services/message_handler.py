@@ -14,6 +14,7 @@ Pipeline:
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime
 
 from sqlalchemy import select
@@ -27,6 +28,7 @@ from app.models.user import User
 from app.models.product import Product
 from app.schemas.signal import ParsedMessage, SignalIncomingMessage
 from app.services.signal_client import signal_client
+from app.services.metrics import runtime_metrics
 
 logger = logging.getLogger("signal.handler")
 
@@ -53,6 +55,7 @@ class MessageHandler:
         Args:
             incoming: Raw parsed message from the Signal API
         """
+        started = time.perf_counter()
         envelope = incoming.envelope
 
         # Build normalized internal message
@@ -129,6 +132,11 @@ class MessageHandler:
             except Exception as e:
                 logger.error(f"❌ Pipeline error: {e}", exc_info=True)
                 await session.rollback()
+            finally:
+                runtime_metrics.observe_latency(
+                    "message.processing",
+                    time.perf_counter() - started,
+                )
 
     async def _upsert_user(
         self, session: AsyncSession, parsed: ParsedMessage
@@ -241,7 +249,7 @@ class MessageHandler:
         message logging, user tracking, or other features.
         """
         # AI module: only if enabled and injected
-        if self._ai_engine is not None and self._ai_engine.is_enabled:
+        if self._ai_engine is not None:
             try:
                 reply = await self._ai_engine.generate_response(
                     session=session,
@@ -268,10 +276,13 @@ class MessageHandler:
             return await self._generate_fallback_menu(session)
 
         logger.info(
-            f"📝 [Log-only] Message from {parsed.sender_name} stored "
-            f"(AI module disabled). User can reply manually."
+            f"📝 [Fallback] Message from {parsed.sender_name} stored "
+            f"(AI module disabled). Sending availability notice."
         )
-        return None
+        return (
+            "✅ Zpráva dorazila. AI asistent je momentálně vypnutý.\n"
+            "Napište prosím *menu* pro zobrazení nabídky, nebo vyčkejte na manuální odpověď."
+        )
 
     async def _generate_fallback_menu(self, session: AsyncSession) -> str:
         """Generate a simple text menu of active products when AI is disabled."""

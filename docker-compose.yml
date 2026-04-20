@@ -3,9 +3,12 @@ services:
   # Backend — FastAPI + Signal Bot Engine
   # ============================================================
   backend:
+    image: signal-market-bot-backend:${APP_VERSION:-dev}
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
     container_name: smb-backend
     restart: unless-stopped
     ports:
@@ -29,9 +32,12 @@ services:
   # Frontend — React Admin Dashboard (Nginx)
   # ============================================================
   frontend:
+    image: signal-market-bot-frontend:${APP_VERSION:-dev}
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
     container_name: smb-frontend
     restart: unless-stopped
     ports:

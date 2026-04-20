@@ -23,15 +23,17 @@ from app.schemas.product import (
     ProductResponse,
     ProductUpdate,
 )
+from app.services.runtime_config import get_runtime_settings
 
 logger = logging.getLogger("api.products")
 
 router = APIRouter(prefix="/products", tags=["Products"])
 
 
-def _check_market_enabled():
+async def _check_market_enabled(session: AsyncSession):
     """Raise 403 if market module is disabled."""
-    if not settings.is_market_available:
+    runtime = await get_runtime_settings(session)
+    if not runtime.get("is_market_enabled", settings.is_market_available):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Market module is disabled (FEATURE_MARKET_ENABLED=false)",
@@ -48,7 +50,7 @@ async def list_products(
     _admin: AdminUser = Depends(get_current_admin),
 ):
     """List products with pagination and optional filtering."""
-    _check_market_enabled()
+    await _check_market_enabled(session)
 
     query = select(Product)
 
@@ -82,7 +84,7 @@ async def get_product(
     _admin: AdminUser = Depends(get_current_admin),
 ):
     """Get a single product by ID."""
-    _check_market_enabled()
+    await _check_market_enabled(session)
 
     result = await session.execute(
         select(Product).where(Product.id == product_id)
@@ -102,7 +104,7 @@ async def create_product(
     admin: AdminUser = Depends(get_current_admin),
 ):
     """Create a new product."""
-    _check_market_enabled()
+    await _check_market_enabled(session)
 
     product = Product(**data.model_dump())
     session.add(product)
@@ -121,7 +123,7 @@ async def update_product(
     admin: AdminUser = Depends(get_current_admin),
 ):
     """Update an existing product (partial update)."""
-    _check_market_enabled()
+    await _check_market_enabled(session)
 
     result = await session.execute(
         select(Product).where(Product.id == product_id)
@@ -150,7 +152,7 @@ async def delete_product(
     admin: AdminUser = Depends(get_current_admin),
 ):
     """Delete a product (hard delete)."""
-    _check_market_enabled()
+    await _check_market_enabled(session)
 
     result = await session.execute(
         select(Product).where(Product.id == product_id)

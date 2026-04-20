@@ -1,41 +1,180 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { api, ChatConversation, ChatMessage } from './api';
 import SidebarLayout from './SidebarLayout';
 
-interface Contact {
-  id: string;
-  name: string;
-  phone: string;
-  lastMessage: string;
-  time: string;
-  unread: boolean;
+function formatTime(iso?: string): string {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-interface Message {
-  id: string;
-  text: string;
-  isUser: boolean;
-  time: string;
+function formatListTime(iso?: string): string {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  const now = new Date();
+  const sameDay = date.toDateString() === now.toDateString();
+  return sameDay
+    ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : date.toLocaleDateString();
 }
-
-const MOCK_CONTACTS: Contact[] = [
-  { id: '1', name: 'Alice Smith', phone: '+447123456789', lastMessage: 'Jak si mohu objednat?', time: '10:45', unread: true },
-  { id: '2', name: 'Bob Johnson', phone: '+447987654321', lastMessage: 'Díky za pomoc!', time: 'Včera', unread: false },
-  { id: '3', name: 'Charlie', phone: '+420777123456', lastMessage: 'Chci produkt B.', time: 'Út', unread: false },
-];
-
-const MOCK_MESSAGES: Message[] = [
-  { id: '1', text: 'Dobrý den, potřeboval bych poradit.', isUser: true, time: '10:42' },
-  { id: '2', text: 'Dobrý den! Jsem váš asistent. S čím vám mohu pomoci?', isUser: false, time: '10:42' },
-  { id: '3', text: 'Jak si mohu objednat?', isUser: true, time: '10:45' },
-];
 
 export default function ChatLogsPage() {
-  const [activeContact, setActiveContact] = useState<string>(MOCK_CONTACTS[0].id);
+  const [loadingContacts, setLoadingContacts] = useState(true);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [contacts, setContacts] = useState<ChatConversation[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [activeContact, setActiveContact] = useState<string>('');
+  const [draft, setDraft] = useState('');
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(50);
+  const [totalMessages, setTotalMessages] = useState(0);
+  const [unreadMap, setUnreadMap] = useState<Record<string, number>>({});
+  const lastMessageCountRef = useRef<Record<string, number>>({});
 
-  const currentContact = MOCK_CONTACTS.find(c => c.id === activeContact);
+  const currentContact = useMemo(
+    () => contacts.find(c => c.signal_id === activeContact),
+    [contacts, activeContact]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadChats = async (isBackground = false) => {
+      try {
+        if (!isBackground) setLoadingContacts(true);
+        const data = await api.getChats(100);
+        if (cancelled) return;
+
+        const prevCounts = lastMessageCountRef.current;
+        const nextCounts: Record<string, number> = {};
+        data.items.forEach(item => {
+          nextCounts[`${item.signal_id}::${item.group_id || 'dm'}`] = item.message_count;
+        });
+
+        setUnreadMap(prevUnread => {
+          const nextUnread = { ...prevUnread };
+          data.items.forEach(item => {
+            const key = `${item.signal_id}::${item.group_id || 'dm'}`;
+            const prevCount = prevCounts[key] ?? item.message_count;
+            const delta = Math.max(0, item.message_count - prevCount);
+            const isActive =
+              activeContact === item.signal_id &&
+              (!!currentContact ? currentContact.group_id === item.group_id : !item.group_id);
+            nextUnread[key] = isActive ? 0 : (nextUnread[key] || 0) + delta;
+          });
+          return nextUnread;
+        });
+
+        lastMessageCountRef.current = nextCounts;
+
+        setContacts(data.items);
+        if (data.items.length > 0) {
+          setActiveContact(prev => prev || data.items[0].signal_id);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : 'Failed to load chats');
+        }
+      } finally {
+        if (!cancelled && !isBackground) setLoadingContacts(false);
+      }
+    };
+
+    loadChats();
+    const interval = setInterval(() => {
+      void loadChats(true);
+    }, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [activeContact, currentContact?.group_id]);
+
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!currentContact) {
+      setMessages([]);
+      return;
+    }
+
+    const loadMessages = async () => {
+      try {
+        setLoadingMessages(true);
+        setError(null);
+        const data = await api.getChatMessages(
+          currentContact.signal_id,
+          currentContact.group_id,
+          page,
+          pageSize,
+        );
+        if (cancelled) return;
+        setMessages(data.items);
+        setTotalMessages(data.total);
+        setUnreadMap(prev => ({ ...prev, [`${currentContact.signal_id}::${currentContact.group_id || 'dm'}`]: 0 }));
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : 'Failed to load messages');
+        }
+      } finally {
+        if (!cancelled) setLoadingMessages(false);
+      }
+    };
+
+    loadMessages();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentContact?.signal_id, currentContact?.group_id, page, pageSize]);
+
+  const filteredContacts = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+    if (!keyword) return contacts;
+    return contacts.filter(c => {
+      const text = `${c.display_name || ''} ${c.signal_id} ${c.last_message || ''}`.toLowerCase();
+      return text.includes(keyword);
+    });
+  }, [contacts, search]);
+
+  const handleSend = async () => {
+    if (!currentContact || !draft.trim()) return;
+    try {
+      setSending(true);
+      setError(null);
+      await api.sendChatMessage(currentContact.signal_id, {
+        message: draft.trim(),
+        group_id: currentContact.group_id || undefined,
+      });
+      const justSent = draft.trim();
+      setDraft('');
+      setMessages(prev => [
+        ...prev,
+        {
+          id: Date.now(),
+          role: 'assistant',
+          content: justSent,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to send message');
+    } finally {
+      setSending(false);
+    }
+  };
 
   return (
     <SidebarLayout title="Chat Logs (Audit)">
+      {error && (
+        <div className="form-error" style={{ marginBottom: '1rem' }}>
+          {error}
+        </div>
+      )}
       <div className="chat-container">
         {/* Sidebar Contacts */}
         <div className="chat-sidebar">
@@ -43,25 +182,41 @@ export default function ChatLogsPage() {
             <input 
               type="text" 
               placeholder="Search conversations..." 
+              value={search}
+              onChange={e => setSearch(e.target.value)}
               style={{ width: '100%', padding: '0.6rem 1rem', borderRadius: '1rem', background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
             />
           </div>
           <div className="chat-list">
-            {MOCK_CONTACTS.map(contact => (
+            {loadingContacts && (
+              <div style={{ padding: '1rem', color: 'var(--text-muted)' }}>Loading chats...</div>
+            )}
+            {!loadingContacts && filteredContacts.length === 0 && (
+              <div style={{ padding: '1rem', color: 'var(--text-muted)' }}>No conversations found</div>
+            )}
+            {filteredContacts.map(contact => (
               <div 
-                key={contact.id} 
-                className={`chat-contact ${activeContact === contact.id ? 'active' : ''}`}
-                onClick={() => setActiveContact(contact.id)}
+                key={`${contact.signal_id}-${contact.group_id || 'dm'}`}
+                className={`chat-contact ${activeContact === contact.signal_id ? 'active' : ''}`}
+                onClick={() => {
+                  setActiveContact(contact.signal_id);
+                  setPage(1);
+                }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div className="contact-name">{contact.name || contact.phone}</div>
-                  <div style={{ fontSize: '0.75rem', color: contact.unread ? 'var(--accent)' : 'var(--text-muted)', fontWeight: contact.unread ? 600 : 400 }}>
-                    {contact.time}
+                  <div className="contact-name">{contact.display_name || contact.signal_id}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+                    {formatListTime(contact.last_message_at)}
                   </div>
                 </div>
-                <div className="contact-preview" style={{ fontWeight: contact.unread ? 600 : 400, color: contact.unread ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-                  {contact.lastMessage}
+                <div className="contact-preview" style={{ color: 'var(--text-muted)' }}>
+                  {contact.last_message || 'No messages yet'}
                 </div>
+                {!!unreadMap[`${contact.signal_id}::${contact.group_id || 'dm'}`] && (
+                  <div style={{ marginTop: '0.4rem', fontSize: '0.75rem', color: 'var(--accent)', fontWeight: 600 }}>
+                    {unreadMap[`${contact.signal_id}::${contact.group_id || 'dm'}`]} unread
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -72,21 +227,47 @@ export default function ChatLogsPage() {
           {currentContact ? (
             <>
               <div className="chat-header">
-                <div>{currentContact.name}</div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 'normal' }}>{currentContact.phone}</div>
+                <div>{currentContact.display_name || currentContact.signal_id}</div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 'normal' }}>
+                  {currentContact.group_id ? `${currentContact.signal_id} · ${currentContact.group_id}` : currentContact.signal_id}
+                </div>
               </div>
               
               <div className="chat-messages">
-                <div style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-muted)', margin: '1rem 0' }}>
-                  Today
-                </div>
-                
-                {MOCK_MESSAGES.map(msg => (
-                  <div key={msg.id} className={`message ${msg.isUser ? 'user' : 'bot'}`}>
-                    <div>{msg.text}</div>
-                    <div className="message-time">{msg.time} {msg.isUser ? '' : '🤖'}</div>
+                {loadingMessages && (
+                  <div style={{ textAlign: 'center', fontSize: '0.9rem', color: 'var(--text-muted)', margin: '1rem 0' }}>
+                    Loading messages...
                   </div>
-                ))}
+                )}
+                {!loadingMessages && messages.map(msg => {
+                  const isUser = msg.role === 'user';
+                  return (
+                  <div key={msg.id} className={`message ${isUser ? 'user' : 'bot'}`}>
+                    <div>{msg.content}</div>
+                    <div className="message-time">{formatTime(msg.timestamp)} {isUser ? '' : '🤖'}</div>
+                  </div>
+                )})}
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  <span>Total: {totalMessages}</span>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button className="btn-secondary" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1 || loadingMessages}>Prev</button>
+                    <span style={{ alignSelf: 'center' }}>Page {page}</span>
+                    <button className="btn-secondary" onClick={() => setPage(p => p + 1)} disabled={loadingMessages || page * pageSize >= totalMessages}>Next</button>
+                    <button className="btn-secondary" onClick={() => {
+                      if (!currentContact) return;
+                      setError(null);
+                      setLoadingMessages(true);
+                      void api.getChatMessages(currentContact.signal_id, currentContact.group_id, page, pageSize)
+                        .then(data => {
+                          setMessages(data.items);
+                          setTotalMessages(data.total);
+                        })
+                        .catch(e => setError(e instanceof Error ? e.message : 'Failed to load messages'))
+                        .finally(() => setLoadingMessages(false));
+                    }} disabled={loadingMessages}>Retry</button>
+                  </div>
+                </div>
               </div>
 
               <div style={{ padding: '1rem', borderTop: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
@@ -94,13 +275,23 @@ export default function ChatLogsPage() {
                   <input 
                     type="text" 
                     placeholder="Takeover mode: Send message manually..." 
+                    value={draft}
+                    onChange={e => setDraft(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        void handleSend();
+                      }
+                    }}
                     style={{ flex: 1, padding: '0.8rem 1rem', borderRadius: 'var(--radius)', background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-                    disabled
+                    disabled={sending || loadingMessages}
                   />
-                  <button className="btn-primary" disabled style={{ opacity: 0.5 }}>Send</button>
+                  <button className="btn-primary" onClick={handleSend} disabled={sending || !draft.trim() || loadingMessages}>
+                    {sending ? 'Sending...' : 'Send'}
+                  </button>
                 </div>
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem', textAlign: 'center' }}>
-                  Manual takeover and real-time logs will be implemented in future backend updates.
+                  Manual takeover is active. New messages are stored in conversation history.
                 </div>
               </div>
             </>

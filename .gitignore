@@ -26,6 +26,7 @@ yarn-error.log*
 frontend/dist/
 frontend/build/
 backend/dist/
+frontend/tsconfig.tsbuildinfo
 
 # ===== Environment & Secrets =====
 .env

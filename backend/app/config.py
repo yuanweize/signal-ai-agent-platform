@@ -48,6 +48,22 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 480  # 8 hours
 
+    # ---- Login Protection ----
+    login_rate_limit_window_seconds: int = 300
+    login_rate_limit_max_attempts_per_ip: int = 20
+    login_rate_limit_max_attempts_per_user: int = 8
+    login_lock_seconds: int = 900
+
+    # ---- Config Encryption ----
+    config_encryption_key: str = ""
+
+    # ---- Data Retention ----
+    data_retention_days: int = 30
+
+    # ---- Monitoring Thresholds ----
+    alert_signal_pull_fail_rate: float = 0.2
+    alert_api_5xx_rate: float = 0.05
+
     # ---- Bot Behavior ----
     bot_default_language: str = "cs"
     bot_name: str = "MarketBot"

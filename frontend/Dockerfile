@@ -6,6 +6,8 @@
 # ---- Build stage ----
 FROM node:20-alpine AS build
 
+ARG APP_VERSION=dev
+
 WORKDIR /app
 
 # Install dependencies first (cache layer)
@@ -18,6 +20,11 @@ RUN npm run build
 
 # ---- Production stage ----
 FROM nginx:alpine AS production
+
+ARG APP_VERSION=dev
+LABEL org.opencontainers.image.title="signal-market-bot-frontend"
+LABEL org.opencontainers.image.version="${APP_VERSION}"
+LABEL org.opencontainers.image.description="Signal Market Bot admin dashboard"
 
 # Copy custom nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf

@@ -21,6 +21,7 @@ from app.config import settings
 from app.models.conversation import Conversation, Message
 from app.models.group import Group
 from app.models.product import Product
+from app.services.runtime_config import get_runtime_settings
 
 logger = logging.getLogger("ai.engine")
 
@@ -40,6 +41,7 @@ class AIEngine:
     def __init__(self) -> None:
         self._client: AsyncOpenAI | None = None
         self._enabled = False
+        self._runtime_api_key: str = ""
 
     async def initialize(self) -> bool:
         """
@@ -98,13 +100,18 @@ class AIEngine:
         Returns:
             AI response text, or None if generation fails
         """
+        runtime = await self._refresh_runtime_client(session)
         if not self.is_enabled:
             return None
 
         try:
             # Build the message list for the API call
             messages = await self._build_messages(
-                session, conversation, user_message, group_id
+                session,
+                conversation,
+                user_message,
+                group_id,
+                runtime,
             )
 
             # Call the LLM
@@ -150,12 +157,32 @@ class AIEngine:
         """Token count from the last API call (for tracking)."""
         return getattr(self, "_last_tokens_used", None)
 
+    async def _refresh_runtime_client(self, session: AsyncSession) -> dict:
+        runtime = await get_runtime_settings(session)
+        runtime_enabled = runtime["is_ai_enabled"]
+        runtime_key = runtime["ai_api_key"]
+
+        if not runtime_enabled or not runtime_key:
+            self._enabled = False
+            return runtime
+
+        if self._client is None or runtime_key != self._runtime_api_key:
+            self._client = AsyncOpenAI(
+                api_key=runtime_key,
+                base_url=settings.ai_api_base_url,
+            )
+            self._runtime_api_key = runtime_key
+
+        self._enabled = True
+        return runtime
+
     async def _build_messages(
         self,
         session: AsyncSession,
         conversation: Conversation,
         user_message: str,
         group_id: str | None = None,
+        runtime: dict | None = None,
     ) -> list[dict]:
         """
         Build the messages list for the OpenAI API call.
@@ -167,13 +194,18 @@ class AIEngine:
         4. Current user message
         """
         messages = []
+        runtime = runtime or {}
 
         # 1. System prompt
-        system_prompt = await self._get_system_prompt(session, group_id)
+        system_prompt = await self._get_system_prompt(
+            session,
+            group_id,
+            runtime_prompt=runtime.get("ai_prompt"),
+        )
         messages.append({"role": "system", "content": system_prompt})
 
         # 2. Product catalog (only when market module is enabled)
-        if settings.is_market_available:
+        if runtime.get("is_market_enabled", settings.is_market_available):
             catalog = await self._build_catalog_context(session)
             if catalog:
                 messages.append({"role": "system", "content": catalog})
@@ -201,6 +233,7 @@ class AIEngine:
         self,
         session: AsyncSession,
         group_id: str | None = None,
+        runtime_prompt: str | None = None,
     ) -> str:
         """
         Get the system prompt — check for per-group override first.
@@ -214,7 +247,7 @@ class AIEngine:
                 return group.system_prompt_override
 
         # Fall back to global system prompt
-        return settings.bot_system_prompt
+            return runtime_prompt or settings.bot_system_prompt
 
     async def _build_catalog_context(
         self,
