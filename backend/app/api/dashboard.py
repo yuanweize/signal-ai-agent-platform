@@ -57,7 +57,6 @@ async def get_stats(
     ai_enabled = bool(runtime.get("is_ai_enabled")) and (
         bool(runtime.get("has_ai_api_key")) or is_ai_api_key_optional(ai_base_url)
     )
-    signal_ready = bool(runtime.get("signal_api_url")) and bool(runtime.get("signal_phone_number"))
 
     return {
         "users": users,
@@ -67,7 +66,7 @@ async def get_stats(
         "groups": groups,
         "orders": orders,
         "features": {
-            "signal": signal_ready and signal_client.is_running,
+            "signal": signal_client.is_connected,
             "ai": ai_enabled,
             "market": bool(runtime.get("is_market_enabled")),
             "admin_2fa": bootstrap_status.requires_2fa,

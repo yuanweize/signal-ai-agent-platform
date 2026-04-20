@@ -4,10 +4,29 @@
 [![Docker Publish](https://img.shields.io/github/actions/workflow/status/yuanweize/signal-market-bot/docker-publish.yml?branch=main&label=Docker%20Publish)](https://github.com/yuanweize/signal-market-bot/actions)
 [![License](https://img.shields.io/github/license/yuanweize/signal-market-bot)](LICENSE)
 
-Signal Market Bot 是一个面向 Signal 场景的营销机器人系统，包含 FastAPI 后端与 React 管理后台。
+Signal Market Bot 是一个面向 Signal 场景的营销机器人系统，包含 FastAPI 后端与 React 管理后台，支持运行时配置、审计追踪与安全初始化。
 
-- 英文主文档: [README.md](README.md)
-- 中文文档: 当前页面
+语言: [English](README.md) | **中文**
+
+## 项目价值
+
+这个项目用于快速搭建 Signal 销售运营中台：
+
+- 接收并处理用户消息
+- AI 自动回复与人工接管并存
+- 商品、用户、投放、审计统一管理
+- 不依赖 `.env` 的后台运行时配置
+
+## 目录导航
+
+- [核心能力](#核心能力)
+- [快速启动（预构建镜像）](#快速启动预构建镜像)
+- [本地源码构建模式](#本地源码构建模式)
+- [首次安全初始化](#首次安全初始化)
+- [运行时配置模型](#运行时配置模型无-env-依赖)
+- [发布与版本管理](#发布与版本管理)
+- [文档质量工具建议](#文档质量工具建议)
+- [目录说明](#目录说明)
 
 ## 核心能力
 
@@ -18,20 +37,47 @@ Signal Market Bot 是一个面向 Signal 场景的营销机器人系统，包含
 - 审计日志、数据保留清理、运行指标
 - Docker 一键部署 + GitHub Actions 持续集成与镜像发布
 
-## 快速启动
+## 快速启动（默认使用 GHCR 预构建镜像）
 
 ```bash
 git clone https://github.com/yuanweize/signal-market-bot.git
 cd signal-market-bot
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 docker compose exec backend alembic upgrade head
 ```
 
-访问地址：
+默认 `docker-compose.yml` 直接使用 GitHub Packages（GHCR）镜像：
+
+- `ghcr.io/yuanweize/signal-market-bot-backend:<tag>`
+- `ghcr.io/yuanweize/signal-market-bot-frontend:<tag>`
+
+可指定版本：
+
+```bash
+APP_VERSION=0.2.0 docker compose pull
+APP_VERSION=0.2.0 docker compose up -d
+```
+
+服务地址：
 
 - 管理后台: http://localhost:3000
 - API: http://localhost:8000
 - OpenAPI 文档: http://localhost:8000/docs
+
+## 本地源码构建模式
+
+当你修改了本地代码，需要重新构建镜像时：
+
+```bash
+./scripts/redeploy.sh
+```
+
+等价命令：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build frontend backend
+```
 
 ## 首次部署初始化
 
@@ -59,7 +105,7 @@ docker compose exec backend alembic upgrade head
 - 管理端与 API 描述采用英语优先，便于国际团队协作
 - 中文文档用于本地部署与运维说明
 
-## 开发与发布
+## 开发检查
 
 后端检查：
 
@@ -75,16 +121,37 @@ npm ci
 npm run build
 ```
 
-本地重部署：
-
-```bash
-./scripts/redeploy.sh
-```
+## 发布与版本管理
 
 版本来源：
 
 - `backend/pyproject.toml` 的 `[project].version`
 - 读取脚本：`python3 scripts/get_version.py`
+
+镜像发布流程：
+
+- CI：`.github/workflows/ci.yml`
+- Docker 发布：`.github/workflows/docker-publish.yml`
+- GHCR 镜像：
+	- `ghcr.io/<owner>/signal-market-bot-backend`
+	- `ghcr.io/<owner>/signal-market-bot-frontend`
+
+## 文档质量工具建议
+
+建议对 README 引入自动化质量门禁：
+
+- `markdownlint-cli2`：标题层级、列表规范、空行一致性
+- `prettier`（Markdown）：统一格式，减少无意义 diff
+- `lychee`：链接有效性检查（徽章/文档/外链）
+- `vale`：英文文案质量与术语一致性
+
+建议在 CI 中加入：
+
+```bash
+npx markdownlint-cli2 "**/*.md"
+npx prettier -c "**/*.md"
+npx lychee README.md README.zh-CN.md
+```
 
 ## 目录说明
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from typing import Callable, Awaitable
 
 import httpx
@@ -45,6 +46,7 @@ class SignalClient:
         self._on_message: MessageCallback | None = None
         self._listener_task: asyncio.Task | None = None
         self._running = False
+        self._connected = False
         self._http_client: httpx.AsyncClient | None = None
 
         # Reconnection state
@@ -65,6 +67,11 @@ class SignalClient:
     def is_running(self) -> bool:
         """Whether listener lifecycle is currently active."""
         return self._running
+
+    @property
+    def is_connected(self) -> bool:
+        """Whether Signal gateway is currently reachable with active listener transport."""
+        return self._connected
 
     # ---- HTTP Client Setup ----
 
@@ -152,10 +159,67 @@ class SignalClient:
             return
 
         self._running = True
+        self._connected = False
         self._reconnect_delay = 1.0
         self._reconnect_attempts = 0
         self._listener_task = asyncio.create_task(self._listener_loop())
         logger.info("🎧 Signal message listener started")
+
+    async def test_connection(
+        self,
+        *,
+        signal_api_url: str,
+        signal_api_token: str,
+        signal_phone_number: str,
+    ) -> dict:
+        """Perform an explicit Signal gateway connection check."""
+        base_url = signal_api_url.strip()
+        phone_number = signal_phone_number.strip()
+        token = signal_api_token.strip()
+
+        if not base_url:
+            return {
+                "ok": False,
+                "message": "Signal API URL is required",
+                "status_code": None,
+                "latency_ms": 0,
+            }
+        if not phone_number:
+            return {
+                "ok": False,
+                "message": "Signal phone number is required",
+                "status_code": None,
+                "latency_ms": 0,
+            }
+
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
+        started = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(
+                base_url=base_url,
+                headers=headers,
+                timeout=10.0,
+            ) as client:
+                response = await client.get(f"/v1/receive/{phone_number}")
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            ok = response.status_code in {200, 204}
+            return {
+                "ok": ok,
+                "message": "Signal gateway reachable" if ok else f"Signal gateway responded with HTTP {response.status_code}",
+                "status_code": response.status_code,
+                "latency_ms": latency_ms,
+            }
+        except httpx.HTTPError as exc:
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            return {
+                "ok": False,
+                "message": f"Signal gateway request failed: {exc}",
+                "status_code": None,
+                "latency_ms": latency_ms,
+            }
 
     async def apply_runtime_config(
         self,
@@ -187,6 +251,7 @@ class SignalClient:
     async def stop(self) -> None:
         """Stop the background message listener gracefully."""
         self._running = False
+        self._connected = False
 
         if self._listener_task and not self._listener_task.done():
             self._listener_task.cancel()
@@ -278,12 +343,14 @@ class SignalClient:
             # Reset backoff on successful connection
             self._reconnect_delay = 1.0
             self._reconnect_attempts = 0
+            self._connected = True
             logger.info("✅ WebSocket connected — listening for messages")
 
             async for raw_message in ws:
                 if not self._running:
                     break
                 await self._process_raw_message(raw_message)
+        self._connected = False
 
     async def _poll_listener(self) -> None:
         """
@@ -306,6 +373,7 @@ class SignalClient:
                 response = await client.get(poll_url)
 
                 if response.status_code == 200:
+                    self._connected = True
                     messages = response.json()
 
                     if isinstance(messages, list) and len(messages) > 0:
@@ -317,8 +385,10 @@ class SignalClient:
                         empty_polls += 1
                 elif response.status_code == 204:
                     # No content — no new messages
+                    self._connected = True
                     empty_polls += 1
                 else:
+                    self._connected = False
                     runtime_metrics.inc("signal.pull.fail")
                     if response.status_code == 401:
                         runtime_metrics.inc("signal.pull.401")
@@ -330,6 +400,7 @@ class SignalClient:
                     empty_polls += 1
 
             except httpx.HTTPError as e:
+                self._connected = False
                 runtime_metrics.inc("signal.pull.fail")
                 logger.warning(f"⚠️  Poll error: {e}")
                 raise  # Let the outer loop handle reconnection

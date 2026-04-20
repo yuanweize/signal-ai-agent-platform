@@ -25,6 +25,8 @@ from app.schemas.settings import (
     RuntimeSettingsResponse,
     RuntimeSettingsRollbackRequest,
     RuntimeSettingsUpdateRequest,
+    SignalProbeRequest,
+    SignalProbeResponse,
 )
 from app.services.audit_log import list_audit_logs, write_audit_log
 from app.services.ai_engine import probe_ai_compatibility, verify_ai_model_availability
@@ -170,6 +172,37 @@ async def update_settings(
     )
     await session.commit()
     return _to_response(data)
+
+
+@router.post("/signal/test", response_model=SignalProbeResponse)
+async def test_signal_connection(
+    payload: SignalProbeRequest,
+    session: AsyncSession = Depends(get_session),
+    _admin: AdminUser = Depends(get_current_admin),
+):
+    runtime = await get_runtime_settings(session)
+    signal_api_url = (payload.signal_api_url or runtime.get("signal_api_url") or "").strip()
+    signal_phone_number = (payload.signal_phone_number or runtime.get("signal_phone_number") or "").strip()
+    signal_api_token = (
+        payload.signal_api_token.strip()
+        if payload.signal_api_token is not None and payload.signal_api_token.strip()
+        else (runtime.get("signal_api_token") or "")
+    )
+
+    result = await signal_client.test_connection(
+        signal_api_url=signal_api_url,
+        signal_api_token=signal_api_token,
+        signal_phone_number=signal_phone_number,
+    )
+
+    return SignalProbeResponse(
+        ok=bool(result.get("ok")),
+        message=str(result.get("message") or "Signal test completed"),
+        status_code=result.get("status_code"),
+        latency_ms=int(result.get("latency_ms") or 0),
+        listener_running=signal_client.is_running,
+        listener_connected=signal_client.is_connected,
+    )
 
 
 @router.post("/ai/probe", response_model=AiProbeResponse)

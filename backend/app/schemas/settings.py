@@ -61,6 +61,21 @@ class RuntimeSettingsRollbackRequest(BaseModel):
     audit_log_id: int | None = None
 
 
+class SignalProbeRequest(BaseModel):
+    signal_api_url: str | None = Field(default=None, max_length=500)
+    signal_phone_number: str | None = Field(default=None, max_length=64)
+    signal_api_token: str | None = None
+
+
+class SignalProbeResponse(BaseModel):
+    ok: bool
+    message: str
+    status_code: int | None = None
+    latency_ms: int = 0
+    listener_running: bool
+    listener_connected: bool
+
+
 class AiProbeRequest(BaseModel):
     ai_api_base_url: str | None = Field(default=None, max_length=500)
     ai_model: str | None = Field(default=None, max_length=120)

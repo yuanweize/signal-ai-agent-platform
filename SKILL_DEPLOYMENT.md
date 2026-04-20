@@ -1,10 +1,17 @@
 # Deployment Skill (Mandatory)
 
 ## Rule
-After **any** frontend/backend code change, you must run:
+Default deployment should use prebuilt GHCR images:
 
 ```bash
-docker compose up -d --build frontend backend
+docker compose pull
+docker compose up -d
+```
+
+After **any** frontend/backend source code change (local development), run source-build mode:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build frontend backend
 ```
 
 ## Why
@@ -12,7 +19,7 @@ docker compose up -d --build frontend backend
 - Ensure new API/UI interactions are actually deployed
 - Avoid "looks updated in code but not in runtime" incidents
 
-## Quick command
+## Quick command (source-build)
 ```bash
 ./scripts/redeploy.sh
 ```

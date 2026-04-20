@@ -5,10 +5,24 @@
 [![License](https://img.shields.io/github/license/yuanweize/signal-market-bot)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](backend/pyproject.toml)
 
-AI-powered Signal marketing assistant with a FastAPI backend and React admin console.
+Production-ready Signal marketing assistant with FastAPI backend and React admin console.
 
-- English docs (this page)
-- 中文文档: [README.zh-CN.md](README.zh-CN.md)
+Language: **English** | [中文](README.zh-CN.md)
+
+## Why this project
+
+Signal Market Bot helps operators run Signal-based sales workflows with secure admin controls, runtime AI configuration, campaign management, and audit visibility—without depending on `.env` for day-to-day operations.
+
+## Table of Contents
+
+- [Highlights](#highlights)
+- [Quick Start (Prebuilt Images)](#quick-start-prebuilt-images)
+- [Local Source Build Mode](#local-source-build-mode)
+- [First-Run Security Bootstrap](#first-run-security-bootstrap)
+- [Runtime Configuration Model](#runtime-configuration-model)
+- [Release and Image Versioning](#release-and-image-versioning)
+- [Documentation Tooling Recommendations](#documentation-tooling-recommendations)
+- [Project Structure](#project-structure)
 
 ## Highlights
 
@@ -26,22 +40,49 @@ AI-powered Signal marketing assistant with a FastAPI backend and React admin con
 - Storage: SQLite by default (`data/bot.db`)
 - Runtime config: managed from admin UI (no `.env` file required)
 
-## Quick Start
+## Quick Start (Prebuilt Images)
 
 ```bash
 git clone https://github.com/yuanweize/signal-market-bot.git
 cd signal-market-bot
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 docker compose exec backend alembic upgrade head
 ```
 
-Open:
+By default, `docker-compose.yml` uses prebuilt GHCR images:
+
+- `ghcr.io/yuanweize/signal-market-bot-backend:<tag>`
+- `ghcr.io/yuanweize/signal-market-bot-frontend:<tag>`
+
+Set a version tag if needed:
+
+```bash
+APP_VERSION=0.2.0 docker compose pull
+APP_VERSION=0.2.0 docker compose up -d
+```
+
+Service endpoints:
 
 - Admin: http://localhost:3000
 - API: http://localhost:8000
 - OpenAPI: http://localhost:8000/docs
 
-## First-Run Setup
+## Local Source Build Mode
+
+Use this when you changed backend/frontend code locally:
+
+```bash
+./scripts/redeploy.sh
+```
+
+Equivalent command:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build frontend backend
+```
+
+## First-Run Security Bootstrap
 
 On first access to `/login`, you will see one-time bootstrap initialization.
 
@@ -51,7 +92,7 @@ On first access to `/login`, you will see one-time bootstrap initialization.
 
 After bootstrap is completed, login works in normal mode and setup is disabled.
 
-## Runtime Settings Model
+## Runtime Configuration Model
 
 This project is runtime-driven and does not require `.env` for application features.
 
@@ -60,14 +101,14 @@ This project is runtime-driven and does not require `.env` for application featu
 - Secrets (AI key / Signal token / JWT signing secret) are stored encrypted in DB-backed config
 - Changes apply immediately (including Signal listener reconfiguration)
 
-## Internationalization Support
+## Internationalization
 
 - Documentation is bilingual: English + Chinese
 - Bot default language is configurable in admin settings (`bot_default_language`)
 - UI and API text are English-first for global operator teams
 - Chinese docs are maintained for local onboarding and operations
 
-## Development
+## Development Checks
 
 Backend checks:
 
@@ -83,13 +124,7 @@ npm ci
 npm run build
 ```
 
-Full local redeploy:
-
-```bash
-./scripts/redeploy.sh
-```
-
-## Release & Publish
+## Release and Image Versioning
 
 Version source of truth:
 
@@ -105,6 +140,24 @@ Published images:
 
 - `ghcr.io/<owner>/signal-market-bot-backend`
 - `ghcr.io/<owner>/signal-market-bot-frontend`
+
+## Documentation Tooling Recommendations
+
+Recommended tooling for GitHub-grade README quality:
+
+- `markdownlint-cli2`: heading hierarchy, spacing, list style consistency
+- `prettier --parser markdown`: stable formatting and diff cleanliness
+- `lychee`: dead link detection (badges, docs links, external references)
+- `vale`: writing quality and terminology consistency (English docs)
+- GitHub Actions gate: run markdown/link checks on PRs before merge
+
+Suggested CI commands:
+
+```bash
+npx markdownlint-cli2 "**/*.md"
+npx prettier -c "**/*.md"
+npx lychee README.md README.zh-CN.md
+```
 
 ## Project Structure
 

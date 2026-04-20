@@ -9,7 +9,7 @@ fi
 export APP_VERSION
 
 echo "[deploy] rebuilding frontend + backend..."
-docker compose up -d --build frontend backend
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build frontend backend
 
 echo "[deploy] done"
 docker compose ps

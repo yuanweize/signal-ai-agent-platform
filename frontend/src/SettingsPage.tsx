@@ -50,6 +50,15 @@ export default function SettingsPage() {
   const [rollingBack, setRollingBack] = useState(false);
   const [auditLogs, setAuditLogs] = useState<Array<{ id: number; created_at: string; actor: string; action: string; status: string }>>([]);
   const [saved, setSaved] = useState(false);
+  const [testingSignal, setTestingSignal] = useState(false);
+  const [signalTestResult, setSignalTestResult] = useState<{
+    ok: boolean;
+    message: string;
+    status_code?: number | null;
+    latency_ms: number;
+    listener_running: boolean;
+    listener_connected: boolean;
+  } | null>(null);
   const [probingAi, setProbingAi] = useState(false);
   const [checkingModel, setCheckingModel] = useState(false);
   const [modelVerifyResult, setModelVerifyResult] = useState<{
@@ -311,6 +320,23 @@ export default function SettingsPage() {
     }
   };
 
+  const handleTestSignal = async () => {
+    try {
+      setTestingSignal(true);
+      setError(null);
+      const result = await api.testSignalConnection({
+        signal_api_url: signalApiUrl.trim(),
+        signal_phone_number: signalPhoneNumber.trim(),
+        signal_api_token: signalApiToken.trim() ? signalApiToken.trim() : undefined,
+      });
+      setSignalTestResult(result);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Signal connection test failed');
+    } finally {
+      setTestingSignal(false);
+    }
+  };
+
   const handleProbeAi = async () => {
     try {
       setProbingAi(true);
@@ -452,13 +478,49 @@ export default function SettingsPage() {
 
         <div className="form-group" style={{ marginBottom: '1rem' }}>
           <label>Signal API URL</label>
-          <input
-            type="text"
-            value={signalApiUrl}
-            onChange={e => setSignalApiUrl(e.target.value.slice(0, 500))}
-            placeholder="http://signal-api:8080"
-            disabled={loading || saving}
-          />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.6rem', alignItems: 'center' }}>
+            <input
+              type="text"
+              value={signalApiUrl}
+              onChange={e => setSignalApiUrl(e.target.value.slice(0, 500))}
+              placeholder="http://signal-api:8080"
+              disabled={loading || saving}
+            />
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={handleTestSignal}
+              disabled={loading || saving || testingSignal || !signalApiUrl.trim() || !signalPhoneNumber.trim()}
+              style={{ width: 'auto', whiteSpace: 'nowrap', padding: '0.65rem 0.9rem' }}
+            >
+              {testingSignal ? 'Testing...' : 'Test Signal Connection'}
+            </button>
+          </div>
+          {signalTestResult && (
+            <div
+              style={{
+                marginTop: '0.75rem',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '0.75rem',
+                background: 'rgba(255,255,255,0.02)',
+                display: 'grid',
+                gap: '0.3rem',
+              }}
+            >
+              <div style={{ color: signalTestResult.ok ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }}>
+                {signalTestResult.ok ? 'Signal Gateway Reachable' : 'Signal Gateway Unreachable'}
+              </div>
+              <div className="label-hint">Message: {signalTestResult.message}</div>
+              {typeof signalTestResult.status_code === 'number' && (
+                <div className="label-hint">HTTP status: {signalTestResult.status_code}</div>
+              )}
+              <div className="label-hint">Latency: {signalTestResult.latency_ms} ms</div>
+              <div className="label-hint">
+                Listener running: {signalTestResult.listener_running ? 'yes' : 'no'} · connected: {signalTestResult.listener_connected ? 'yes' : 'no'}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="form-group" style={{ marginBottom: '1rem' }}>

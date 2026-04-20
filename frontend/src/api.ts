@@ -226,6 +226,13 @@ class ApiClient {
     });
   }
 
+  async testSignalConnection(payload: SignalProbeRequest) {
+    return this.request<SignalProbeResponse>('/settings/signal/test', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
   // Chats
   async getChats(limit = 50) {
     return this.request<{ items: ChatConversation[]; total: number }>(`/chats?limit=${limit}`);
@@ -323,6 +330,21 @@ export interface RuntimeSettingsUpdate {
   ad_quiet_hour_start?: number;
   ad_quiet_hour_end?: number;
   ad_group_blacklist?: string[];
+}
+
+export interface SignalProbeRequest {
+  signal_api_url?: string;
+  signal_phone_number?: string;
+  signal_api_token?: string;
+}
+
+export interface SignalProbeResponse {
+  ok: boolean;
+  message: string;
+  status_code?: number | null;
+  latency_ms: number;
+  listener_running: boolean;
+  listener_connected: boolean;
 }
 
 export interface AiProbeRequest {
