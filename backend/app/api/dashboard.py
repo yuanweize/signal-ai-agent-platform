@@ -11,7 +11,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AdminUser, get_current_admin
-from app.config import settings
 from app.database import get_session
 from app.models.conversation import Conversation, Message
 from app.models.group import Group
@@ -19,7 +18,9 @@ from app.models.order import Order
 from app.models.product import Product
 from app.models.user import User
 from app.services.metrics import runtime_metrics
-from app.services.runtime_config import get_runtime_settings
+from app.services.runtime_config import get_runtime_settings, is_ai_api_key_optional
+from app.services.security_bootstrap import get_bootstrap_status
+from app.services.signal_client import signal_client
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
@@ -51,6 +52,12 @@ async def get_stats(
         await session.execute(select(func.count(Order.id)))
     ).scalar() or 0
     runtime = await get_runtime_settings(session)
+    bootstrap_status = await get_bootstrap_status(session)
+    ai_base_url = runtime.get("ai_api_base_url") or ""
+    ai_enabled = bool(runtime.get("is_ai_enabled")) and (
+        bool(runtime.get("has_ai_api_key")) or is_ai_api_key_optional(ai_base_url)
+    )
+    signal_ready = bool(runtime.get("signal_api_url")) and bool(runtime.get("signal_phone_number"))
 
     return {
         "users": users,
@@ -60,10 +67,10 @@ async def get_stats(
         "groups": groups,
         "orders": orders,
         "features": {
-            "signal": bool(settings.signal_phone_number),
-            "ai": runtime["is_ai_enabled"] and runtime["has_ai_api_key"],
-            "market": runtime["is_market_enabled"],
-            "admin_2fa": settings.is_2fa_enabled,
+            "signal": signal_ready and signal_client.is_running,
+            "ai": ai_enabled,
+            "market": bool(runtime.get("is_market_enabled")),
+            "admin_2fa": bootstrap_status.requires_2fa,
         },
     }
 

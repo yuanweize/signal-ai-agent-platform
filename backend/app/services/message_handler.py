@@ -263,12 +263,13 @@ class MessageHandler:
                     if tokens:
                         # Token count will be stored by the caller
                         pass
-                return reply
+                if reply:
+                    return reply
             except Exception as e:
                 logger.error(f"❌ AI engine error: {e}", exc_info=True)
-                return None
+                # Continue to fallback response instead of silent drop
 
-# No AI available — fallback to basic auto-reply commands
+        # No AI available — fallback to basic auto-reply commands
         text_lower = parsed.text.lower().strip()
         keywords = ["menu", "produkty", "ceník", "nabídka", "products", "help", "pomoc", "/menu", "/start"]
         

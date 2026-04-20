@@ -9,15 +9,18 @@ from datetime import datetime, timedelta, timezone
 from jose import jwt, JWTError
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.database import get_session
 from app.schemas.auth import AdminUser
+from app.services.security_bootstrap import get_admin_username, get_jwt_signing_secret
 
 # JWT bearer scheme
 security = HTTPBearer(auto_error=False)
 
 
-def create_access_token(username: str) -> tuple[str, int]:
+async def create_access_token(username: str, session: AsyncSession) -> tuple[str, int]:
     """
     Create a JWT access token.
 
@@ -35,7 +38,7 @@ def create_access_token(username: str) -> tuple[str, int]:
 
     token = jwt.encode(
         payload,
-        settings.jwt_secret_key,
+        await get_jwt_signing_secret(session),
         algorithm=settings.jwt_algorithm,
     )
 
@@ -44,6 +47,7 @@ def create_access_token(username: str) -> tuple[str, int]:
 
 async def get_current_admin(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    session: AsyncSession = Depends(get_session),
 ) -> AdminUser:
     """
     Validate JWT token and return the authenticated admin user.
@@ -63,7 +67,7 @@ async def get_current_admin(
     try:
         payload = jwt.decode(
             credentials.credentials,
-            settings.jwt_secret_key,
+            await get_jwt_signing_secret(session),
             algorithms=[settings.jwt_algorithm],
         )
         username: str | None = payload.get("sub")
@@ -71,6 +75,12 @@ async def get_current_admin(
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token: missing subject",
+            )
+        configured_username = await get_admin_username(session)
+        if username != configured_username:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token subject",
             )
         return AdminUser(username=username)
 

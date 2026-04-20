@@ -12,8 +12,16 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from urllib.parse import urlparse, urlunparse
 
-from openai import AsyncOpenAI
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    AsyncOpenAI,
+    AuthenticationError,
+    RateLimitError,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,9 +29,301 @@ from app.config import settings
 from app.models.conversation import Conversation, Message
 from app.models.group import Group
 from app.models.product import Product
-from app.services.runtime_config import get_runtime_settings
+from app.services.runtime_config import get_runtime_settings, is_ai_api_key_optional
 
 logger = logging.getLogger("ai.engine")
+
+DEFAULT_AI_TIMEOUT_SECONDS = 30.0
+DEFAULT_AI_MAX_RETRIES = 2
+
+
+def build_base_url_candidates(base_url: str) -> list[str]:
+    normalized = (base_url or "").strip().rstrip("/")
+    if not normalized:
+        return []
+
+    parsed = urlparse(normalized)
+    path = parsed.path.rstrip("/")
+
+    candidates: list[str] = [normalized]
+    if path.endswith("/v1"):
+        alt_path = path[:-3] or ""
+        candidates.append(urlunparse(parsed._replace(path=alt_path)).rstrip("/"))
+    else:
+        alt_path = f"{path}/v1" if path else "/v1"
+        candidates.append(urlunparse(parsed._replace(path=alt_path)).rstrip("/"))
+
+    unique: list[str] = []
+    for item in candidates:
+        if item and item not in unique:
+            unique.append(item)
+    return unique
+
+
+def build_model_candidates(model: str, preferred: str | None = None) -> list[str]:
+    candidates: list[str] = []
+    if preferred and preferred.strip():
+        candidates.append(preferred.strip())
+
+    normalized = (model or "").strip()
+    if normalized:
+        candidates.append(normalized)
+        if "/" not in normalized:
+            candidates.append(f"openai/{normalized}")
+        if normalized.startswith("openai/") and len(normalized) > len("openai/"):
+            candidates.append(normalized.split("/", 1)[1])
+
+    unique: list[str] = []
+    for item in candidates:
+        if item and item not in unique:
+            unique.append(item)
+    return unique
+
+
+def is_model_route_error(status_code: int, message: str) -> bool:
+    msg = (message or "").lower()
+    return status_code in {400, 404} and any(
+        snippet in msg
+        for snippet in [
+            "no route found for model",
+            "model not found",
+            "unsupported model",
+            "unknown model",
+        ]
+    )
+
+
+async def probe_ai_compatibility(
+    *,
+    base_url: str,
+    api_key: str,
+    model: str,
+) -> dict:
+    attempts: list[dict] = []
+    last_error: str | None = None
+    base_candidates = build_base_url_candidates(base_url)
+    model_candidates = build_model_candidates(model) if model else []
+
+    for candidate_base in base_candidates:
+        effective_api_key = api_key or "__NO_KEY__"
+        client = AsyncOpenAI(
+            api_key=effective_api_key,
+            base_url=candidate_base,
+            timeout=DEFAULT_AI_TIMEOUT_SECONDS,
+            max_retries=1,
+        )
+
+        listed_models_all: list[str] = []
+        try:
+            model_list = await client.models.list()
+            listed_models_all = sorted(
+                {
+                    str(item.id).strip()
+                    for item in getattr(model_list, "data", [])
+                    if getattr(item, "id", None)
+                },
+                key=lambda v: v.lower(),
+            )
+            listed_total = len(listed_models_all)
+            listed_models = listed_models_all[:500]
+
+            return {
+                "ok": True,
+                "base_url": candidate_base,
+                "model": None,
+                "listed_models": listed_models,
+                "valid_models": listed_models,
+                "invalid_models": [],
+                "models": listed_models,
+                "listed_total": listed_total,
+                "verified_total": 0,
+                "base_candidates": base_candidates,
+                "verification_base_candidates": [],
+                "message": (
+                    f"Base URL reachable. models listed={listed_total}. No bulk model verification performed."
+                    if listed_total
+                    else "Base URL is reachable but model list is empty"
+                ),
+                "preview": "",
+                "attempts": attempts,
+            }
+        except Exception as e:
+            detail = str(e)
+            attempts.append(
+                {
+                    "base_url": candidate_base,
+                    "model": "<models.list>",
+                    "status": None,
+                    "message": detail[:200],
+                }
+            )
+            last_error = detail
+
+        if not model_candidates:
+            continue
+
+        for candidate_model in model_candidates:
+            try:
+                response = await client.chat.completions.create(
+                    model=candidate_model,
+                    messages=[{"role": "user", "content": "Reply with OK only"}],
+                    temperature=0,
+                    max_tokens=8,
+                )
+                preview = (response.choices[0].message.content or "").strip()[:120]
+                return {
+                    "ok": True,
+                    "base_url": candidate_base,
+                    "model": candidate_model,
+                    "listed_models": [],
+                    "valid_models": [candidate_model],
+                    "invalid_models": [],
+                    "models": [candidate_model],
+                    "listed_total": 1,
+                    "verified_total": 1,
+                    "base_candidates": base_candidates,
+                    "message": "Compatibility probe succeeded",
+                    "preview": preview,
+                    "attempts": attempts,
+                }
+            except APIStatusError as e:
+                detail = str(getattr(e, "body", e))
+                attempts.append(
+                    {
+                        "base_url": candidate_base,
+                        "model": candidate_model,
+                        "status": e.status_code,
+                        "message": detail[:200],
+                    }
+                )
+                last_error = detail
+                if is_model_route_error(e.status_code, detail):
+                    continue
+            except (APITimeoutError, APIConnectionError) as e:
+                detail = str(e)
+                attempts.append(
+                    {
+                        "base_url": candidate_base,
+                        "model": candidate_model,
+                        "status": None,
+                        "message": detail[:200],
+                    }
+                )
+                last_error = detail
+                continue
+            except Exception as e:
+                detail = str(e)
+                attempts.append(
+                    {
+                        "base_url": candidate_base,
+                        "model": candidate_model,
+                        "status": None,
+                        "message": detail[:200],
+                    }
+                )
+                last_error = detail
+
+    return {
+        "ok": False,
+        "base_url": None,
+        "model": None,
+        "listed_models": [],
+        "valid_models": [],
+        "invalid_models": [],
+        "models": [],
+        "listed_total": 0,
+        "verified_total": 0,
+        "base_candidates": base_candidates,
+        "message": (last_error or "Compatibility probe failed")[:200],
+        "preview": "",
+        "attempts": attempts,
+    }
+
+
+async def verify_ai_model_availability(
+    *,
+    base_url: str,
+    api_key: str,
+    model: str,
+) -> dict:
+    if not model.strip():
+        return {
+            "ok": False,
+            "model": model,
+            "effective_model": None,
+            "effective_base_url": None,
+            "message": "Model is required",
+            "checked_at": datetime.utcnow().isoformat() + "Z",
+            "attempts": [],
+        }
+
+    attempts: list[dict] = []
+    for candidate_base in build_base_url_candidates(base_url):
+        client = AsyncOpenAI(
+            api_key=api_key or "__NO_KEY__",
+            base_url=candidate_base,
+            timeout=DEFAULT_AI_TIMEOUT_SECONDS,
+            max_retries=1,
+        )
+        for candidate_model in build_model_candidates(model):
+            try:
+                response = await client.chat.completions.create(
+                    model=candidate_model,
+                    messages=[{"role": "user", "content": "Reply with OK only"}],
+                    temperature=0,
+                    max_tokens=8,
+                )
+                preview = (response.choices[0].message.content or "").strip()[:120]
+                return {
+                    "ok": True,
+                    "model": model,
+                    "effective_model": candidate_model,
+                    "effective_base_url": candidate_base,
+                    "message": "Model is available",
+                    "preview": preview,
+                    "checked_at": datetime.utcnow().isoformat() + "Z",
+                    "attempts": attempts,
+                }
+            except APIStatusError as e:
+                detail = str(getattr(e, "body", e))
+                attempts.append(
+                    {
+                        "base_url": candidate_base,
+                        "model": candidate_model,
+                        "status": e.status_code,
+                        "message": detail[:200],
+                    }
+                )
+                if is_model_route_error(e.status_code, detail):
+                    continue
+            except (APITimeoutError, APIConnectionError) as e:
+                attempts.append(
+                    {
+                        "base_url": candidate_base,
+                        "model": candidate_model,
+                        "status": None,
+                        "message": str(e)[:200],
+                    }
+                )
+            except Exception as e:
+                attempts.append(
+                    {
+                        "base_url": candidate_base,
+                        "model": candidate_model,
+                        "status": None,
+                        "message": str(e)[:200],
+                    }
+                )
+
+    return {
+        "ok": False,
+        "model": model,
+        "effective_model": None,
+        "effective_base_url": None,
+        "message": "Model verification failed",
+        "checked_at": datetime.utcnow().isoformat() + "Z",
+        "attempts": attempts,
+    }
 
 
 class AIEngine:
@@ -42,6 +342,9 @@ class AIEngine:
         self._client: AsyncOpenAI | None = None
         self._enabled = False
         self._runtime_api_key: str = ""
+        self._runtime_base_url: str = ""
+        self._runtime_effective_base_url: str = ""
+        self._runtime_model_aliases: dict[str, str] = {}
 
     async def initialize(self) -> bool:
         """
@@ -49,7 +352,7 @@ class AIEngine:
 
         Returns True if successfully initialized, False if disabled/misconfigured.
         """
-        if not settings.is_ai_available:
+        if not settings.feature_ai_enabled:
             logger.info(
                 "🧠 AI engine DISABLED "
                 f"(feature_ai_enabled={settings.feature_ai_enabled}, "
@@ -58,10 +361,19 @@ class AIEngine:
             self._enabled = False
             return False
 
+        if not settings.ai_api_key and not is_ai_api_key_optional(settings.ai_api_base_url):
+            logger.info(
+                "🧠 AI engine DISABLED (missing API key for current provider)"
+            )
+            self._enabled = False
+            return False
+
         try:
             self._client = AsyncOpenAI(
-                api_key=settings.ai_api_key,
+                api_key=settings.ai_api_key or "__NO_KEY__",
                 base_url=settings.ai_api_base_url,
+                timeout=DEFAULT_AI_TIMEOUT_SECONDS,
+                max_retries=DEFAULT_AI_MAX_RETRIES,
             )
             self._enabled = True
             logger.info(
@@ -114,13 +426,8 @@ class AIEngine:
                 runtime,
             )
 
-            # Call the LLM
-            response = await self._client.chat.completions.create(
-                model=settings.ai_model,
-                messages=messages,
-                temperature=settings.ai_temperature,
-                max_tokens=settings.ai_max_tokens,
-            )
+            # Call the LLM with endpoint/model adaptation
+            response = await self._create_completion_with_adaptation(runtime, messages)
 
             # Extract response
             choice = response.choices[0]
@@ -148,6 +455,21 @@ class AIEngine:
                 logger.warning("⚠️  AI returned empty response")
                 return None
 
+        except AuthenticationError:
+            logger.error("❌ AI auth failed: invalid API key or gateway auth")
+            return None
+        except RateLimitError:
+            logger.warning("⏳ AI rate limited by provider")
+            return None
+        except APITimeoutError:
+            logger.warning("⏱️  AI request timed out")
+            return None
+        except APIConnectionError:
+            logger.error("🌐 AI provider connection failed")
+            return None
+        except APIStatusError as e:
+            logger.error(f"❌ AI provider status error: {e.status_code}")
+            return None
         except Exception as e:
             logger.error(f"❌ AI generation error: {e}", exc_info=True)
             return None
@@ -161,20 +483,105 @@ class AIEngine:
         runtime = await get_runtime_settings(session)
         runtime_enabled = runtime["is_ai_enabled"]
         runtime_key = runtime["ai_api_key"]
+        runtime_base_url = runtime["ai_api_base_url"]
 
-        if not runtime_enabled or not runtime_key:
+        if not runtime_enabled:
             self._enabled = False
             return runtime
 
-        if self._client is None or runtime_key != self._runtime_api_key:
+        if not runtime_key and not is_ai_api_key_optional(runtime_base_url):
+            self._enabled = False
+            return runtime
+
+        if (
+            self._client is None
+            or runtime_key != self._runtime_api_key
+            or runtime_base_url != self._runtime_base_url
+        ):
             self._client = AsyncOpenAI(
-                api_key=runtime_key,
-                base_url=settings.ai_api_base_url,
+                api_key=runtime_key or "__NO_KEY__",
+                base_url=runtime_base_url,
+                timeout=DEFAULT_AI_TIMEOUT_SECONDS,
+                max_retries=DEFAULT_AI_MAX_RETRIES,
             )
             self._runtime_api_key = runtime_key
+            self._runtime_base_url = runtime_base_url
+            self._runtime_effective_base_url = runtime_base_url
+            self._runtime_model_aliases = {}
+            logger.info(
+                "🔄 AI client refreshed "
+                f"(provider={runtime.get('ai_provider_detected', 'unknown')}, "
+                f"base_url={runtime_base_url}, model={runtime.get('ai_model', settings.ai_model)})"
+            )
 
         self._enabled = True
         return runtime
+
+    async def _create_completion_with_adaptation(self, runtime: dict, messages: list[dict]):
+        requested_base_url = runtime["ai_api_base_url"]
+        requested_model = (runtime.get("ai_model") or "").strip()
+
+        base_candidates = build_base_url_candidates(requested_base_url)
+        if self._runtime_effective_base_url in base_candidates:
+            base_candidates = [
+                self._runtime_effective_base_url,
+                *[candidate for candidate in base_candidates if candidate != self._runtime_effective_base_url],
+            ]
+
+        model_candidates = build_model_candidates(
+            requested_model,
+            preferred=self._runtime_model_aliases.get(requested_model),
+        )
+
+        last_error: Exception | None = None
+        for candidate_base in base_candidates:
+            client = self._client
+            if candidate_base != self._runtime_effective_base_url or client is None:
+                client = AsyncOpenAI(
+                    api_key=self._runtime_api_key or "__NO_KEY__",
+                    base_url=candidate_base,
+                    timeout=DEFAULT_AI_TIMEOUT_SECONDS,
+                    max_retries=DEFAULT_AI_MAX_RETRIES,
+                )
+
+            for candidate_model in model_candidates:
+                try:
+                    response = await client.chat.completions.create(
+                        model=candidate_model,
+                        messages=messages,
+                        temperature=runtime["ai_temperature"],
+                        max_tokens=runtime["ai_max_tokens"],
+                    )
+
+                    if candidate_base != self._runtime_effective_base_url:
+                        self._client = client
+                        self._runtime_effective_base_url = candidate_base
+                        logger.info(
+                            "🔁 AI endpoint adapted "
+                            f"(requested={requested_base_url}, effective={candidate_base})"
+                        )
+
+                    if candidate_model != requested_model:
+                        self._runtime_model_aliases[requested_model] = candidate_model
+                        logger.info(
+                            "🔁 AI model adapted "
+                            f"(requested={requested_model}, effective={candidate_model})"
+                        )
+
+                    return response
+                except APIStatusError as e:
+                    last_error = e
+                    detail = str(getattr(e, "body", e))
+                    if e.status_code == 404 or is_model_route_error(e.status_code, detail):
+                        continue
+                    raise
+                except (APITimeoutError, APIConnectionError) as e:
+                    last_error = e
+                    continue
+
+        if last_error:
+            raise last_error
+        raise RuntimeError("No compatible endpoint/model combination was found")
 
     async def _build_messages(
         self,
@@ -221,7 +628,11 @@ class AIEngine:
             })
 
         # 4. Load recent messages from DB (short-term context)
-        history = await self._load_context_messages(session, conversation.id)
+        history = await self._load_context_messages(
+            session,
+            conversation.id,
+            runtime.get("ai_context_messages", settings.ai_context_messages),
+        )
         messages.extend(history)
 
         # 5. Current user message
@@ -247,7 +658,7 @@ class AIEngine:
                 return group.system_prompt_override
 
         # Fall back to global system prompt
-            return runtime_prompt or settings.bot_system_prompt
+        return runtime_prompt or settings.bot_system_prompt
 
     async def _build_catalog_context(
         self,
@@ -296,14 +707,13 @@ class AIEngine:
         self,
         session: AsyncSession,
         conversation_id: int,
+        max_messages: int,
     ) -> list[dict]:
         """
         Load the last N messages from the conversation for context.
 
         Only loads 'user' and 'assistant' roles (not system messages).
         """
-        max_messages = settings.ai_context_messages
-
         result = await session.execute(
             select(Message)
             .where(Message.conversation_id == conversation_id)

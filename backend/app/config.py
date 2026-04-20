@@ -1,38 +1,35 @@
-"""
-Application configuration loaded from environment variables.
+"""Application process configuration (Docker compose env + safe defaults)."""
 
-Supports any OpenAI-compatible AI provider via configurable base URL.
-"""
+import ipaddress
+from urllib.parse import urlparse
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Central configuration — all values read from .env or environment."""
+    """Central process configuration loaded from process environment/defaults."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
 
     # ---- Signal API Gateway ----
-    signal_api_url: str = "http://localhost:8880"
+    signal_api_url: str = ""
     signal_api_token: str = ""
     signal_phone_number: str = ""
 
     # ---- Feature Toggles (each module is independent) ----
-    feature_ai_enabled: bool = True
+    feature_ai_enabled: bool = False
     feature_market_enabled: bool = True
 
     # ---- AI Provider (OpenAI-compatible) ----
     # Only used when feature_ai_enabled=True AND ai_api_key is set
     # Works with: OpenAI, Azure, Tailscale AI Gateway, OpenRouter,
     #             Ollama, vLLM, LocalAI, LiteLLM, etc.
-    ai_api_base_url: str = "https://api.openai.com/v1"
+    ai_api_base_url: str = ""
     ai_api_key: str = ""
-    ai_model: str = "gpt-4o"
+    ai_model: str = ""
     ai_temperature: float = 0.7
     ai_max_tokens: int = 1000
     ai_context_messages: int = 20  # Max messages in AI context window
@@ -41,10 +38,10 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./data/bot.db"
 
     # ---- Admin Dashboard Security ----
-    admin_username: str = "admin"
-    admin_password: str = "changeme"
+    admin_username: str = ""
+    admin_password: str = ""
     admin_totp_secret: str = ""  # Empty = 2FA disabled
-    jwt_secret_key: str = "change-me-in-production"
+    jwt_secret_key: str = ""
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 480  # 8 hours
 
@@ -66,10 +63,9 @@ class Settings(BaseSettings):
 
     # ---- Bot Behavior ----
     bot_default_language: str = "cs"
-    bot_name: str = "MarketBot"
+    bot_name: str = "Signal Market Bot"
     bot_system_prompt: str = (
-        "Jsi přátelský prodejní asistent. Odpovídej přirozeně česky, "
-        "jako bys byl skutečný člověk. Nikdy neprozrazuj, že jsi AI."
+        "You are a helpful sales assistant. Reply naturally and professionally."
     )
 
     # ---- Logging ----
@@ -80,6 +76,8 @@ class Settings(BaseSettings):
     @property
     def signal_ws_url(self) -> str:
         """WebSocket URL for receiving Signal messages."""
+        if not self.signal_api_url or not self.signal_phone_number:
+            return ""
         base = self.signal_api_url.replace("http://", "ws://").replace("https://", "wss://")
         number = self.signal_phone_number
         return f"{base}/v1/receive/{number}"
@@ -87,11 +85,15 @@ class Settings(BaseSettings):
     @property
     def signal_send_url(self) -> str:
         """HTTP URL for sending Signal messages."""
+        if not self.signal_api_url:
+            return ""
         return f"{self.signal_api_url}/v2/send"
 
     @property
     def signal_receive_url(self) -> str:
         """HTTP URL for polling Signal messages (fallback)."""
+        if not self.signal_api_url or not self.signal_phone_number:
+            return ""
         number = self.signal_phone_number
         return f"{self.signal_api_url}/v1/receive/{number}"
 
@@ -102,8 +104,24 @@ class Settings(BaseSettings):
 
     @property
     def is_ai_available(self) -> bool:
-        """True if AI module is enabled AND has a valid API key."""
-        return self.feature_ai_enabled and bool(self.ai_api_key)
+        """True if AI module is enabled and auth requirements are satisfied."""
+        if not self.feature_ai_enabled:
+            return False
+        if self.ai_api_key:
+            return True
+
+        try:
+            host = (urlparse(self.ai_api_base_url).hostname or "").lower()
+        except Exception:
+            host = ""
+
+        if "gateway.ai" in host or "tailscale" in host or host in {"localhost", "127.0.0.1"}:
+            return True
+
+        try:
+            return ipaddress.ip_address(host) in ipaddress.ip_network("100.64.0.0/10")
+        except ValueError:
+            return False
 
     @property
     def is_market_available(self) -> bool:

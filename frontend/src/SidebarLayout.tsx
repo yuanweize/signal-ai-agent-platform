@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { api } from './api';
 
@@ -9,6 +9,31 @@ interface SidebarLayoutProps {
 
 export default function SidebarLayout({ children, title }: SidebarLayoutProps) {
   const navigate = useNavigate();
+  const [botName, setBotName] = useState('Signal Market');
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetch('/health')
+      .then(r => r.json())
+      .then(data => {
+        if (!cancelled && data?.bot_name) {
+          const name = String(data.bot_name);
+          setBotName(name);
+          document.title = `${title} | ${name}`;
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBotName('Signal Market');
+          document.title = `${title} | Signal Market`;
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleLogout = () => {
     api.clearToken();
@@ -20,7 +45,7 @@ export default function SidebarLayout({ children, title }: SidebarLayoutProps) {
       <aside className="sidebar">
         <div className="sidebar-header">
           <span className="sidebar-logo">🤖</span>
-          <span className="sidebar-title">Signal Market</span>
+          <span className="sidebar-title">{botName}</span>
         </div>
         
         <nav className="sidebar-nav">

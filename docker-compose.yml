@@ -15,10 +15,9 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/app/data
-    env_file:
-      - .env
     environment:
       - DATABASE_URL=sqlite+aiosqlite:///./data/bot.db
+      - LOG_LEVEL=INFO
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s

@@ -2,16 +2,44 @@ import { useEffect, useState } from 'react';
 import { api } from './api';
 import SidebarLayout from './SidebarLayout';
 
+function inferProvider(model: string): string {
+  const value = (model || '').trim();
+  if (!value) return 'unknown';
+  if (value.includes('/')) return value.split('/')[0];
+  if (value.startsWith('gpt-') || value.startsWith('o1') || value.startsWith('o3')) return 'openai';
+  if (value.startsWith('claude-')) return 'anthropic';
+  if (value.startsWith('qwen-')) return 'qwen';
+  if (value.startsWith('deepseek-')) return 'deepseek';
+  if (value.startsWith('gemini-')) return 'google';
+  return 'other';
+}
+
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [botName, setBotName] = useState('MarketBot');
+  const [botDefaultLanguage, setBotDefaultLanguage] = useState('cs');
+  const [signalApiUrl, setSignalApiUrl] = useState('');
+  const [signalPhoneNumber, setSignalPhoneNumber] = useState('');
+  const [signalApiToken, setSignalApiToken] = useState('');
+  const [signalApiTokenMasked, setSignalApiTokenMasked] = useState('');
   const [aiEnabled, setAiEnabled] = useState(false);
   const [marketEnabled, setMarketEnabled] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [apiKeyMasked, setApiKeyMasked] = useState('');
+  const [aiBaseUrl, setAiBaseUrl] = useState('https://api.openai.com/v1');
+  const [aiProviderDetected, setAiProviderDetected] = useState('unknown');
+  const [aiModel, setAiModel] = useState('gpt-4o');
+  const [modelOptions, setModelOptions] = useState<string[]>([]);
+  const [modelProviderFilter, setModelProviderFilter] = useState('all');
+  const [cachedModelPicker, setCachedModelPicker] = useState('');
+  const [listedModelTotal, setListedModelTotal] = useState(0);
+  const [modelsCachedAt, setModelsCachedAt] = useState<string | null>(null);
+  const [aiTemperature, setAiTemperature] = useState(0.7);
+  const [aiMaxTokens, setAiMaxTokens] = useState(1000);
+  const [aiContextMessages, setAiContextMessages] = useState(20);
   const [retentionDays, setRetentionDays] = useState(30);
   const [adAutomationEnabled, setAdAutomationEnabled] = useState(true);
   const [adMinIntervalMinutes, setAdMinIntervalMinutes] = useState(180);
@@ -22,6 +50,36 @@ export default function SettingsPage() {
   const [rollingBack, setRollingBack] = useState(false);
   const [auditLogs, setAuditLogs] = useState<Array<{ id: number; created_at: string; actor: string; action: string; status: string }>>([]);
   const [saved, setSaved] = useState(false);
+  const [probingAi, setProbingAi] = useState(false);
+  const [checkingModel, setCheckingModel] = useState(false);
+  const [modelVerifyResult, setModelVerifyResult] = useState<{
+    ok: boolean;
+    model: string;
+    effective_model?: string | null;
+    effective_base_url?: string | null;
+    checked_at: string;
+    message: string;
+    preview?: string | null;
+    attempts: Array<{ base_url: string; model: string; status?: number | null; message: string }>;
+  } | null>(null);
+  const [probeResult, setProbeResult] = useState<{
+    ok: boolean;
+    provider_detected: string;
+    requested_base_url?: string | null;
+    candidate_base_urls?: string[];
+    verification_base_candidates?: string[];
+    effective_base_url?: string | null;
+    effective_model?: string | null;
+    listed_total?: number;
+    models_count?: number;
+    verified_total?: number;
+    message: string;
+    cached_at?: string | null;
+    preview?: string | null;
+    models?: string[];
+    invalid_models?: Array<{ model: string; reason?: string }>;
+    attempts: Array<{ base_url: string; model: string; status?: number | null; message: string }>;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -36,8 +94,23 @@ export default function SettingsPage() {
         setAiEnabled(data.is_ai_enabled);
         setMarketEnabled(data.is_market_enabled);
         setBotName(data.bot_name || 'MarketBot');
+        setBotDefaultLanguage(data.bot_default_language || 'cs');
+        setSignalApiUrl(data.signal_api_url || '');
+        setSignalPhoneNumber(data.signal_phone_number || '');
+        setSignalApiTokenMasked(data.signal_api_token_masked || '');
+        setSignalApiToken('');
         setPrompt(data.ai_prompt || '');
         setApiKeyMasked(data.ai_api_key_masked || '');
+
+        setAiBaseUrl(data.ai_api_base_url || 'https://api.openai.com/v1');
+        setAiProviderDetected(data.ai_provider_detected || 'unknown');
+        setAiModel(data.ai_model || 'gpt-4o');
+        setModelOptions(Array.isArray(data.ai_models_cached) ? data.ai_models_cached : []);
+        setListedModelTotal(Number(data.ai_models_listed_total || 0));
+        setModelsCachedAt(data.ai_models_cached_at || null);
+        setAiTemperature(data.ai_temperature ?? 0.7);
+        setAiMaxTokens(data.ai_max_tokens ?? 1000);
+        setAiContextMessages(data.ai_context_messages ?? 20);
         setRetentionDays(data.retention_days || 30);
         setAdAutomationEnabled(data.ad_automation_enabled ?? true);
         setAdMinIntervalMinutes(data.ad_min_interval_minutes ?? 180);
@@ -80,6 +153,14 @@ export default function SettingsPage() {
         is_ai_enabled: boolean;
         is_market_enabled: boolean;
         bot_name: string;
+        bot_default_language: string;
+        signal_api_url: string;
+        signal_phone_number: string;
+        ai_api_base_url: string;
+        ai_model: string;
+        ai_temperature: number;
+        ai_max_tokens: number;
+        ai_context_messages: number;
         retention_days: number;
         ad_automation_enabled: boolean;
         ad_min_interval_minutes: number;
@@ -87,11 +168,20 @@ export default function SettingsPage() {
         ad_quiet_hour_end: number;
         ad_group_blacklist: string[];
         ai_api_key?: string;
+        signal_api_token?: string;
       } = {
         ai_prompt: prompt,
         bot_name: botName,
+        bot_default_language: botDefaultLanguage.trim(),
         is_ai_enabled: aiEnabled,
         is_market_enabled: marketEnabled,
+        signal_api_url: signalApiUrl.trim(),
+        signal_phone_number: signalPhoneNumber.trim(),
+        ai_api_base_url: aiBaseUrl.trim(),
+        ai_model: aiModel.trim(),
+        ai_temperature: Math.min(2, Math.max(0, aiTemperature)),
+        ai_max_tokens: Math.min(32000, Math.max(1, aiMaxTokens)),
+        ai_context_messages: Math.min(200, Math.max(1, aiContextMessages)),
         retention_days: retentionDays,
         ad_automation_enabled: adAutomationEnabled,
         ad_min_interval_minutes: adMinIntervalMinutes,
@@ -106,11 +196,27 @@ export default function SettingsPage() {
       if (apiKey.trim()) {
         payload.ai_api_key = apiKey.trim();
       }
+      if (signalApiToken.trim()) {
+        payload.signal_api_token = signalApiToken.trim();
+      }
 
       const updated = await api.updateSettings(payload);
-      setApiKey('');
-      setBotName(updated.bot_name || botName);
+      setSignalApiUrl(updated.signal_api_url || signalApiUrl);
+      setSignalPhoneNumber(updated.signal_phone_number || signalPhoneNumber);
+      setSignalApiTokenMasked(updated.signal_api_token_masked || '');
+      setSignalApiToken('');
+      setBotDefaultLanguage(updated.bot_default_language || botDefaultLanguage);
       setApiKeyMasked(updated.ai_api_key_masked || '');
+
+      setAiBaseUrl(updated.ai_api_base_url || aiBaseUrl);
+      setAiProviderDetected(updated.ai_provider_detected || 'unknown');
+      setAiModel(updated.ai_model || aiModel);
+      setModelOptions(Array.isArray(updated.ai_models_cached) ? updated.ai_models_cached : modelOptions);
+      setListedModelTotal(Number(updated.ai_models_listed_total || listedModelTotal));
+      setModelsCachedAt(updated.ai_models_cached_at || modelsCachedAt);
+      setAiTemperature(updated.ai_temperature ?? aiTemperature);
+      setAiMaxTokens(updated.ai_max_tokens ?? aiMaxTokens);
+      setAiContextMessages(updated.ai_context_messages ?? aiContextMessages);
       setRetentionDays(updated.retention_days || retentionDays);
       setAdAutomationEnabled(updated.ad_automation_enabled ?? adAutomationEnabled);
       setAdMinIntervalMinutes(updated.ad_min_interval_minutes ?? adMinIntervalMinutes);
@@ -143,8 +249,23 @@ export default function SettingsPage() {
       setAiEnabled(restored.is_ai_enabled);
       setMarketEnabled(restored.is_market_enabled);
       setBotName(restored.bot_name || 'MarketBot');
+      setBotDefaultLanguage(restored.bot_default_language || 'cs');
+      setSignalApiUrl(restored.signal_api_url || '');
+      setSignalPhoneNumber(restored.signal_phone_number || '');
+      setSignalApiTokenMasked(restored.signal_api_token_masked || '');
+      setSignalApiToken('');
       setPrompt(restored.ai_prompt || '');
       setApiKeyMasked(restored.ai_api_key_masked || '');
+
+      setAiBaseUrl(restored.ai_api_base_url || 'https://api.openai.com/v1');
+      setAiProviderDetected(restored.ai_provider_detected || 'unknown');
+      setAiModel(restored.ai_model || 'gpt-4o');
+      setModelOptions(Array.isArray(restored.ai_models_cached) ? restored.ai_models_cached : []);
+      setListedModelTotal(Number(restored.ai_models_listed_total || 0));
+      setModelsCachedAt(restored.ai_models_cached_at || null);
+      setAiTemperature(restored.ai_temperature ?? 0.7);
+      setAiMaxTokens(restored.ai_max_tokens ?? 1000);
+      setAiContextMessages(restored.ai_context_messages ?? 20);
       setRetentionDays(restored.retention_days || 30);
       setAdAutomationEnabled(restored.ad_automation_enabled ?? true);
       setAdMinIntervalMinutes(restored.ad_min_interval_minutes ?? 180);
@@ -190,6 +311,94 @@ export default function SettingsPage() {
     }
   };
 
+  const handleProbeAi = async () => {
+    try {
+      setProbingAi(true);
+      setError(null);
+      setProbeResult(null);
+
+      const result = await api.probeAiCompatibility({
+        ai_api_base_url: aiBaseUrl.trim(),
+        ai_api_key: apiKey.trim() ? apiKey.trim() : undefined,
+      });
+      setProbeResult(result);
+      setAiProviderDetected(result.provider_detected || aiProviderDetected);
+      setModelProviderFilter('all');
+      setCachedModelPicker('');
+      setModelOptions(Array.isArray(result.models) ? result.models : []);
+      setListedModelTotal(Number(result.listed_total || 0));
+      setModelsCachedAt(result.cached_at || result.probed_at || null);
+
+      const latest = await api.getSettings();
+      setModelOptions(Array.isArray(latest.ai_models_cached) ? latest.ai_models_cached : (Array.isArray(result.models) ? result.models : []));
+      setListedModelTotal(Number(latest.ai_models_listed_total || result.listed_total || 0));
+      setModelsCachedAt(latest.ai_models_cached_at || result.cached_at || result.probed_at || null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'AI Base URL probe failed');
+    } finally {
+      setProbingAi(false);
+    }
+  };
+
+  const handleVerifyModel = async (silent = false) => {
+    const targetModel = aiModel.trim();
+    if (!targetModel || checkingModel) return;
+    try {
+      setCheckingModel(true);
+      if (!silent) {
+        setError(null);
+      }
+      const result = await api.verifyAiModel({
+        ai_api_base_url: aiBaseUrl.trim(),
+        ai_model: targetModel,
+        ai_api_key: apiKey.trim() ? apiKey.trim() : undefined,
+      });
+      setModelVerifyResult(result);
+    } catch (e) {
+      if (!silent) {
+        setError(e instanceof Error ? e.message : 'Model verification failed');
+      }
+    } finally {
+      setCheckingModel(false);
+    }
+  };
+
+  useEffect(() => {
+    const targetModel = aiModel.trim();
+    if (!targetModel) return;
+    if (!modelOptions.includes(targetModel)) return;
+
+    const timer = setTimeout(() => {
+      void handleVerifyModel(true);
+    }, 700);
+
+    return () => clearTimeout(timer);
+  }, [aiModel, aiBaseUrl, modelOptions]);
+
+  useEffect(() => {
+    if (!modelVerifyResult) return;
+    if (modelVerifyResult.model !== aiModel.trim()) {
+      setModelVerifyResult(null);
+    }
+  }, [aiModel, modelVerifyResult]);
+
+  const providerStats = Object.entries(
+    modelOptions.reduce((acc, model) => {
+      const key = inferProvider(model);
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>)
+  ).sort((a, b) => a[0].localeCompare(b[0]));
+
+  const filteredModelOptions = modelProviderFilter === 'all'
+    ? modelOptions
+    : modelOptions.filter(model => inferProvider(model) === modelProviderFilter);
+
+  const providerFilterOptions = [
+    { key: 'all', label: `All providers (${modelOptions.length})` },
+    ...providerStats.map(([provider, count]) => ({ key: provider, label: `${provider} (${count})` })),
+  ];
+
   return (
     <SidebarLayout title="Settings">
       {error && (
@@ -203,7 +412,7 @@ export default function SettingsPage() {
         
         <div className="setting-item">
           <div className="setting-info">
-            <div className="setting-label">AI Responses (FEATURE_AI_ENABLED)</div>
+            <div className="setting-label">AI Responses</div>
             <div className="setting-desc">Enable or disable automatic AI responses to incoming messages.</div>
           </div>
           <div className="setting-action">
@@ -221,7 +430,7 @@ export default function SettingsPage() {
 
         <div className="setting-item">
           <div className="setting-info">
-            <div className="setting-label">Market Catalog (FEATURE_MARKET_ENABLED)</div>
+            <div className="setting-label">Market Catalog</div>
             <div className="setting-desc">Allow users to view products and place orders.</div>
           </div>
           <div className="setting-action">
@@ -234,6 +443,57 @@ export default function SettingsPage() {
               />
               <span className="slider"></span>
             </label>
+          </div>
+        </div>
+      </div>
+
+      <div className="settings-group">
+        <h3 className="settings-group-title">Signal Gateway Settings</h3>
+
+        <div className="form-group" style={{ marginBottom: '1rem' }}>
+          <label>Signal API URL</label>
+          <input
+            type="text"
+            value={signalApiUrl}
+            onChange={e => setSignalApiUrl(e.target.value.slice(0, 500))}
+            placeholder="http://signal-api:8080"
+            disabled={loading || saving}
+          />
+        </div>
+
+        <div className="form-group" style={{ marginBottom: '1rem' }}>
+          <label>Signal Phone Number</label>
+          <input
+            type="text"
+            value={signalPhoneNumber}
+            onChange={e => setSignalPhoneNumber(e.target.value.slice(0, 64))}
+            placeholder="+420123456789"
+            disabled={loading || saving}
+          />
+        </div>
+
+        <div className="form-group" style={{ marginBottom: '1rem' }}>
+          <label>Signal API Token</label>
+          <input
+            type="password"
+            value={signalApiToken}
+            onChange={e => setSignalApiToken(e.target.value)}
+            placeholder={signalApiTokenMasked ? `Current: ${signalApiTokenMasked}` : 'Optional if gateway is public'}
+            disabled={loading || saving}
+          />
+        </div>
+
+        <div className="form-group" style={{ marginBottom: '0.5rem' }}>
+          <label>Default Language</label>
+          <input
+            type="text"
+            value={botDefaultLanguage}
+            onChange={e => setBotDefaultLanguage(e.target.value.slice(0, 12))}
+            placeholder="cs"
+            disabled={loading || saving}
+          />
+          <div className="label-hint" style={{ marginTop: '0.4rem', marginLeft: 0 }}>
+            Used as the initial language for newly discovered users.
           </div>
         </div>
       </div>
@@ -263,6 +523,180 @@ export default function SettingsPage() {
           />
         </div>
 
+        <div className="form-group" style={{ marginBottom: '1rem' }}>
+          <label>API Base URL</label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.6rem', alignItems: 'center' }}>
+            <input
+              type="text"
+              value={aiBaseUrl}
+              onChange={e => setAiBaseUrl(e.target.value.slice(0, 500))}
+              placeholder="https://api.openai.com/v1"
+              disabled={loading || saving}
+            />
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={handleProbeAi}
+              disabled={loading || saving || probingAi || !aiBaseUrl.trim()}
+              style={{ width: 'auto', whiteSpace: 'nowrap', padding: '0.65rem 0.9rem' }}
+            >
+              {probingAi ? 'Probing...' : 'Probe Base URL'}
+            </button>
+          </div>
+          <div className="label-hint" style={{ marginTop: '0.4rem', marginLeft: 0 }}>
+            Auto-detected provider: {aiProviderDetected}
+          </div>
+          <div className="label-hint" style={{ marginTop: '0.3rem', marginLeft: 0 }}>
+            {modelsCachedAt
+              ? `Last probe: ${new Date(modelsCachedAt).toLocaleString()}`
+              : 'No probe record yet.'}
+          </div>
+          {probeResult && (
+            <div
+              style={{
+                marginTop: '0.75rem',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '0.75rem',
+                background: 'rgba(255,255,255,0.02)',
+                display: 'grid',
+                gap: '0.35rem',
+              }}
+            >
+              <div style={{ color: probeResult.ok ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }}>
+                {probeResult.ok ? 'Base URL Available' : 'Base URL Probe Failed'}
+              </div>
+              <div className="label-hint">Provider: {probeResult.provider_detected}</div>
+              <div className="label-hint">Models listed: {probeResult.listed_total ?? listedModelTotal}</div>
+              {probeResult.cached_at && (
+                <div className="label-hint">Cache updated at: {new Date(probeResult.cached_at).toLocaleString()}</div>
+              )}
+              <div className="label-hint">Message: {probeResult.message}</div>
+            </div>
+          )}
+        </div>
+
+        <div className="form-group" style={{ marginBottom: '1rem' }}>
+          <label>Model</label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem', marginBottom: '0.55rem' }}>
+            <select
+              value={modelProviderFilter}
+              onChange={e => {
+                setModelProviderFilter(e.target.value);
+                setCachedModelPicker('');
+              }}
+              disabled={loading || saving}
+            >
+              {providerFilterOptions.map(item => (
+                <option key={item.key} value={item.key}>{item.label}</option>
+              ))}
+            </select>
+            <select
+              value={cachedModelPicker}
+              onChange={e => {
+                const selected = e.target.value;
+                setCachedModelPicker(selected);
+                if (selected) {
+                  setAiModel(selected);
+                }
+              }}
+              disabled={loading || saving || filteredModelOptions.length === 0}
+            >
+              <option value="">Select cached model...</option>
+              {filteredModelOptions.slice(0, 500).map(model => (
+                <option key={model} value={model}>{model}</option>
+              ))}
+            </select>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.6rem', alignItems: 'center' }}>
+            <input
+              type="text"
+              value={aiModel}
+              onChange={e => setAiModel(e.target.value.slice(0, 120))}
+              placeholder="gpt-4o"
+              disabled={loading || saving}
+            />
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => { void handleVerifyModel(false); }}
+              disabled={loading || saving || checkingModel || !aiModel.trim()}
+              style={{ width: 'auto', whiteSpace: 'nowrap', padding: '0.65rem 0.9rem' }}
+            >
+              {checkingModel ? 'Checking...' : 'Check Model'}
+            </button>
+          </div>
+          <div className="label-hint" style={{ marginTop: '0.4rem', marginLeft: 0 }}>
+            {modelOptions.length > 0
+              ? `Cached models: ${modelOptions.length} · Listed total: ${listedModelTotal || modelOptions.length}`
+              : 'No model cache yet. Probe Base URL to fetch model list.'}
+          </div>
+          {modelVerifyResult && (
+            <div
+              style={{
+                marginTop: '0.6rem',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '0.55rem 0.65rem',
+                background: 'rgba(255,255,255,0.02)',
+                display: 'grid',
+                gap: '0.25rem',
+              }}
+            >
+              <div style={{ color: modelVerifyResult.ok ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }}>
+                {modelVerifyResult.ok ? 'Model Available' : 'Model Unavailable'}
+              </div>
+              <div className="label-hint">Last checked: {new Date(modelVerifyResult.checked_at).toLocaleString()}</div>
+              <div className="label-hint">Message: {modelVerifyResult.message}</div>
+              {modelVerifyResult.effective_model && (
+                <div className="label-hint">Effective model: {modelVerifyResult.effective_model}</div>
+              )}
+              {modelVerifyResult.effective_base_url && (
+                <div className="label-hint">Effective base URL: {modelVerifyResult.effective_base_url}</div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
+          <div className="form-group" style={{ marginBottom: '1rem' }}>
+            <label>Temperature (0-2)</label>
+            <input
+              type="number"
+              min={0}
+              max={2}
+              step={0.1}
+              value={aiTemperature}
+              onChange={e => setAiTemperature(Math.min(2, Math.max(0, Number(e.target.value) || 0)))}
+              disabled={loading || saving}
+            />
+          </div>
+
+          <div className="form-group" style={{ marginBottom: '1rem' }}>
+            <label>Max Tokens (1-32000)</label>
+            <input
+              type="number"
+              min={1}
+              max={32000}
+              value={aiMaxTokens}
+              onChange={e => setAiMaxTokens(Math.min(32000, Math.max(1, Number(e.target.value) || 1)))}
+              disabled={loading || saving}
+            />
+          </div>
+
+          <div className="form-group" style={{ marginBottom: '1rem' }}>
+            <label>Context Messages (1-200)</label>
+            <input
+              type="number"
+              min={1}
+              max={200}
+              value={aiContextMessages}
+              onChange={e => setAiContextMessages(Math.min(200, Math.max(1, Number(e.target.value) || 1)))}
+              disabled={loading || saving}
+            />
+          </div>
+        </div>
+
         <div className="form-group">
           <label>Bot System Prompt</label>
           <textarea 
@@ -274,6 +708,9 @@ export default function SettingsPage() {
           />
           <div className="label-hint" style={{ marginTop: '0.5rem', marginLeft: 0 }}>
             This prompt defines the bot's personality and language.
+          </div>
+          <div className="label-hint" style={{ marginTop: '0.3rem', marginLeft: 0 }}>
+            Configuration is stored in the internal runtime database and applies immediately.
           </div>
         </div>
 

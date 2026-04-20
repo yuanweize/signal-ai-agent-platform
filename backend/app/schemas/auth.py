@@ -25,3 +25,27 @@ class AdminUser(BaseModel):
     """Authenticated admin info (decoded from JWT)."""
 
     username: str
+
+
+class AuthStatusResponse(BaseModel):
+    """Public auth status for login/setup page."""
+
+    requires_2fa: bool
+    bootstrap_required: bool
+
+
+class BootstrapInitRequest(BaseModel):
+    """First-run bootstrap payload."""
+
+    username: str = "admin"
+    password: str
+    password_confirm: str
+    totp_secret: str | None = None
+
+
+class BootstrapInitResponse(BaseModel):
+    """Bootstrap result shown once to the operator."""
+
+    initialized: bool
+    username: str
+    generated_totp_secret: str | None = None

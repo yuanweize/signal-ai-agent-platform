@@ -88,7 +88,14 @@ class ApiClient {
 
   // Auth
   async checkAuth() {
-    return this.request<{ requires_2fa: boolean }>('/auth/me');
+    return this.request<{ requires_2fa: boolean; bootstrap_required: boolean }>('/auth/me');
+  }
+
+  async initBootstrap(payload: BootstrapInitRequest) {
+    return this.request<BootstrapInitResponse>('/auth/bootstrap/init', {
+      method: 'POST',
+      body: payload,
+    });
   }
 
   async login(username: string, password: string, totpCode?: string) {
@@ -205,6 +212,20 @@ class ApiClient {
     });
   }
 
+  async probeAiCompatibility(payload: AiProbeRequest) {
+    return this.request<AiProbeResponse>('/settings/ai/probe', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async verifyAiModel(payload: AiModelVerifyRequest) {
+    return this.request<AiModelVerifyResponse>('/settings/ai/verify-model', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
   // Chats
   async getChats(limit = 50) {
     return this.request<{ items: ChatConversation[]; total: number }>(`/chats?limit=${limit}`);
@@ -252,11 +273,27 @@ export interface ProductInput {
 
 export interface RuntimeSettings {
   bot_name: string;
+  bot_default_language: string;
+  signal_api_url: string;
+  signal_phone_number: string;
+  has_signal_api_token: boolean;
+  signal_api_token_masked: string;
   ai_prompt: string;
   is_ai_enabled: boolean;
   is_market_enabled: boolean;
   has_ai_api_key: boolean;
   ai_api_key_masked: string;
+  ai_api_key_source: string;
+  ai_api_base_url: string;
+  ai_provider_detected: string;
+  ai_model: string;
+  ai_temperature: number;
+  ai_max_tokens: number;
+  ai_context_messages: number;
+  ai_models_cached: string[];
+  ai_models_cached_invalid: string[];
+  ai_models_listed_total: number;
+  ai_models_cached_at?: string | null;
   retention_days: number;
   ad_automation_enabled: boolean;
   ad_min_interval_minutes: number;
@@ -267,16 +304,88 @@ export interface RuntimeSettings {
 
 export interface RuntimeSettingsUpdate {
   bot_name?: string;
+  bot_default_language?: string;
+  signal_api_url?: string;
+  signal_phone_number?: string;
+  signal_api_token?: string;
   ai_prompt?: string;
   is_ai_enabled?: boolean;
   is_market_enabled?: boolean;
   ai_api_key?: string;
+  ai_api_base_url?: string;
+  ai_model?: string;
+  ai_temperature?: number;
+  ai_max_tokens?: number;
+  ai_context_messages?: number;
   retention_days?: number;
   ad_automation_enabled?: boolean;
   ad_min_interval_minutes?: number;
   ad_quiet_hour_start?: number;
   ad_quiet_hour_end?: number;
   ad_group_blacklist?: string[];
+}
+
+export interface AiProbeRequest {
+  ai_api_base_url?: string;
+  ai_model?: string;
+  ai_api_key?: string;
+}
+
+export interface AiModelVerifyRequest {
+  ai_api_base_url?: string;
+  ai_model: string;
+  ai_api_key?: string;
+}
+
+export interface BootstrapInitRequest {
+  username: string;
+  password: string;
+  password_confirm: string;
+  totp_secret?: string;
+}
+
+export interface BootstrapInitResponse {
+  initialized: boolean;
+  username: string;
+  generated_totp_secret?: string | null;
+}
+
+export interface AiProbeAttempt {
+  base_url: string;
+  model: string;
+  status?: number | null;
+  message: string;
+}
+
+export interface AiProbeResponse {
+  ok: boolean;
+  provider_detected: string;
+  requested_base_url?: string | null;
+  candidate_base_urls: string[];
+  verification_base_candidates: string[];
+  effective_base_url?: string | null;
+  effective_model?: string | null;
+  models: string[];
+  invalid_models: Array<{ model: string; reason?: string }>;
+  listed_total: number;
+  models_count?: number;
+  verified_total?: number;
+  probed_at?: string | null;
+  cached_at?: string | null;
+  message: string;
+  preview?: string | null;
+  attempts: AiProbeAttempt[];
+}
+
+export interface AiModelVerifyResponse {
+  ok: boolean;
+  model: string;
+  effective_model?: string | null;
+  effective_base_url?: string | null;
+  checked_at: string;
+  message: string;
+  preview?: string | null;
+  attempts: AiProbeAttempt[];
 }
 
 export interface CampaignBroadcastPayload {

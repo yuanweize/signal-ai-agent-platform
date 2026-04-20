@@ -1,101 +1,125 @@
-# 🤖 Signal Market Bot
+# Signal Market Bot
 
-Signal 群营销机器人（FastAPI + React），支持 AI 自动回复、人工接管、群发投放、用户管理、审计追踪、保留期清理，以及 Docker 一键部署。
+[![CI](https://img.shields.io/github/actions/workflow/status/yuanweize/signal-market-bot/ci.yml?branch=main&label=CI)](https://github.com/yuanweize/signal-market-bot/actions)
+[![Docker Publish](https://img.shields.io/github/actions/workflow/status/yuanweize/signal-market-bot/docker-publish.yml?branch=main&label=Docker%20Publish)](https://github.com/yuanweize/signal-market-bot/actions)
+[![License](https://img.shields.io/github/license/yuanweize/signal-market-bot)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](backend/pyproject.toml)
 
-## 当前版本
+AI-powered Signal marketing assistant with a FastAPI backend and React admin console.
 
-- 单一版本源：`backend/pyproject.toml` 的 `[project].version`
-- 运行时 API 版本读取：`backend/app/version.py`
-- 当前：请以 `python3 scripts/get_version.py` 输出为准
+- English docs (this page)
+- 中文文档: [README.zh-CN.md](README.zh-CN.md)
 
-## ✨ 核心能力
+## Highlights
 
-- Signal Gateway 接入（轮询 + WS 回退）
-- AI 回复（运行时配置、加密 API Key、动态开关）
-- 商品管理（Products CRUD）
-- 聊天审计（会话分页、手动接管发送、重试）
-- 群投放 Campaign（dry-run、静默时段、最小间隔、黑名单）
-- 用户管理 Users（分页搜索、编辑、批量封禁/解封、活动详情）
-- 审计日志（登录、设置、接管、批量用户动作、投放）
-- 指标与告警快照（拉取失败率、5xx 比例、处理时延）
-- 数据治理（保留期清理 + 一键清空）
+- Signal gateway integration with WebSocket primary + HTTP polling fallback
+- Runtime-configurable AI engine (OpenAI-compatible providers)
+- First-run secure bootstrap (password + TOTP + JWT signing secret)
+- Product catalog, chat takeover, campaign broadcast, and user management
+- Audit trail, retention cleanup, and operational metrics
+- Docker-first deployment with CI and GHCR publish workflows
 
-## 🚀 快速启动
+## Architecture
+
+- Backend: FastAPI + SQLAlchemy + Alembic + runtime config in database
+- Frontend: React + Vite + TypeScript
+- Storage: SQLite by default (`data/bot.db`)
+- Runtime config: managed from admin UI (no `.env` file required)
+
+## Quick Start
 
 ```bash
 git clone https://github.com/yuanweize/signal-market-bot.git
 cd signal-market-bot
-cp .env.example .env
 docker compose up -d --build
 docker compose exec backend alembic upgrade head
 ```
 
-访问：
+Open:
 
 - Admin: http://localhost:3000
 - API: http://localhost:8000
-- Docs: http://localhost:8000/docs
+- OpenAPI: http://localhost:8000/docs
 
-## ⚙️ 版本与发布规范
+## First-Run Setup
 
-### 1) 版本只改一个地方
+On first access to `/login`, you will see one-time bootstrap initialization.
 
-只修改 `backend/pyproject.toml`：
+1. Set admin password
+2. Provide or auto-generate a TOTP secret
+3. Login with username/password/TOTP
 
-```toml
-[project]
-version = "<new-version>"
-```
+After bootstrap is completed, login works in normal mode and setup is disabled.
 
-### 2) 本地检查
+## Runtime Settings Model
+
+This project is runtime-driven and does not require `.env` for application features.
+
+- Signal settings are managed in `Settings -> Signal Gateway`
+- AI settings are managed in `Settings -> AI Engine`
+- Secrets (AI key / Signal token / JWT signing secret) are stored encrypted in DB-backed config
+- Changes apply immediately (including Signal listener reconfiguration)
+
+## Internationalization Support
+
+- Documentation is bilingual: English + Chinese
+- Bot default language is configurable in admin settings (`bot_default_language`)
+- UI and API text are English-first for global operator teams
+- Chinese docs are maintained for local onboarding and operations
+
+## Development
+
+Backend checks:
 
 ```bash
-python3 scripts/get_version.py
 python3 -m compileall backend/app
-cd frontend && npm run build
 ```
 
-### 3) 本地容器重建
+Frontend build:
+
+```bash
+cd frontend
+npm ci
+npm run build
+```
+
+Full local redeploy:
 
 ```bash
 ./scripts/redeploy.sh
 ```
 
-### 4) 镜像发布（GitHub Actions）
+## Release & Publish
 
-仓库已提供：
+Version source of truth:
 
-- `.github/workflows/ci.yml`：后端编译 + 前端构建
-- `.github/workflows/docker-publish.yml`：推送到 GHCR
+- `backend/pyproject.toml` -> `[project].version`
+- helper script: `python3 scripts/get_version.py`
 
-发布触发：
+GitHub workflows:
 
-- push 到 `main`（发布 `latest` + 当前版本）
-- push tag（如 `v<new-version>`）
+- `.github/workflows/ci.yml`
+- `.github/workflows/docker-publish.yml`
 
-GHCR 镜像：
+Published images:
 
 - `ghcr.io/<owner>/signal-market-bot-backend`
 - `ghcr.io/<owner>/signal-market-bot-frontend`
 
-## 🧪 运行审计建议
-
-- 未登录访问管理接口应返回 `401`
-- `/health` 中 `version` 与 `backend/pyproject.toml` 保持一致
-- Settings 修改 `bot_name` 后，`/health` 立即反映
-- Users 批量封禁/解封后审计日志可检索
-- Campaign dry-run 与实际发送结果可在 summary 中追踪
-
-## 📁 目录说明
+## Project Structure
 
 ```text
-backend/                 FastAPI 服务与业务逻辑
-frontend/                React 管理台
-scripts/get_version.py   统一版本读取脚本
-scripts/redeploy.sh      本地重建部署脚本
-.github/workflows/       CI + Docker 发布
+backend/                  FastAPI services and domain logic
+frontend/                 React admin dashboard
+scripts/redeploy.sh       local deploy helper
+scripts/get_version.py    canonical version reader
+.github/workflows/        CI and container publish
 ```
 
-## 📄 License
+## Additional Docs
 
-[MIT](LICENSE)
+- Deployment routine: [SKILL_DEPLOYMENT.md](SKILL_DEPLOYMENT.md)
+
+## License
+
+MIT — see [LICENSE](LICENSE)

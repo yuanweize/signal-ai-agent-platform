@@ -61,6 +61,11 @@ class SignalClient:
         """Register a callback for incoming messages."""
         self._on_message = callback
 
+    @property
+    def is_running(self) -> bool:
+        """Whether listener lifecycle is currently active."""
+        return self._running
+
     # ---- HTTP Client Setup ----
 
     def _get_http_client(self) -> httpx.AsyncClient:
@@ -152,6 +157,33 @@ class SignalClient:
         self._listener_task = asyncio.create_task(self._listener_loop())
         logger.info("🎧 Signal message listener started")
 
+    async def apply_runtime_config(
+        self,
+        *,
+        signal_api_url: str,
+        signal_api_token: str,
+        signal_phone_number: str,
+        restart_listener: bool = True,
+    ) -> None:
+        """Apply runtime Signal settings and refresh transports if needed."""
+        settings.signal_api_url = signal_api_url.strip()
+        settings.signal_api_token = signal_api_token.strip()
+        settings.signal_phone_number = signal_phone_number.strip()
+
+        if self._http_client and not self._http_client.is_closed:
+            await self._http_client.aclose()
+        self._http_client = None
+
+        if not restart_listener:
+            return
+
+        is_ready = bool(settings.signal_api_url and settings.signal_phone_number)
+        if self._running:
+            await self.stop()
+
+        if is_ready:
+            await self.start()
+
     async def stop(self) -> None:
         """Stop the background message listener gracefully."""
         self._running = False
@@ -165,6 +197,7 @@ class SignalClient:
 
         if self._http_client and not self._http_client.is_closed:
             await self._http_client.aclose()
+        self._http_client = None
 
         logger.info("🛑 Signal message listener stopped")
 

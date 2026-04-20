@@ -41,17 +41,37 @@ export default function DashboardPage() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    fetch('/health')
-      .then(r => r.json())
-      .then(setHealth)
-      .catch(() => setError('Backend offline'));
+    let cancelled = false;
 
-    api.getStats()
-      .then(setStats)
-      .catch(() => {});
+    const loadDashboard = async () => {
+      try {
+        const [healthData, statsData] = await Promise.all([
+          fetch('/health').then(r => r.json()),
+          api.getStats(),
+        ]);
+        if (cancelled) return;
+        setHealth(healthData);
+        setStats(statsData);
+        setError('');
+      } catch {
+        if (!cancelled) {
+          setError('Backend offline');
+        }
+      }
+    };
+
+    void loadDashboard();
+    const timer = setInterval(() => {
+      void loadDashboard();
+    }, 10000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, []);
 
-  const features = health?.features || stats?.features;
+  const features = stats?.features || health?.features;
 
   return (
     <SidebarLayout title="Dashboard Overview">

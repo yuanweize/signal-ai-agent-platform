@@ -270,8 +270,8 @@ export default function ChatLogsPage() {
                 </div>
               </div>
 
-              <div style={{ padding: '1rem', borderTop: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <div style={{ padding: '1.25rem', borderTop: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
+                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'stretch' }}>
                   <input 
                     type="text" 
                     placeholder="Takeover mode: Send message manually..." 
@@ -283,14 +283,38 @@ export default function ChatLogsPage() {
                         void handleSend();
                       }
                     }}
-                    style={{ flex: 1, padding: '0.8rem 1rem', borderRadius: 'var(--radius)', background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                    style={{ 
+                      flex: 1, 
+                      padding: '0.8rem 1.25rem', 
+                      borderRadius: 'var(--radius)', 
+                      background: 'var(--bg-input)', 
+                      border: '1px solid var(--border)', 
+                      color: 'var(--text-primary)',
+                      fontSize: '0.95rem'
+                    }}
                     disabled={sending || loadingMessages}
                   />
-                  <button className="btn-primary" onClick={handleSend} disabled={sending || !draft.trim() || loadingMessages}>
+                  <button 
+                    className="btn-primary" 
+                    onClick={handleSend} 
+                    disabled={sending || !draft.trim() || loadingMessages}
+                    style={{ 
+                      width: 'auto', 
+                      padding: '0 2.5rem', 
+                      whiteSpace: 'nowrap', 
+                      borderRadius: 'var(--radius)', 
+                      margin: 0,
+                      fontWeight: 600,
+                      fontSize: '1rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                  >
                     {sending ? 'Sending...' : 'Send'}
                   </button>
                 </div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem', textAlign: 'center' }}>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.75rem', textAlign: 'center' }}>
                   Manual takeover is active. New messages are stored in conversation history.
                 </div>
               </div>

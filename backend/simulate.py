@@ -13,7 +13,7 @@ async def main():
     
     if not settings.ai_api_key or settings.ai_api_key == "sk-your-api-key-here":
         print("⚠️  Warning: AI_API_KEY is not set or is using the default value.")
-        print("Please set a real API key in .env to test the AI properly.")
+        print("Please configure a real API key in Settings before testing AI.")
         return
 
     print("✅ AI Engine available. Connecting to DB...")
