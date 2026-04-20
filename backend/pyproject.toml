@@ -1,0 +1,57 @@
+[project]
+name = "signal-market-bot"
+version = "0.1.0"
+description = "AI-powered Signal group market bot with admin dashboard"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+dependencies = [
+    # Web framework
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    # Database
+    "sqlalchemy[asyncio]>=2.0.35",
+    "aiosqlite>=0.20.0",
+    "alembic>=1.14.0",
+    # AI — OpenAI-compatible SDK (works with any compatible provider)
+    "openai>=1.55.0",
+    # HTTP client for Signal API
+    "httpx>=0.28.0",
+    # WebSocket client for Signal message receiving
+    "websockets>=14.0",
+    # Settings management
+    "pydantic-settings>=2.6.0",
+    # Auth & Security
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "pyotp>=2.9.0",
+    # Utilities
+    "python-multipart>=0.0.12",
+]
+
+[project.optional-dependencies]
+prod = []
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24.0",
+    "httpx>=0.28.0",
+    "ruff>=0.8.0",
+]
+
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
