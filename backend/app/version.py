@@ -10,6 +10,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 import tomllib
+from importlib import metadata
 
 
 @lru_cache(maxsize=1)
@@ -18,13 +19,18 @@ def get_app_version() -> str:
     if env_version:
         return env_version
 
-    pyproject_path = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
     try:
         data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
         project = data.get("project", {})
         version = str(project.get("version", "")).strip()
         if version:
             return version
+    except Exception:
+        pass
+
+    try:
+        return metadata.version("signal-market-bot")
     except Exception:
         pass
 
