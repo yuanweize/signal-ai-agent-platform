@@ -8,6 +8,11 @@ Signal Market Bot 是一个面向 Signal 场景的营销机器人系统，包含
 
 语言: [English](README.md) | **中文**
 
+<div align="center">
+  <img src="assets/admin_overview.png" width="850" alt="Signal Market Bot 管理后台概览">
+  <p><em>Signal Market Bot 管理控制台 — 群发投放、商品中台、会话接管与运行指标全景</em></p>
+</div>
+
 ## 项目价值
 
 这个项目用于快速搭建 Signal 销售运营中台：
@@ -95,6 +100,11 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build f
 
 - Signal 配置：`Settings -> Signal Gateway`
 - AI 配置：`Settings -> AI Engine`
+
+<div align="center">
+  <img src="assets/ai_engine_setting.png" width="850" alt="Signal Market Bot AI 引擎配置面板">
+  <p><em>运行时 AI 引擎配置 — 多模型供应商兼容接入、温度与采样调节、系统 Prompt 模板与热重载</em></p>
+</div>
 - 密钥信息（AI key、Signal token、JWT signing secret）采用加密存储
 - 配置保存后立即生效（包含 Signal 监听器重载）
 

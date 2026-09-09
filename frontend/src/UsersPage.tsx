@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   api,
   ManagedUserActivityResponse,
@@ -307,7 +308,7 @@ export default function UsersPage() {
         <button disabled={page >= totalPages} onClick={() => { void loadUsers(page + 1); }}>→</button>
       </div>
 
-      {editing && (
+      {editing && createPortal(
         <div className="modal-overlay" onClick={closeEdit}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <h2>Edit User</h2>
@@ -374,7 +375,8 @@ export default function UsersPage() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </SidebarLayout>
   );

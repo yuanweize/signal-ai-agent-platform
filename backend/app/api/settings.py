@@ -181,13 +181,31 @@ async def test_signal_connection(
     _admin: AdminUser = Depends(get_current_admin),
 ):
     runtime = await get_runtime_settings(session)
-    signal_api_url = (payload.signal_api_url or runtime.get("signal_api_url") or "").strip()
+    stored_url = (runtime.get("signal_api_url") or "").strip()
+    signal_api_url = (payload.signal_api_url or stored_url).strip()
     signal_phone_number = (payload.signal_phone_number or runtime.get("signal_phone_number") or "").strip()
-    signal_api_token = (
-        payload.signal_api_token.strip()
-        if payload.signal_api_token is not None and payload.signal_api_token.strip()
-        else (runtime.get("signal_api_token") or "")
+
+    # SECURITY: Prevent SSRF / token leakage.
+    # If the user provides a custom URL that differs from the stored config,
+    # do NOT fall back to the stored token — only use the explicitly provided one.
+    # This prevents an attacker from pointing the test at their own server
+    # and capturing the real API token via the Authorization header.
+    custom_url_provided = (
+        payload.signal_api_url is not None
+        and payload.signal_api_url.strip()
+        and payload.signal_api_url.strip() != stored_url
     )
+
+    if custom_url_provided:
+        # Only use explicitly provided token for non-stored URLs
+        signal_api_token = (payload.signal_api_token or "").strip()
+    else:
+        # Standard test against known URL — allow stored token fallback
+        signal_api_token = (
+            payload.signal_api_token.strip()
+            if payload.signal_api_token is not None and payload.signal_api_token.strip()
+            else (runtime.get("signal_api_token") or "")
+        )
 
     result = await signal_client.test_connection(
         signal_api_url=signal_api_url,
@@ -440,5 +458,9 @@ async def cleanup_data(
         conversations_deleted=result.get("conversations_deleted", 0),
         audit_logs_deleted=result.get("audit_logs_deleted", 0),
         campaign_logs_deleted=result.get("campaign_logs_deleted", 0),
+        users_deleted=result.get("users_deleted", 0),
+        orders_deleted=result.get("orders_deleted", 0),
+        payments_deleted=result.get("payments_deleted", 0),
+        groups_deleted=result.get("groups_deleted", 0),
         retention_days=retention_days,
     )

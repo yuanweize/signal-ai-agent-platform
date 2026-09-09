@@ -7,6 +7,8 @@ import SettingsPage from './SettingsPage';
 import ChatLogsPage from './ChatLogsPage';
 import CampaignsPage from './CampaignsPage';
 import UsersPage from './UsersPage';
+import GroupsPage from './GroupsPage';
+import DevicesPage from './DevicesPage';
 
 /**
  * Auth guard — redirects to /login if no JWT token present.
@@ -68,6 +70,22 @@ function App() {
           element={
             <ProtectedRoute>
               <UsersPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/groups"
+          element={
+            <ProtectedRoute>
+              <GroupsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/devices"
+          element={
+            <ProtectedRoute>
+              <DevicesPage />
             </ProtectedRoute>
           }
         />

@@ -9,6 +9,11 @@ Production-ready Signal marketing assistant with FastAPI backend and React admin
 
 Language: **English** | [中文](README.zh-CN.md)
 
+<div align="center">
+  <img src="assets/admin_overview.png" width="850" alt="Signal Market Bot Admin Overview">
+  <p><em>Signal Market Bot Admin Console — Campaign broadcasts, product catalog, user sessions, and operational telemetry</em></p>
+</div>
+
 ## Why this project
 
 Signal Market Bot helps operators run Signal-based sales workflows with secure admin controls, runtime AI configuration, campaign management, and audit visibility—without depending on `.env` for day-to-day operations.
@@ -98,6 +103,11 @@ This project is runtime-driven and does not require `.env` for application featu
 
 - Signal settings are managed in `Settings -> Signal Gateway`
 - AI settings are managed in `Settings -> AI Engine`
+
+<div align="center">
+  <img src="assets/ai_engine_setting.png" width="850" alt="Signal Market Bot AI Engine Configuration">
+  <p><em>Runtime AI Engine Configuration — Multi-provider endpoints, model temperature tuning, system prompt templates, and hot-reloading</em></p>
+</div>
 - Secrets (AI key / Signal token / JWT signing secret) are stored encrypted in DB-backed config
 - Changes apply immediately (including Signal listener reconfiguration)
 

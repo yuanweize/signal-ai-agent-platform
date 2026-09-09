@@ -26,6 +26,7 @@ class ChatMessageItem(BaseModel):
     role: str
     content: str
     timestamp: datetime
+    sender_name: str | None = None
 
 
 class ChatMessagesResponse(BaseModel):

@@ -304,7 +304,7 @@ export default function SettingsPage() {
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
       const mode = purgeAll ? 'Full purge' : `Retention cleanup (${result.retention_days ?? retentionDays}d)`;
-      setError(`${mode} completed. Deleted messages=${result.messages_deleted}, conversations=${result.conversations_deleted}, audit=${result.audit_logs_deleted}, campaignLogs=${result.campaign_logs_deleted}`);
+      setError(`${mode} completed. Deleted messages=${result.messages_deleted}, conversations=${result.conversations_deleted}, audit=${result.audit_logs_deleted}, campaignLogs=${result.campaign_logs_deleted}, users=${result.users_deleted}, orders=${result.orders_deleted}, payments=${result.payments_deleted}, groups=${result.groups_deleted}`);
       const logs = await api.getAuditLogs(1, 20, 'settings.');
       setAuditLogs(logs.items.map(item => ({
         id: item.id,

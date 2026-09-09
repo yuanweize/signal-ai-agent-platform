@@ -47,35 +47,49 @@ export default function SidebarLayout({ children, title }: SidebarLayoutProps) {
           <span className="sidebar-logo">🤖</span>
           <span className="sidebar-title">{botName}</span>
         </div>
-        
+
         <nav className="sidebar-nav">
-          <NavLink to="/" className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`} end>
-            <span>📊</span> Overview
+          <NavLink to="/" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} end>
+            <span className="nav-icon">📊</span>
+            <span>Overview</span>
           </NavLink>
-          <NavLink to="/products" className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
-            <span>📦</span> Products
+          <NavLink to="/products" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+            <span className="nav-icon">📦</span>
+            <span>Products</span>
           </NavLink>
-          <NavLink to="/logs" className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
-            <span>💬</span> Chat Logs
+          <NavLink to="/logs" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+            <span className="nav-icon">💬</span>
+            <span>Chat Logs</span>
           </NavLink>
-          <NavLink to="/campaigns" className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
-            <span>📣</span> Campaigns
+          <NavLink to="/groups" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+            <span className="nav-icon">👥</span>
+            <span>Groups</span>
           </NavLink>
-          <NavLink to="/users" className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
-            <span>👤</span> Users
+          <NavLink to="/campaigns" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+            <span className="nav-icon">📣</span>
+            <span>Campaigns</span>
           </NavLink>
-          <NavLink to="/settings" className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
-            <span>⚙️</span> Settings
+          <NavLink to="/users" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+            <span className="nav-icon">👤</span>
+            <span>Users</span>
+          </NavLink>
+          <NavLink to="/settings" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+            <span className="nav-icon">⚙️</span>
+            <span>Settings</span>
+          </NavLink>
+          <NavLink to="/devices" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+            <span className="nav-icon">📱</span>
+            <span>Devices</span>
           </NavLink>
         </nav>
-        
+
         <div className="sidebar-footer">
-          <button onClick={handleLogout} className="btn-secondary" style={{ width: '100%', borderColor: 'rgba(255,107,107,0.3)', color: '#ff6b6b' }}>
+          <button type="button" onClick={handleLogout} className="btn-secondary sidebar-logout">
             Logout
           </button>
         </div>
       </aside>
-      
+
       <main className="main-content">
         <header className="page-header">
           <h1 className="page-title">{title}</h1>

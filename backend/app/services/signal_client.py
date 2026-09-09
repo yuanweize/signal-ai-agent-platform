@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from typing import Callable, Awaitable
 
@@ -25,6 +26,18 @@ from app.schemas.signal import SignalIncomingMessage, SignalSendRequest
 from app.services.metrics import runtime_metrics
 
 logger = logging.getLogger("signal.client")
+
+# Regex to strip ANSI escape codes, newlines, and other control characters
+_SANITIZE_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]|\x1b\[[0-9;]*[a-zA-Z]")
+
+
+def _sanitize_log(text: str, max_len: int = 120) -> str:
+    """Strip control characters and truncate for safe log output."""
+    cleaned = _SANITIZE_RE.sub("", text)
+    cleaned = cleaned.replace("\n", " ").replace("\r", " ")
+    if len(cleaned) > max_len:
+        return cleaned[:max_len] + "…"
+    return cleaned
 
 # Type for the callback that handles incoming messages
 MessageCallback = Callable[[SignalIncomingMessage], Awaitable[None]]
@@ -52,6 +65,7 @@ class SignalClient:
         # Reconnection state
         self._reconnect_delay = 1.0  # Start at 1 second
         self._max_reconnect_delay = 60.0
+        self._max_reconnect_attempts = 100  # Hard cap to prevent infinite storm
         self._reconnect_attempts = 0
 
     @property
@@ -135,6 +149,536 @@ class SignalClient:
         except httpx.HTTPError as e:
             logger.error(f"❌ Send HTTP error: {e}")
             return False
+
+    # ---- Typing Indicator ----
+
+    async def show_typing(
+        self,
+        recipient: str,
+        number: str | None = None,
+    ) -> bool:
+        """
+        Show typing indicator to a recipient.
+
+        Args:
+            recipient: Phone number or "group.{groupId}"
+            number: Bot's phone number (defaults to settings)
+        """
+        phone = number or settings.signal_phone_number
+        try:
+            client = self._get_http_client()
+            response = await client.put(
+                f"/v1/typing-indicator/{phone}",
+                json={"recipient": recipient},
+            )
+            return response.status_code in {200, 201, 204}
+        except httpx.HTTPError as e:
+            logger.debug(f"Typing indicator (show) failed: {e}")
+            return False
+
+    async def hide_typing(
+        self,
+        recipient: str,
+        number: str | None = None,
+    ) -> bool:
+        """
+        Hide typing indicator from a recipient.
+
+        Args:
+            recipient: Phone number or "group.{groupId}"
+            number: Bot's phone number (defaults to settings)
+        """
+        phone = number or settings.signal_phone_number
+        try:
+            client = self._get_http_client()
+            response = await client.delete(
+                f"/v1/typing-indicator/{phone}",
+                params={"recipient": recipient},
+            )
+            return response.status_code in {200, 201, 204}
+        except httpx.HTTPError as e:
+            logger.debug(f"Typing indicator (hide) failed: {e}")
+            return False
+
+    # ---- Read Receipts ----
+
+    async def send_read_receipt(
+        self,
+        recipient: str,
+        timestamp: int,
+        number: str | None = None,
+    ) -> bool:
+        """
+        Send a read receipt to acknowledge a message.
+
+        Args:
+            recipient: Sender's phone number
+            timestamp: Timestamp of the message to mark as read
+            number: Bot's phone number (defaults to settings)
+        """
+        phone = number or settings.signal_phone_number
+        try:
+            client = self._get_http_client()
+            response = await client.post(
+                f"/v1/receipts/{phone}",
+                json={
+                    "receipt_type": "read",
+                    "target_author": recipient,
+                    "timestamp": timestamp,
+                },
+            )
+            return response.status_code in {200, 201, 204}
+        except httpx.HTTPError as e:
+            logger.debug(f"Read receipt send failed: {e}")
+            return False
+
+    # ---- Reactions & Remote Delete ----
+
+    async def send_reaction(
+        self,
+        recipient: str,
+        target_author: str,
+        timestamp: int,
+        emoji: str,
+        number: str | None = None,
+    ) -> bool:
+        """Send a reaction emoji to a specific message."""
+        phone = number or settings.signal_phone_number
+        try:
+            client = self._get_http_client()
+            response = await client.post(
+                f"/v1/reactions/{phone}",
+                json={
+                    "recipient": recipient,
+                    "reaction": emoji,
+                    "target_author": target_author,
+                    "target_timestamp": timestamp,
+                },
+            )
+            return response.status_code in {200, 201, 204}
+        except httpx.HTTPError as e:
+            logger.error(f"Send reaction failed: {e}")
+            return False
+
+    async def remove_reaction(
+        self,
+        recipient: str,
+        target_author: str,
+        timestamp: int,
+        number: str | None = None,
+    ) -> bool:
+        """Remove a previously sent reaction."""
+        phone = number or settings.signal_phone_number
+        try:
+            client = self._get_http_client()
+            response = await client.delete(
+                f"/v1/reactions/{phone}",
+                params={
+                    "recipient": recipient,
+                    "target_author": target_author,
+                    "target_timestamp": timestamp,
+                },
+            )
+            return response.status_code in {200, 201, 204}
+        except httpx.HTTPError as e:
+            logger.error(f"Remove reaction failed: {e}")
+            return False
+
+    async def delete_message(
+        self,
+        recipient: str,
+        target_timestamp: int,
+        number: str | None = None,
+    ) -> bool:
+        """Remote delete a message sent by this bot."""
+        phone = number or settings.signal_phone_number
+        try:
+            client = self._get_http_client()
+            response = await client.delete(
+                f"/v1/remote-delete/{phone}",
+                params={
+                    "recipient": recipient,
+                    "target_timestamp": target_timestamp,
+                },
+            )
+            return response.status_code in {200, 201, 204}
+        except httpx.HTTPError as e:
+            logger.error(f"Remote delete failed: {e}")
+            return False
+
+    # ---- Attachments ----
+
+    async def list_attachments(self) -> list[str]:
+        """List all stored attachment IDs."""
+        try:
+            client = self._get_http_client()
+            response = await client.get("/v1/attachments")
+            if response.status_code == 200:
+                return response.json()
+            return []
+        except httpx.HTTPError as e:
+            logger.error(f"List attachments failed: {e}")
+            return []
+
+    async def serve_attachment(self, attachment_id: str) -> bytes | None:
+        """Get the raw bytes of an attachment."""
+        try:
+            client = self._get_http_client()
+            response = await client.get(f"/v1/attachments/{attachment_id}")
+            if response.status_code == 200:
+                return response.content
+            return None
+        except httpx.HTTPError as e:
+            logger.error(f"Serve attachment failed: {e}")
+            return None
+
+    async def delete_attachment(self, attachment_id: str) -> bool:
+        """Delete an attachment from the Signal CLI internal storage."""
+        try:
+            client = self._get_http_client()
+            response = await client.delete(f"/v1/attachments/{attachment_id}")
+            return response.status_code in {200, 201, 204}
+        except httpx.HTTPError as e:
+            logger.error(f"Delete attachment failed: {e}")
+            return False
+
+    # ---- Contacts ----
+
+    async def list_contacts(
+        self,
+        number: str | None = None,
+    ) -> list[dict]:
+        """List all contacts associated with this number."""
+        phone = number or settings.signal_phone_number
+        try:
+            client = self._get_http_client()
+            response = await client.get(f"/v1/contacts/{phone}")
+            if response.status_code == 200:
+                return response.json()
+            return []
+        except httpx.HTTPError as e:
+            logger.error(f"List contacts failed: {e}")
+            return []
+
+    async def sync_contacts(
+        self,
+        number: str | None = None,
+    ) -> bool:
+        """Sync contacts to all linked devices."""
+        phone = number or settings.signal_phone_number
+        try:
+            client = self._get_http_client()
+            response = await client.post(f"/v1/contacts/{phone}/sync")
+            return response.status_code in {200, 201, 204}
+        except httpx.HTTPError as e:
+            logger.error(f"Sync contacts failed: {e}")
+            return False
+
+    async def get_contact_avatar(
+        self,
+        uuid: str,
+        number: str | None = None,
+    ) -> bytes | None:
+        """Get the avatar bytes for a specific contact UUID."""
+        phone = number or settings.signal_phone_number
+        try:
+            client = self._get_http_client()
+            response = await client.get(f"/v1/contacts/{phone}/{uuid}/avatar")
+            if response.status_code == 200:
+                return response.content
+            return None
+        except httpx.HTTPError as e:
+            logger.error(f"Get contact avatar failed: {e}")
+            return None
+
+    # ---- Group Management ----
+
+    async def list_groups(
+        self,
+        number: str | None = None,
+    ) -> list[dict]:
+        """
+        List all Signal groups the bot belongs to.
+
+        Returns:
+            List of group info dicts from the Signal API
+        """
+        phone = number or settings.signal_phone_number
+        try:
+            client = self._get_http_client()
+            response = await client.get(f"/v1/groups/{phone}")
+            if response.status_code == 200:
+                return response.json()
+            logger.warning(f"List groups returned HTTP {response.status_code}")
+            return []
+        except httpx.HTTPError as e:
+            logger.error(f"List groups failed: {e}")
+            return []
+
+    async def get_group(
+        self,
+        group_id: str,
+        number: str | None = None,
+    ) -> dict | None:
+        """
+        Get details of a specific Signal group.
+
+        Args:
+            group_id: Internal Signal group ID
+            number: Bot's phone number (defaults to settings)
+        """
+        phone = number or settings.signal_phone_number
+        try:
+            client = self._get_http_client()
+            response = await client.get(f"/v1/groups/{phone}/{group_id}")
+            if response.status_code == 200:
+                return response.json()
+            return None
+        except httpx.HTTPError as e:
+            logger.error(f"Get group failed: {e}")
+            return None
+
+    async def quit_group(
+        self,
+        group_id: str,
+        number: str | None = None,
+    ) -> bool:
+        """
+        Quit (leave) a Signal group.
+
+        Args:
+            group_id: Internal Signal group ID
+            number: Bot's phone number (defaults to settings)
+        """
+        phone = number or settings.signal_phone_number
+        try:
+            client = self._get_http_client()
+            response = await client.post(f"/v1/groups/{phone}/{group_id}/quit")
+            ok = response.status_code in {200, 201, 204}
+            if ok:
+                logger.info(f"👋 Left group {_sanitize_log(group_id, 32)}")
+            else:
+                logger.warning(
+                    f"Quit group returned HTTP {response.status_code}"
+                )
+            return ok
+        except httpx.HTTPError as e:
+            logger.error(f"Quit group failed: {e}")
+            return False
+
+    # ---- Advanced Group Management ----
+
+    async def create_group(
+        self,
+        name: str,
+        members: list[str],
+        number: str | None = None,
+    ) -> dict | None:
+        """Create a new Signal Group."""
+        phone = number or settings.signal_phone_number
+        try:
+            client = self._get_http_client()
+            response = await client.post(
+                f"/v1/groups/{phone}",
+                json={"name": name, "members": members},
+            )
+            if response.status_code == 201:
+                return response.json()
+            return None
+        except httpx.HTTPError as e:
+            logger.error(f"Create group failed: {e}")
+            return None
+
+    async def update_group(
+        self,
+        group_id: str,
+        name: str | None = None,
+        description: str | None = None,
+        number: str | None = None,
+    ) -> bool:
+        """Update an existing Signal Group's metadata."""
+        phone = number or settings.signal_phone_number
+        try:
+            payload = {}
+            if name is not None:
+                payload["name"] = name
+            if description is not None:
+                payload["description"] = description
+            
+            client = self._get_http_client()
+            response = await client.put(
+                f"/v1/groups/{phone}/{group_id}",
+                json=payload,
+            )
+            return response.status_code in {200, 201, 204}
+        except httpx.HTTPError as e:
+            logger.error(f"Update group failed: {e}")
+            return False
+
+    async def add_group_members(
+        self,
+        group_id: str,
+        members: list[str],
+        number: str | None = None,
+    ) -> bool:
+        """Add members to a group."""
+        phone = number or settings.signal_phone_number
+        try:
+            client = self._get_http_client()
+            response = await client.post(
+                f"/v1/groups/{phone}/{group_id}/members",
+                json={"members": members},
+            )
+            return response.status_code in {200, 201, 204}
+        except httpx.HTTPError as e:
+            logger.error(f"Add group members failed: {e}")
+            return False
+
+    async def remove_group_members(
+        self,
+        group_id: str,
+        members: list[str],
+        number: str | None = None,
+    ) -> bool:
+        """Remove members from a group."""
+        phone = number or settings.signal_phone_number
+        try:
+            client = self._get_http_client()
+            response = await client.delete(
+                f"/v1/groups/{phone}/{group_id}/members",
+                json={"members": members},
+            )
+            return response.status_code in {200, 201, 204}
+        except httpx.HTTPError as e:
+            logger.error(f"Remove group members failed: {e}")
+            return False
+
+    async def modify_group_admins(
+        self,
+        group_id: str,
+        admins: list[str],
+        action: str = "add",
+        number: str | None = None,
+    ) -> bool:
+        """Add or remove group admins."""
+        phone = number or settings.signal_phone_number
+        try:
+            client = self._get_http_client()
+            url = f"/v1/groups/{phone}/{group_id}/admins"
+            if action == "add":
+                response = await client.post(url, json={"members": admins})
+            else:
+                response = await client.delete(url, json={"members": admins})
+            return response.status_code in {200, 201, 204}
+        except httpx.HTTPError as e:
+            logger.error(f"Modify group admins failed: {e}")
+            return False
+
+    # ---- Accounts & Devices ----
+
+    async def update_profile(
+        self,
+        name: str | None = None,
+        about: str | None = None,
+        number: str | None = None,
+    ) -> bool:
+        """Update the Signal profile name and about text."""
+        phone = number or settings.signal_phone_number
+        try:
+            payload = {}
+            if name is not None:
+                payload["name"] = name
+            if about is not None:
+                payload["about"] = about
+                
+            client = self._get_http_client()
+            response = await client.put(f"/v1/profiles/{phone}", json=payload)
+            return response.status_code in {200, 201, 204}
+        except httpx.HTTPError as e:
+            logger.error(f"Update profile failed: {e}")
+            return False
+
+    async def list_devices(
+        self,
+        number: str | None = None,
+    ) -> list[dict]:
+        """List all devices linked to this Signal account."""
+        phone = number or settings.signal_phone_number
+        try:
+            client = self._get_http_client()
+            response = await client.get(f"/v1/devices/{phone}")
+            if response.status_code == 200:
+                return response.json()
+            return []
+        except httpx.HTTPError as e:
+            logger.error(f"List devices failed: {e}")
+            return []
+
+    async def remove_device(
+        self,
+        device_id: int,
+        number: str | None = None,
+    ) -> bool:
+        """Unlink a specific device."""
+        phone = number or settings.signal_phone_number
+        try:
+            client = self._get_http_client()
+            response = await client.delete(f"/v1/devices/{phone}/{device_id}")
+            return response.status_code in {200, 201, 204}
+        except httpx.HTTPError as e:
+            logger.error(f"Remove device failed: {e}")
+            return False
+
+    # ---- QR Code Device Linking ----
+
+    async def get_qrcode_link(self) -> dict | None:
+        """
+        Get a QR code link URI for linking a new device.
+
+        Returns:
+            Dict with link info, or None on failure
+        """
+        try:
+            client = self._get_http_client()
+            response = await client.get("/v1/qrcodelink")
+            if response.status_code == 200:
+                return response.json()
+            return None
+        except httpx.HTTPError as e:
+            logger.error(f"QR code link failed: {e}")
+            return None
+
+    # ---- Number Search ----
+
+    async def search_numbers(
+        self,
+        numbers: list[str],
+        number: str | None = None,
+    ) -> dict:
+        """
+        Check if phone numbers are registered on Signal.
+
+        Args:
+            numbers: List of phone numbers to check
+            number: Bot's phone number (defaults to settings)
+
+        Returns:
+            Dict mapping numbers to their registration status
+        """
+        phone = number or settings.signal_phone_number
+        try:
+            client = self._get_http_client()
+            numbers_param = ",".join(numbers)
+            response = await client.get(
+                f"/v1/search/{phone}",
+                params={"numbers": numbers_param},
+            )
+            if response.status_code == 200:
+                return response.json()
+            return {}
+        except httpx.HTTPError as e:
+            logger.error(f"Number search failed: {e}")
+            return {}
 
     async def send_reply(
         self,
@@ -310,13 +854,26 @@ class SignalClient:
             # Exponential backoff before retry
             if self._running:
                 self._reconnect_attempts += 1
+
+                # Hard cap: stop after too many consecutive failures
+                if self._reconnect_attempts >= self._max_reconnect_attempts:
+                    logger.error(
+                        f"🛑 Reached max reconnect attempts "
+                        f"({self._max_reconnect_attempts}). "
+                        f"Stopping listener to prevent reconnect storm. "
+                        f"Manual restart or config change required."
+                    )
+                    self._running = False
+                    self._connected = False
+                    break
+
                 delay = min(
                     self._reconnect_delay * (2 ** min(self._reconnect_attempts - 1, 6)),
                     self._max_reconnect_delay,
                 )
                 logger.info(
                     f"⏳ Reconnecting in {delay:.0f}s "
-                    f"(attempt {self._reconnect_attempts})..."
+                    f"(attempt {self._reconnect_attempts}/{self._max_reconnect_attempts})..."
                 )
                 await asyncio.sleep(delay)
 
@@ -339,6 +896,7 @@ class SignalClient:
             ping_interval=30,
             ping_timeout=10,
             close_timeout=5,
+            max_size=2 * 1024 * 1024,  # 2MB — prevent OOM from large attachments
         ) as ws:
             # Reset backoff on successful connection
             self._reconnect_delay = 1.0
@@ -452,9 +1010,9 @@ class SignalClient:
         if msg.envelope.sender_id == settings.signal_phone_number:
             return
 
-        source = msg.envelope.sender_name
-        text_preview = (msg.envelope.text or "")[:60]
-        context = f"in group {msg.envelope.group_id}" if msg.envelope.is_group_message else "DM"
+        source = _sanitize_log(msg.envelope.sender_name, 40)
+        text_preview = _sanitize_log((msg.envelope.text or ""), 60)
+        context = f"in group {msg.envelope.group_id[:16]}" if msg.envelope.is_group_message else "DM"
         logger.info(f"📨 [{context}] {source}: {text_preview}")
 
         # Dispatch to handler

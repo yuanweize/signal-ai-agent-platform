@@ -20,8 +20,8 @@ class Conversation(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 
-    # Who is this conversation with
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    # Who initiated this conversation (NULL for group convos created automatically without specific user context, though typically recorded as the first sender)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     signal_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
 
     # Which group (NULL = direct message / private chat)
@@ -69,6 +69,9 @@ class Message(Base):
 
     # Role: "user", "assistant", or "system"
     role: Mapped[str] = mapped_column(String(20), nullable=False)
+
+    # Sender Signal ID (to identify who sent a group message)
+    sender_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
 
     # Message content
     content: Mapped[str] = mapped_column(Text, nullable=False)

@@ -135,6 +135,10 @@ class CleanupResponse(BaseModel):
     conversations_deleted: int
     audit_logs_deleted: int
     campaign_logs_deleted: int
+    users_deleted: int = 0
+    orders_deleted: int = 0
+    payments_deleted: int = 0
+    groups_deleted: int = 0
     retention_days: int | None = None
 
 

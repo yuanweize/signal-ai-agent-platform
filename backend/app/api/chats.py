@@ -5,12 +5,13 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import select
+from sqlalchemy import select, func as sa_func, case, literal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AdminUser, get_current_admin
 from app.database import get_session
 from app.models.conversation import Conversation, Message
+from app.models.group import Group
 from app.models.user import User
 from app.schemas.chat import (
     ChatConversationItem,
@@ -32,6 +33,11 @@ async def list_chats(
     session: AsyncSession = Depends(get_session),
     _admin: AdminUser = Depends(get_current_admin),
 ):
+    """List chat conversations.
+
+    - DMs: one entry per user (signal_id, group_id=None)
+    - Groups: one entry per group_id
+    """
     result = await session.execute(
         select(Conversation)
         .where(Conversation.is_active == True)  # noqa: E712
@@ -41,30 +47,52 @@ async def list_chats(
     conversations = result.scalars().all()
 
     items: list[ChatConversationItem] = []
-    for conversation in conversations:
-        user_result = await session.execute(
-            select(User).where(User.id == conversation.user_id)
-        )
-        user = user_result.scalar_one_or_none()
 
+    for conv in conversations:
+        # Get latest message
         last_result = await session.execute(
             select(Message)
-            .where(Message.conversation_id == conversation.id)
+            .where(Message.conversation_id == conv.id)
             .order_by(Message.timestamp.desc())
             .limit(1)
         )
         last_message = last_result.scalar_one_or_none()
 
-        items.append(
-            ChatConversationItem(
-                signal_id=conversation.signal_id,
-                display_name=user.display_name if user else conversation.signal_id,
-                group_id=conversation.group_id,
-                last_message=last_message.content if last_message else "",
-                last_message_at=last_message.timestamp if last_message else None,
-                message_count=conversation.message_count,
+        if conv.group_id:
+            # Try to get group name from Group table
+            group_result = await session.execute(
+                select(Group).where(Group.group_id == conv.group_id)
             )
-        )
+            group = group_result.scalar_one_or_none()
+            display_name = group.name if group else f"Group {conv.group_id[:12]}..."
+            
+            items.append(
+                ChatConversationItem(
+                    signal_id=conv.group_id,  # Use group_id as primary identifier
+                    display_name=display_name,
+                    group_id=conv.group_id,
+                    last_message=last_message.content if last_message else "",
+                    last_message_at=last_message.timestamp if last_message else None,
+                    message_count=conv.message_count,
+                )
+            )
+        else:
+            # DM
+            user_result = await session.execute(
+                select(User).where(User.id == conv.user_id)
+            )
+            user = user_result.scalar_one_or_none()
+            
+            items.append(
+                ChatConversationItem(
+                    signal_id=conv.signal_id,
+                    display_name=user.display_name if user else conv.signal_id,
+                    group_id=None,
+                    last_message=last_message.content if last_message else "",
+                    last_message_at=last_message.timestamp if last_message else None,
+                    message_count=conv.message_count,
+                )
+            )
 
     return ChatConversationListResponse(items=items, total=len(items))
 
@@ -78,33 +106,43 @@ async def get_chat_messages(
     session: AsyncSession = Depends(get_session),
     _admin: AdminUser = Depends(get_current_admin),
 ):
-    query = select(Conversation).where(Conversation.signal_id == signal_id)
-    if group_id is None:
-        query = query.where(Conversation.group_id == None)  # noqa: E711
+    """Get messages for a conversation.
+
+    - DM: fetches messages from the specific user's conversation
+    - Group: fetches messages for the group conversation
+    """
+    if group_id:
+        query = select(Conversation).where(Conversation.group_id == group_id)
     else:
-        query = query.where(Conversation.group_id == group_id)
-
+        query = (
+            select(Conversation)
+            .where(Conversation.signal_id == signal_id)
+            .where(Conversation.group_id == None)  # noqa: E711
+        )
+    
     query = query.order_by(Conversation.updated_at.desc()).limit(1)
-
     conv_result = await session.execute(query)
     conversation = conv_result.scalar_one_or_none()
+    
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    user_result = await session.execute(
-        select(User).where(User.id == conversation.user_id)
-    )
-    user = user_result.scalar_one_or_none()
+    # Get display name
+    if group_id:
+        group_result = await session.execute(select(Group).where(Group.group_id == group_id))
+        group = group_result.scalar_one_or_none()
+        display_name = group.name if group else f"Group {group_id[:12]}..."
+    else:
+        user_result = await session.execute(select(User).where(User.id == conversation.user_id))
+        user = user_result.scalar_one_or_none()
+        display_name = user.display_name if user else signal_id
 
-    total_messages = len(
-        (
-            await session.execute(
-                select(Message).where(Message.conversation_id == conversation.id)
-            )
-        )
-        .scalars()
-        .all()
+    # Messages
+    count_result = await session.execute(
+        select(sa_func.count(Message.id))
+        .where(Message.conversation_id == conversation.id)
     )
+    total_messages = count_result.scalar() or 0
 
     messages_result = await session.execute(
         select(Message)
@@ -115,16 +153,25 @@ async def get_chat_messages(
     )
     messages = messages_result.scalars().all()
 
+    # Pre-fetch users for sender names
+    sender_ids = list({m.sender_id for m in messages if m.sender_id and m.sender_id != "bot"})
+    sender_map = {}
+    if sender_ids:
+        users_result = await session.execute(select(User).where(User.signal_id.in_(sender_ids)))
+        users = users_result.scalars().all()
+        sender_map = {u.signal_id: u.display_name for u in users}
+
     return ChatMessagesResponse(
         signal_id=signal_id,
-        display_name=user.display_name if user else signal_id,
-        group_id=conversation.group_id,
+        display_name=display_name,
+        group_id=group_id,
         items=[
             ChatMessageItem(
                 id=m.id,
                 role=m.role,
                 content=m.content,
                 timestamp=m.timestamp,
+                sender_name=sender_map.get(m.sender_id, m.sender_id) if m.role == "user" and m.sender_id else None,
             )
             for m in messages
         ],
@@ -178,6 +225,7 @@ async def send_chat_message(
                 conversation_id=conversation.id,
                 role="assistant",
                 content=payload.message,
+                sender_id="bot",
                 timestamp=datetime.now(),
             )
         )
@@ -197,3 +245,84 @@ async def send_chat_message(
     await session.commit()
 
     return ChatSendResponse(success=True)
+
+
+from pydantic import BaseModel
+
+class ReactionRequest(BaseModel):
+    emoji: str
+    target_author: str
+
+
+@router.post("/{signal_id}/messages/{timestamp}/react")
+async def send_reaction(
+    signal_id: str,
+    timestamp: int,
+    request: ReactionRequest,
+    group_id: str | None = None,
+    admin: AdminUser = Depends(get_current_admin),
+):
+    """
+    Send a reaction to a specific message.
+    """
+    recipient = group_id if group_id else signal_id
+    if recipient and recipient.startswith("group") is False and group_id:
+        recipient = f"group.{recipient}"
+
+    success = await signal_client.send_reaction(
+        recipient=recipient,
+        target_author=request.target_author,
+        timestamp=timestamp,
+        emoji=request.emoji,
+    )
+    if not success:
+        raise HTTPException(status_code=502, detail="Failed to send reaction")
+    return {"ok": True}
+
+
+@router.delete("/{signal_id}/messages/{timestamp}/react")
+async def remove_reaction(
+    signal_id: str,
+    timestamp: int,
+    target_author: str,
+    group_id: str | None = None,
+    admin: AdminUser = Depends(get_current_admin),
+):
+    """
+    Remove a previously sent reaction.
+    """
+    recipient = group_id if group_id else signal_id
+    if recipient and recipient.startswith("group") is False and group_id:
+        recipient = f"group.{recipient}"
+
+    success = await signal_client.remove_reaction(
+        recipient=recipient,
+        target_author=target_author,
+        timestamp=timestamp,
+    )
+    if not success:
+        raise HTTPException(status_code=502, detail="Failed to remove reaction")
+    return {"ok": True}
+
+
+@router.delete("/{signal_id}/messages/{timestamp}")
+async def delete_message(
+    signal_id: str,
+    timestamp: int,
+    group_id: str | None = None,
+    admin: AdminUser = Depends(get_current_admin),
+):
+    """
+    Remotely delete a message sent by the bot.
+    """
+    recipient = group_id if group_id else signal_id
+    if recipient and recipient.startswith("group") is False and group_id:
+        recipient = f"group.{recipient}"
+
+    success = await signal_client.delete_message(
+        recipient=recipient,
+        target_timestamp=timestamp,
+    )
+    if not success:
+        raise HTTPException(status_code=502, detail="Failed to remotely delete message")
+    return {"ok": True}

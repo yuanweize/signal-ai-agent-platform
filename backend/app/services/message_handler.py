@@ -13,6 +13,7 @@ Pipeline:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import datetime
@@ -68,6 +69,29 @@ class MessageHandler:
             is_group=envelope.is_group_message,
         )
 
+        # Send read receipt for DMs (fire-and-forget, non-blocking)
+        if not parsed.is_group and parsed.timestamp:
+            asyncio.create_task(
+                signal_client.send_read_receipt(
+                    recipient=parsed.sender_id,
+                    timestamp=parsed.timestamp,
+                )
+            )
+
+        # Handle attachment-only messages (no text)
+        if not parsed.text.strip() and envelope.has_attachments:
+            logger.info(
+                f"📎 Attachment-only message from {parsed.sender_id} — replying with notice"
+            )
+            await signal_client.send_reply(
+                text="📎 Děkujeme za soubor. Přílohy zatím nepodporujeme. "
+                     "Napište prosím textovou zprávu.\n"
+                     "(Thank you for the file. Attachments are not yet supported. "
+                     "Please send a text message.)",
+                recipient=parsed.reply_recipient,
+            )
+            return
+
         if not parsed.text.strip():
             logger.debug(f"Skipping empty message from {parsed.sender_id}")
             return
@@ -93,6 +117,7 @@ class MessageHandler:
                     conversation_id=conversation.id,
                     role="user",
                     content=parsed.text,
+                    sender_id=parsed.sender_id,
                     timestamp=datetime.fromtimestamp(parsed.timestamp / 1000)
                     if parsed.timestamp
                     else datetime.now(),
@@ -109,8 +134,18 @@ class MessageHandler:
 
                 await session.commit()
 
-                # Step 5: Generate reply
+                # Step 5: Generate reply (with typing indicator)
+                # Show typing indicator while AI processes
+                asyncio.create_task(
+                    signal_client.show_typing(parsed.reply_recipient)
+                )
+
                 reply_text = await self._generate_reply(session, conversation, parsed)
+
+                # Hide typing indicator after response
+                asyncio.create_task(
+                    signal_client.hide_typing(parsed.reply_recipient)
+                )
 
                 if reply_text:
                     # Step 6: Store bot's reply in DB
@@ -118,6 +153,7 @@ class MessageHandler:
                         conversation_id=conversation.id,
                         role="assistant",
                         content=reply_text,
+                        sender_id="bot",
                     )
                     session.add(bot_message)
                     conversation.message_count += 1
@@ -202,16 +238,12 @@ class MessageHandler:
         A new conversation starts if none exists or if the last one
         has been inactive for a long time (configurable).
         """
-        query = (
-            select(Conversation)
-            .where(Conversation.user_id == user.id)
-            .where(Conversation.is_active == True)  # noqa: E712
-        )
+        query = select(Conversation).where(Conversation.is_active == True)  # noqa: E712
 
         if parsed.is_group:
             query = query.where(Conversation.group_id == parsed.group_id)
         else:
-            query = query.where(Conversation.group_id == None)  # noqa: E711
+            query = query.where(Conversation.user_id == user.id).where(Conversation.group_id == None)  # noqa: E711
 
         query = query.order_by(Conversation.updated_at.desc()).limit(1)
         result = await session.execute(query)

@@ -23,6 +23,28 @@ class SignalGroupInfo(BaseModel):
     type: str = "DELIVER"  # DELIVER, UPDATE, QUIT, etc.
 
 
+class SignalAttachment(BaseModel):
+    """Attachment metadata in an incoming message."""
+
+    content_type: str = Field(alias="contentType", default="")
+    filename: str | None = None
+    id: str = ""
+    size: int = 0
+
+    model_config = {"populate_by_name": True}
+
+
+class SignalReaction(BaseModel):
+    """Reaction emoji to a previous message."""
+
+    emoji: str = ""
+    target_author: str = Field(alias="targetAuthor", default="")
+    target_timestamp: int = Field(alias="targetTimestamp", default=0)
+    is_remove: bool = Field(alias="isRemove", default=False)
+
+    model_config = {"populate_by_name": True}
+
+
 class SignalDataMessage(BaseModel):
     """Core message content within an envelope."""
 
@@ -31,8 +53,15 @@ class SignalDataMessage(BaseModel):
     expires_in_seconds: int = Field(alias="expiresInSeconds", default=0)
     view_once: bool = Field(alias="viewOnce", default=False)
     group_info: SignalGroupInfo | None = Field(alias="groupInfo", default=None)
+    attachments: list[SignalAttachment] = Field(default_factory=list)
+    reaction: SignalReaction | None = None
 
     model_config = {"populate_by_name": True}
+
+    @property
+    def has_attachments(self) -> bool:
+        """True if this message contains attachments."""
+        return len(self.attachments) > 0
 
 
 class SignalReceipt(BaseModel):
@@ -88,8 +117,15 @@ class SignalEnvelope(BaseModel):
 
     @property
     def is_data_message(self) -> bool:
-        """True if this envelope contains an actual text message."""
-        return self.data_message is not None and self.data_message.message is not None
+        """True if this envelope contains a text message or attachments."""
+        if self.data_message is None:
+            return False
+        return self.data_message.message is not None or self.data_message.has_attachments
+
+    @property
+    def has_attachments(self) -> bool:
+        """True if this envelope contains attachments."""
+        return self.data_message is not None and self.data_message.has_attachments
 
     @property
     def is_group_message(self) -> bool:

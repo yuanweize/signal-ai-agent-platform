@@ -251,6 +251,90 @@ class ApiClient {
       body: payload,
     });
   }
+  // Account & Devices
+  async getProfile() {
+    return this.request<{ name?: string; about?: string }>('/account/profile');
+  }
+
+  async updateProfile(data: { name?: string; about?: string }) {
+    return this.request<{ ok: boolean }>('/account/profile', {
+      method: 'PUT',
+      body: data,
+    });
+  }
+
+  async listDevices() {
+    return this.request<{ devices: SignalDevice[] }>('/account/devices');
+  }
+
+  async removeDevice(deviceId: number) {
+    return this.request<{ ok: boolean }>(`/account/devices/${deviceId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Groups
+  async listGroups() {
+    return this.request<SignalGroup[]>('/groups');
+  }
+
+  async createGroup(name: string, members: string[]) {
+    return this.request<{ ok: boolean }>('/groups', {
+      method: 'POST',
+      body: { name, members },
+    });
+  }
+
+  async updateGroup(groupId: string, data: { name?: string; description?: string }) {
+    return this.request<{ ok: boolean }>(`/groups/${encodeURIComponent(groupId)}`, {
+      method: 'PUT',
+      body: data,
+    });
+  }
+
+  async addGroupMembers(groupId: string, members: string[]) {
+    return this.request<{ ok: boolean }>(`/groups/${encodeURIComponent(groupId)}/members`, {
+      method: 'POST',
+      body: { members },
+    });
+  }
+
+  async removeGroupMembers(groupId: string, members: string[]) {
+    return this.request<{ ok: boolean }>(`/groups/${encodeURIComponent(groupId)}/members`, {
+      method: 'DELETE',
+      body: { members },
+    });
+  }
+
+  async addGroupAdmins(groupId: string, members: string[]) {
+    return this.request<{ ok: boolean }>(`/groups/${encodeURIComponent(groupId)}/admins`, {
+      method: 'POST',
+      body: { members },
+    });
+  }
+
+  async removeGroupAdmins(groupId: string, members: string[]) {
+    return this.request<{ ok: boolean }>(`/groups/${encodeURIComponent(groupId)}/admins`, {
+      method: 'DELETE',
+      body: { members },
+    });
+  }
+}
+
+export interface SignalDevice {
+  id: number;
+  name?: string;
+  created?: number;
+  lastSeen?: number;
+}
+
+export interface SignalGroup {
+  id: number;
+  group_id: string;
+  name?: string;
+  description?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Product {
@@ -463,6 +547,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system' | string;
   content: string;
   timestamp: string;
+  sender_name?: string;
 }
 
 export interface ChatMessagesResponse {
@@ -485,6 +570,10 @@ export interface CleanupResponse {
   conversations_deleted: number;
   audit_logs_deleted: number;
   campaign_logs_deleted: number;
+  users_deleted: number;
+  orders_deleted: number;
+  payments_deleted: number;
+  groups_deleted: number;
   retention_days?: number | null;
 }
 
