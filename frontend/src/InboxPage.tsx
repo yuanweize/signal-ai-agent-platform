@@ -215,16 +215,16 @@ export default function InboxPage() {
           <div className="p-4 border-b border-[var(--border)] space-y-3 bg-[rgba(255,255,255,0.01)]">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <h2 className="font-bold text-base text-[var(--text-primary)] tracking-wide">Conversations</h2>
+                <h2 className="font-bold text-sm text-[var(--text-primary)] tracking-wide">Conversations</h2>
                 {totalUnread > 0 && (
-                  <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-[rgba(108,92,231,0.3)] text-[#d9d2ff] border border-[rgba(108,92,231,0.5)]">
+                  <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-[rgba(108,92,231,0.3)] text-[#d9d2ff] border border-[rgba(108,92,231,0.5)]">
                     {totalUnread} new
                   </span>
                 )}
               </div>
               <button
                 type="button"
-                className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-white hover:bg-[rgba(255,255,255,0.06)] transition-all cursor-pointer"
+                className="w-7 h-7 flex items-center justify-center rounded-lg text-xs bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-muted)] hover:text-white hover:border-[rgba(255,255,255,0.2)] transition-all cursor-pointer"
                 onClick={() => fetchConversations()}
                 title="Refresh conversations"
               >
@@ -244,13 +244,13 @@ export default function InboxPage() {
             </div>
 
             {/* Filter Chips */}
-            <div className="flex items-center justify-between gap-1 text-xs">
-              <div className="flex items-center gap-1 p-0.5 bg-[var(--bg-input)] rounded-lg border border-[var(--border)]">
+            <div className="flex items-center justify-between gap-1 text-[11px]">
+              <div className="flex items-center gap-0.5 p-0.5 bg-[var(--bg-input)] rounded-lg border border-[var(--border)]">
                 {(['all', 'dm', 'group'] as const).map(t => (
                   <button
                     key={t}
                     type="button"
-                    className={`px-2.5 py-1 text-xs rounded-md font-medium transition-all ${
+                    className={`px-2 py-0.5 rounded-md font-medium transition-all cursor-pointer ${
                       typeFilter === t
                         ? 'bg-[var(--accent)] text-white shadow-sm'
                         : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
@@ -264,7 +264,7 @@ export default function InboxPage() {
 
               <button
                 type="button"
-                className={`px-2.5 py-1 text-xs rounded-md font-medium border transition-all ${
+                className={`px-2.5 py-0.5 rounded-md font-medium border transition-all cursor-pointer ${
                   unreadOnly
                     ? 'bg-[var(--accent)] border-transparent text-white shadow-sm'
                     : 'border-[var(--border)] text-[var(--text-secondary)] hover:text-white bg-[var(--bg-input)]'
@@ -602,7 +602,7 @@ export default function InboxPage() {
                   <div className="relative">
                     <textarea
                       rows={2}
-                      className="inbox-composer-textarea pr-24"
+                      className="inbox-composer-textarea pr-28"
                       placeholder="Type a manual reply... (Press Enter to send, Shift+Enter for newline)"
                       value={inputText}
                       onChange={e => setInputText(e.target.value)}
@@ -643,7 +643,7 @@ export default function InboxPage() {
                 <h3 className="font-bold text-base text-white">Conversation Details</h3>
                 <button
                   type="button"
-                  className="p-1 rounded text-[var(--text-muted)] hover:text-white hover:bg-[rgba(255,255,255,0.06)] cursor-pointer"
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-xs bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-muted)] hover:text-white hover:border-[rgba(255,255,255,0.2)] transition-all cursor-pointer"
                   onClick={() => setShowDrawer(false)}
                 >
                   ✕
