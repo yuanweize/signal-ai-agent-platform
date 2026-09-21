@@ -115,11 +115,25 @@ class SignalEnvelope(BaseModel):
         return self.source_name or self.sender_id
 
     @property
+    def has_reaction(self) -> bool:
+        """True if this envelope contains a reaction."""
+        return self.data_message is not None and self.data_message.reaction is not None
+
+    @property
+    def reaction(self) -> SignalReaction | None:
+        """Reaction object if present in data message."""
+        return self.data_message.reaction if self.data_message else None
+
+    @property
     def is_data_message(self) -> bool:
-        """True if this envelope contains a text message or attachments."""
+        """True if this envelope contains a text message, attachments, or a reaction."""
         if self.data_message is None:
             return False
-        return self.data_message.message is not None or self.data_message.has_attachments
+        return (
+            self.data_message.message is not None
+            or self.data_message.has_attachments
+            or self.data_message.reaction is not None
+        )
 
     @property
     def has_attachments(self) -> bool:
@@ -161,6 +175,26 @@ class SignalIncomingMessage(BaseModel):
     account: str = ""  # The bot's own number
 
     model_config = {"populate_by_name": True}
+
+    @property
+    def is_data_message(self) -> bool:
+        return self.envelope.is_data_message if self.envelope else False
+
+    @property
+    def has_reaction(self) -> bool:
+        return self.envelope.has_reaction if self.envelope else False
+
+    @property
+    def reaction(self):
+        return self.envelope.reaction if self.envelope else None
+
+    @property
+    def has_attachments(self) -> bool:
+        return self.envelope.has_attachments if self.envelope else False
+
+    @property
+    def sender_id(self) -> str:
+        return self.envelope.sender_id if self.envelope else ""
 
 
 # ============================================================

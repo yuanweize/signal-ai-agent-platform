@@ -11,6 +11,8 @@ When disabled, the bot still receives/logs messages but doesn't reply.
 from __future__ import annotations
 
 import logging
+import time
+from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import urlparse, urlunparse
 
@@ -326,6 +328,21 @@ async def verify_ai_model_availability(
     }
 
 
+@dataclass
+class AIResponse:
+    """Structured response from the AI generation call."""
+
+    text: str
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    model: str = ""
+    provider: str = "openai-compatible"
+    effective_base_url: str = ""
+    latency_ms: int = 0
+    finish_reason: str | None = None
+
+
 class AIEngine:
     """
     LLM-powered response generator with conversation memory.
@@ -391,7 +408,7 @@ class AIEngine:
         """Check if AI engine is active and ready."""
         return self._enabled and self._client is not None
 
-    async def generate_response(
+    async def generate_ai_response(
         self,
         session: AsyncSession,
         conversation: Conversation,
@@ -399,28 +416,15 @@ class AIEngine:
         group_id: str | None = None,
         sender_name: str | None = None,
         current_signal_timestamp_ms: int | None = None,
-    ) -> str | None:
+    ) -> AIResponse | None:
         """
-        Generate an AI response given a conversation and new user message.
-
-        Args:
-            session: DB session for loading context
-            conversation: Current conversation record
-            user_message: The new message from the user (current turn)
-            group_id: Group ID for per-group prompt override
-            sender_name: Display name of the sender (for group context)
-            current_signal_timestamp_ms: Signal timestamp of current message
-                (used to exclude it from history to avoid duplication)
-
-        Returns:
-            AI response text, or None if generation fails
+        Generate a structured AI response given a conversation and new user message.
         """
         runtime = await self._refresh_runtime_client(session)
         if not self.is_enabled:
             return None
 
-        tokens_used: int | None = None
-
+        start_time = time.perf_counter()
         try:
             # Build the message list for the API call
             messages = await self._build_messages(
@@ -435,25 +439,35 @@ class AIEngine:
 
             # Call the LLM
             response = await self._create_completion_with_adaptation(runtime, messages)
+            latency_ms = int((time.perf_counter() - start_time) * 1000)
 
-            # Extract response
             choice = response.choices[0]
             reply = choice.message.content
+            finish_reason = getattr(choice, "finish_reason", None)
 
-            # Track token usage — use local variable, NOT instance state
-            # (P1-13 fix: concurrent requests raced on self._last_tokens_used)
-            if response.usage:
-                tokens_used = response.usage.total_tokens
+            prompt_tokens = response.usage.prompt_tokens if response.usage else None
+            completion_tokens = response.usage.completion_tokens if response.usage else None
+            total_tokens = response.usage.total_tokens if response.usage else None
+
+            if total_tokens:
                 logger.debug(
-                    f"🔢 Tokens: {response.usage.prompt_tokens} prompt + "
-                    f"{response.usage.completion_tokens} completion = "
-                    f"{tokens_used} total"
+                    f"🔢 Tokens: {prompt_tokens} prompt + "
+                    f"{completion_tokens} completion = {total_tokens} total"
                 )
 
             if reply:
                 preview = reply[:80].replace("\n", " ")
-                logger.info(f"🤖 AI reply: {preview}...")
-                return reply.strip()
+                logger.info(f"🤖 AI reply ({latency_ms}ms): {preview}...")
+                return AIResponse(
+                    text=reply.strip(),
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                    model=runtime.get("ai_model", ""),
+                    effective_base_url=runtime.get("ai_api_base_url", ""),
+                    latency_ms=latency_ms,
+                    finish_reason=finish_reason,
+                )
             else:
                 logger.warning("⚠️  AI returned empty response")
                 return None
@@ -476,6 +490,26 @@ class AIEngine:
         except Exception as e:
             logger.error(f"❌ AI generation error: {e}", exc_info=True)
             return None
+
+    async def generate_response(
+        self,
+        session: AsyncSession,
+        conversation: Conversation,
+        user_message: str,
+        group_id: str | None = None,
+        sender_name: str | None = None,
+        current_signal_timestamp_ms: int | None = None,
+    ) -> str | None:
+        """Backward-compatible helper returning raw text."""
+        res = await self.generate_ai_response(
+            session=session,
+            conversation=conversation,
+            user_message=user_message,
+            group_id=group_id,
+            sender_name=sender_name,
+            current_signal_timestamp_ms=current_signal_timestamp_ms,
+        )
+        return res.text if res else None
 
     @property
     def last_tokens_used(self) -> int | None:

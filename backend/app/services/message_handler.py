@@ -2,24 +2,19 @@
 Message Handler — processes incoming Signal messages.
 
 Pipeline:
-1. Parse raw envelope → ParsedMessage
+1. Parse raw envelope -> ParsedMessage
 2. Check idempotency (same Signal event already processed? skip)
-3. Upsert User record (auto-create on first contact)
-4. Enforce block policy (blocked users: record metadata, suppress AI/reply)
-5. Upsert Group record (if group message)
-6. Find or create Conversation
-7. Store inbound Message in DB (idempotent)
-8. Route to AI engine or manual-mode suppression
-9. Write outbound Message as "pending", attempt gateway send, update status
-
-Key fixes vs. original:
-- P0-1: current user message is NOT appended to AI context again (AI builds context from DB only, excluding the just-saved message)
-- P0-2: outbound message written as "pending"; status updated to "sent" or "failed" after gateway call
-- P0-3: Conversation.mode is checked before AI fires — "manual" suppresses AI
-- P0-4: User.is_blocked is checked; blocked users get no AI reply
-- P0-5: group conversations no longer permanently attributed to first sender
-- P0-6: signal_event_id dedup prevents duplicate processing on reconnect
-- P1-14: group sender identity is included in AI context messages
+3. Upsert User record and UserIdentity
+4. Handle reaction-only events (persist MessageReaction, skip AI)
+5. Handle attachment events (persist Message and MessageAttachment rows)
+6. Enforce block policy (blocked users: record metadata, suppress AI/reply)
+7. Upsert Group record & GroupMember roster (if group message)
+8. Find or create Conversation (type="dm" | "group", no single user owner for group)
+9. Store inbound Message in DB (idempotent, sender_user_id mapped)
+10. Check conversation mode (auto | manual | paused)
+11. Generate AI reply (or fallback)
+12. Race check: re-verify conversation mode before sending reply; if admin took over, discard AI reply!
+13. Deliver outbound reply via OutboundMessageService (state machine: pending -> sent | failed)
 """
 
 from __future__ import annotations
@@ -35,23 +30,30 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import async_session
-from app.models.conversation import Conversation, ConversationMode, Message
-from app.models.group import Group
+from app.models.conversation import (
+    Conversation,
+    ConversationMode,
+    ConversationType,
+    Message,
+    MessageActor,
+    MessageAttachment,
+    MessageDeliveryStatus,
+    MessageDirection,
+    MessageReaction,
+)
+from app.models.group import Group, GroupMember
 from app.models.product import Product
-from app.models.user import User
+from app.models.user import User, UserIdentity
 from app.schemas.signal import ParsedMessage, SignalIncomingMessage
 from app.services.metrics import runtime_metrics
+from app.services.outbound_service import outbound_service
 from app.services.signal_client import signal_client
 
 logger = logging.getLogger("signal.handler")
 
 
 class MessageHandler:
-    """
-    Processes incoming Signal messages through the full pipeline.
-
-    Registered as the callback on SignalClient.on_message.
-    """
+    """Processes incoming Signal messages through the full pipeline."""
 
     def __init__(self) -> None:
         self._ai_engine = None
@@ -60,10 +62,12 @@ class MessageHandler:
         """Inject AI engine (called during startup)."""
         self._ai_engine = engine
 
+    async def handle_message(self, incoming: SignalIncomingMessage) -> None:
+        """Alias for handle."""
+        await self.handle(incoming)
+
     async def handle(self, incoming: SignalIncomingMessage) -> None:
-        """
-        Main entry point — called by SignalClient for each incoming message.
-        """
+        """Main entry point — called for each incoming message."""
         started = time.perf_counter()
         envelope = incoming.envelope
 
@@ -77,35 +81,96 @@ class MessageHandler:
             is_group=envelope.is_group_message,
         )
 
-        # Build idempotency key for this inbound event
-        # Format: "{sender_id}:{signal_timestamp_ms}"
         signal_event_id: str | None = None
         if parsed.sender_id and parsed.timestamp:
             signal_event_id = f"{parsed.sender_id}:{parsed.timestamp}"
 
-        # Handle attachment-only messages (no text)
-        if not parsed.text.strip() and envelope.has_attachments:
-            logger.info(
-                f"📎 Attachment-only message from {parsed.sender_id} — "
-                f"recording metadata and sending notice"
-            )
+        # -------------------------------------------------------------
+        # Handle Reaction-only events (Section 17)
+        # -------------------------------------------------------------
+        if envelope.has_reaction and not parsed.text.strip():
+            reaction = envelope.data_message.reaction  # type: ignore
+            logger.info(f"👍 Reaction received: {reaction.emoji} from {parsed.sender_id}")
             async with async_session() as session:
                 try:
                     user = await self._upsert_user(session, parsed)
+                    if parsed.is_group and parsed.group_id:
+                        await self._upsert_group_and_member(session, parsed, user)
+                    conversation = await self._get_or_create_conversation(session, user, parsed)
+
+                    # Resolve target message by target timestamp
+                    target_q = select(Message).where(Message.conversation_id == conversation.id)
+                    if reaction.target_timestamp:
+                        target_q = target_q.where(
+                            Message.signal_timestamp_ms == reaction.target_timestamp
+                        )
+                    target_res = await session.execute(
+                        target_q.order_by(Message.timestamp.desc()).limit(1)
+                    )
+                    target_msg = target_res.scalar_one_or_none()
+
+                    if target_msg:
+                        rx = MessageReaction(
+                            message_id=target_msg.id,
+                            emoji=reaction.emoji,
+                            reactor_identity=parsed.sender_id,
+                            reactor_user_id=user.id,
+                            target_author=reaction.target_author,
+                            target_timestamp=reaction.target_timestamp,
+                            is_removed=reaction.is_remove,
+                            occurred_at=datetime.fromtimestamp(parsed.timestamp / 1000)
+                            if parsed.timestamp
+                            else datetime.utcnow(),
+                        )
+                        session.add(rx)
+                        await session.commit()
+                        logger.info(
+                            f"✅ Reaction {reaction.emoji} saved for message #{target_msg.id}"
+                        )
+                except Exception as e:
+                    logger.error(f"❌ Error recording reaction: {e}", exc_info=True)
+                    await session.rollback()
+            return
+
+        # -------------------------------------------------------------
+        # Handle Attachment-only messages (Section 18)
+        # -------------------------------------------------------------
+        if not parsed.text.strip() and envelope.has_attachments:
+            logger.info(f"📎 Attachment-only message from {parsed.sender_id}")
+            async with async_session() as session:
+                try:
+                    user = await self._upsert_user(session, parsed)
+                    if parsed.is_group and parsed.group_id:
+                        await self._upsert_group_and_member(session, parsed, user)
+                    conversation = await self._get_or_create_conversation(session, user, parsed)
+
                     if user.is_blocked:
                         logger.info(
-                            f"🚫 Blocked user {parsed.sender_id} sent attachment — suppressing"
+                            f"🚫 Blocked user {parsed.sender_id} sent attachment — recording only"
                         )
+                        msg = await self._store_inbound_message(
+                            session,
+                            conversation,
+                            parsed,
+                            user=user,
+                            content="[attachment]",
+                            signal_event_id=signal_event_id,
+                        )
+                        self._store_attachments(session, msg, envelope)
+                        await session.commit()
                         return
-                    conversation = await self._get_or_create_conversation(session, user, parsed)
-                    # Record the attachment event even if we can't process the content
-                    await self._store_inbound_message(
+
+                    msg = await self._store_inbound_message(
                         session,
                         conversation,
                         parsed,
+                        user=user,
                         content="[attachment]",
                         signal_event_id=signal_event_id,
                     )
+                    self._store_attachments(session, msg, envelope)
+                    conversation.message_count += 1
+                    conversation.last_message_at = datetime.utcnow()
                     await session.commit()
                 except IntegrityError:
                     logger.debug(f"Duplicate attachment event suppressed: {signal_event_id}")
@@ -114,71 +179,64 @@ class MessageHandler:
                 except Exception as e:
                     logger.error(f"❌ Error recording attachment: {e}", exc_info=True)
                     await session.rollback()
+                    return
 
-            await signal_client.send_reply(
-                text="📎 Děkujeme za soubor. Přílohy zatím nepodporujeme. "
-                "Napište prosím textovou zprávu.\n"
-                "(Thank you for the file. Attachments are not yet supported. "
-                "Please send a text message.)",
-                recipient=parsed.reply_recipient,
-            )
+                # Send helpful notice if in auto mode
+                if conversation.mode == ConversationMode.auto.value:
+                    await outbound_service.send_message(
+                        session=session,
+                        conversation_id=conversation.id,
+                        content="📎 Děkujeme za soubor. Přílohy zatím nepodporujeme. Napište prosím textovou zprávu.\n(Thank you for the file. Attachments are not yet supported. Please send a text message.)",
+                        recipient=parsed.reply_recipient,
+                        actor=MessageActor.bot.value,
+                    )
             return
 
         if not parsed.text.strip():
             logger.debug(f"Skipping empty message from {parsed.sender_id}")
             return
 
-        # Process through the pipeline
+        # -------------------------------------------------------------
+        # Full Text / Inbound Pipeline
+        # -------------------------------------------------------------
         async with async_session() as session:
             try:
-                # Step 1: Upsert user
+                # 1. Upsert User and Identity
                 user = await self._upsert_user(session, parsed)
 
-                # Step 2: Enforce block policy
-                if user.is_blocked:
-                    logger.info(
-                        f"🚫 Blocked user {parsed.sender_id} — "
-                        f"recording message, suppressing AI and outbound reply"
-                    )
-                    # Still record the inbound message for audit purposes
-                    conversation = await self._get_or_create_conversation(session, user, parsed)
-                    await self._store_inbound_message(
-                        session,
-                        conversation,
-                        parsed,
-                        signal_event_id=signal_event_id,
-                    )
-                    await session.commit()
-                    # Send read receipt for DMs (even for blocked users — we did receive it)
-                    if not parsed.is_group and parsed.timestamp:
-                        asyncio.create_task(
-                            signal_client.send_read_receipt(
-                                recipient=parsed.sender_id,
-                                timestamp=parsed.timestamp,
-                            )
-                        )
-                    return
-
-                # Step 3: Upsert group (if applicable)
+                # 2. Upsert Group & Membership
                 group = None
                 if parsed.is_group and parsed.group_id:
-                    group = await self._upsert_group(session, parsed)
+                    group, _ = await self._upsert_group_and_member(session, parsed, user)
 
-                # Step 4: Find or create conversation
+                # 3. Find or create Conversation
                 conversation = await self._get_or_create_conversation(session, user, parsed)
 
-                # Step 5: Store the inbound message (idempotent via signal_event_id)
-                try:
-                    await self._store_inbound_message(
-                        session,
-                        conversation,
-                        parsed,
-                        signal_event_id=signal_event_id,
+                # 4. Check Block Policy
+                if user.is_blocked:
+                    logger.info(
+                        f"🚫 Blocked user {parsed.sender_id} — recording message, suppressing AI"
                     )
+                    await self._store_inbound_message(
+                        session, conversation, parsed, user=user, signal_event_id=signal_event_id
+                    )
+                    await session.commit()
+                    return
+
+                # 5. Store inbound message
+                try:
+                    inbound_msg = await self._store_inbound_message(
+                        session, conversation, parsed, user=user, signal_event_id=signal_event_id
+                    )
+                    if envelope.has_attachments:
+                        self._store_attachments(session, inbound_msg, envelope)
+
                     conversation.message_count += 1
-                    conversation.updated_at = datetime.now()
+                    conversation.last_message_at = datetime.utcnow()
+                    conversation.updated_at = datetime.utcnow()
                     if group:
                         group.total_messages += 1
+                        group.last_activity = datetime.utcnow()
                     await session.commit()
                 except IntegrityError:
                     logger.debug(f"Duplicate inbound event suppressed: {signal_event_id}")
@@ -195,32 +253,43 @@ class MessageHandler:
                         )
                     )
 
-                # Step 6: Check conversation mode before attempting AI reply
+                # 6. Check conversation mode
                 if conversation.mode == ConversationMode.manual.value:
                     logger.info(
-                        f"✋ Conversation #{conversation.id} in manual mode — "
-                        f"AI suppressed for message from {parsed.sender_id}"
+                        f"✋ Conversation #{conversation.id} in manual mode — AI suppressed"
                     )
                     return
 
                 if conversation.mode == ConversationMode.paused.value:
+                    logger.info(f"⏸ Conversation #{conversation.id} paused — auto-reply suppressed")
+                    return
+
+                # 7. Generate Reply
+                asyncio.create_task(signal_client.show_typing(parsed.reply_recipient))
+                reply_text = await self._generate_reply(session, conversation, parsed)
+                asyncio.create_task(signal_client.hide_typing(parsed.reply_recipient))
+
+                if not reply_text:
+                    return
+
+                # 8. RACE CONDITION CHECK (Section 25)
+                # Re-query authoritative conversation mode before sending in case admin switched to manual mid-generation!
+                await session.refresh(conversation)
+                if conversation.mode != ConversationMode.auto.value:
                     logger.info(
-                        f"⏸  Conversation #{conversation.id} paused — "
-                        f"no auto-reply for message from {parsed.sender_id}"
+                        f"✋ Admin switched conversation #{conversation.id} to mode '{conversation.mode}' "
+                        f"during AI generation — discarding outbound reply!"
                     )
                     return
 
-                # Step 7: Generate reply (mode == "auto")
-                asyncio.create_task(signal_client.show_typing(parsed.reply_recipient))
-
-                reply_text = await self._generate_reply(session, conversation, parsed)
-
-                asyncio.create_task(signal_client.hide_typing(parsed.reply_recipient))
-
-                if reply_text:
-                    await self._send_outbound_reply(
-                        session, conversation, reply_text, parsed.reply_recipient
-                    )
+                # 9. Deliver Outbound Reply via OutboundMessageService
+                await outbound_service.send_message(
+                    session=session,
+                    conversation_id=conversation.id,
+                    content=reply_text,
+                    recipient=parsed.reply_recipient,
+                    actor=MessageActor.bot.value,
+                )
 
             except Exception as e:
                 logger.error(f"❌ Pipeline error: {e}", exc_info=True)
@@ -231,12 +300,26 @@ class MessageHandler:
                     time.perf_counter() - started,
                 )
 
+    def _store_attachments(self, session: AsyncSession, message: Message, envelope) -> None:
+        if not envelope.data_message or not envelope.data_message.attachments:
+            return
+        for att in envelope.data_message.attachments:
+            att_rec = MessageAttachment(
+                message_id=message.id,
+                external_attachment_id=att.id,
+                filename=att.filename or f"attachment_{att.id}",
+                mime_type=att.content_type,
+                size=att.size,
+            )
+            session.add(att_rec)
+
     async def _store_inbound_message(
         self,
         session: AsyncSession,
         conversation: Conversation,
         parsed: ParsedMessage,
         *,
+        user: User | None = None,
         content: str | None = None,
         signal_event_id: str | None = None,
     ) -> Message:
@@ -244,109 +327,110 @@ class MessageHandler:
         msg = Message(
             conversation_id=conversation.id,
             role="user",
+            direction=MessageDirection.inbound.value,
+            actor=MessageActor.customer.value,
             content=content or parsed.text,
             sender_id=parsed.sender_id,
+            sender_user_id=user.id if user else None,
             sender_name=parsed.sender_name,
             signal_timestamp_ms=parsed.timestamp or None,
             signal_event_id=signal_event_id,
-            delivery_status=None,  # inbound messages have no outbound status
-            timestamp=datetime.fromtimestamp(parsed.timestamp / 1000)
+            delivery_status=None,
+            occurred_at=datetime.fromtimestamp(parsed.timestamp / 1000)
             if parsed.timestamp
-            else datetime.now(),
+            else datetime.utcnow(),
+            timestamp=datetime.utcnow(),
         )
         session.add(msg)
         await session.flush()
         return msg
 
-    async def _send_outbound_reply(
-        self,
-        session: AsyncSession,
-        conversation: Conversation,
-        text: str,
-        recipient: str,
-    ) -> None:
-        """
-        Write outbound message as 'pending', attempt send, update status.
-
-        This is the correct state machine:
-          pending → sent  (gateway returned success)
-          pending → failed (gateway returned error)
-
-        The DB record is written first with status=pending, then updated.
-        This ensures we never show a message as "sent" if the gateway failed.
-        """
-        # Write pending record
-        bot_message = Message(
-            conversation_id=conversation.id,
-            role="assistant",
-            content=text,
-            sender_id="bot",
-            sender_name="Bot",
-            delivery_status="pending",
-            timestamp=datetime.now(),
-        )
-        session.add(bot_message)
-        conversation.message_count += 1
-        await session.commit()
-
-        # Attempt gateway send
-        try:
-            ok = await signal_client.send_reply(text=text, recipient=recipient)
-        except Exception as e:
-            ok = False
-            logger.error(f"❌ Gateway send exception: {e}")
-
-        # Update status based on result
-        if ok:
-            bot_message.delivery_status = "sent"
-            logger.info(f"✅ Outbound message #{bot_message.id} sent successfully")
-        else:
-            bot_message.delivery_status = "failed"
-            bot_message.delivery_error = "gateway_send_failed"
-            logger.warning(f"⚠️  Outbound message #{bot_message.id} failed to send")
-            runtime_metrics.inc("message.outbound.failed")
-
-        await session.commit()
-
     async def _upsert_user(self, session: AsyncSession, parsed: ParsedMessage) -> User:
-        """Find existing user or create new one on first contact."""
+        """Find existing user by phone/UUID/alias, or create new one with identity."""
+        # 1. Lookup by signal_id
         result = await session.execute(select(User).where(User.signal_id == parsed.sender_id))
         user = result.scalar_one_or_none()
 
         if user is None:
+            # 2. Check UserIdentity table
+            id_res = await session.execute(
+                select(UserIdentity).where(UserIdentity.identity_value == parsed.sender_id)
+            )
+            ui = id_res.scalar_one_or_none()
+            if ui:
+                user = await session.get(User, ui.user_id)
+
+        if user is None:
+            is_phone = parsed.sender_id.startswith("+")
             user = User(
                 signal_id=parsed.sender_id,
+                phone_number=parsed.sender_id if is_phone else None,
+                signal_uuid=parsed.sender_id if not is_phone else None,
                 display_name=parsed.sender_name,
                 language=settings.bot_default_language,
             )
             session.add(user)
             await session.flush()
+
+            identity = UserIdentity(
+                user_id=user.id,
+                identity_type="phone" if is_phone else "uuid",
+                identity_value=parsed.sender_id,
+            )
+            session.add(identity)
+            await session.flush()
             logger.info(f"👤 New user created: {parsed.sender_name} ({parsed.sender_id})")
         else:
-            user.last_seen = datetime.now()
+            user.last_seen = datetime.utcnow()
             if parsed.sender_name and parsed.sender_name != user.display_name:
                 user.display_name = parsed.sender_name
 
         return user
 
-    async def _upsert_group(self, session: AsyncSession, parsed: ParsedMessage) -> Group:
-        """Find existing group or register it on first encounter."""
-        result = await session.execute(select(Group).where(Group.group_id == parsed.group_id))
-        group = result.scalar_one_or_none()
-
+    async def _upsert_group_and_member(
+        self, session: AsyncSession, parsed: ParsedMessage, user: User
+    ) -> tuple[Group, GroupMember]:
+        """Find or register Group and update GroupMember roster."""
+        res_g = await session.execute(select(Group).where(Group.group_id == parsed.group_id))
+        group = res_g.scalar_one_or_none()
         if group is None:
             group = Group(
                 group_id=parsed.group_id,
                 name=f"Group {parsed.group_id[:8]}...",
                 is_active=True,
+                sync_status="not_synced",
             )
             session.add(group)
             await session.flush()
             logger.info(f"👥 New group registered: {group.group_id}")
         else:
-            group.last_activity = datetime.now()
+            group.last_activity = datetime.utcnow()
 
-        return group
+        # Update or create GroupMember
+        res_m = await session.execute(
+            select(GroupMember).where(
+                GroupMember.group_id == group.id,
+                GroupMember.external_identifier == parsed.sender_id,
+            )
+        )
+        member = res_m.scalar_one_or_none()
+        if member is None:
+            member = GroupMember(
+                group_id=group.id,
+                user_id=user.id,
+                external_identifier=parsed.sender_id,
+                is_admin=False,
+                role="member",
+                last_seen_at=datetime.utcnow(),
+            )
+            session.add(member)
+            await session.flush()
+        else:
+            member.last_seen_at = datetime.utcnow()
+            if member.user_id is None and user.id:
+                member.user_id = user.id
+
+        return group, member
 
     async def _get_or_create_conversation(
         self,
@@ -354,21 +438,15 @@ class MessageHandler:
         user: User,
         parsed: ParsedMessage,
     ) -> Conversation:
-        """
-        Find an active conversation for this context, or start a new one.
-
-        For group conversations: lookup is by group_id only.
-        For DM conversations: lookup is by user_id (not signal_id, which can change).
-        """
+        """Find active conversation or create one (type='dm' or 'group')."""
         query = select(Conversation).where(Conversation.is_active == True)  # noqa: E712
 
         if parsed.is_group:
-            # Group conversations are identified by group_id — NOT by user
             query = query.where(Conversation.group_id == parsed.group_id)
         else:
-            # DM conversations are identified by the user record
-            query = (
-                query.where(Conversation.user_id == user.id).where(Conversation.group_id == None)  # noqa: E711
+            query = query.where(
+                (Conversation.dm_user_id == user.id)
+                | ((Conversation.user_id == user.id) & (Conversation.group_id == None))  # noqa: E711
             )
 
         query = query.order_by(Conversation.updated_at.desc()).limit(1)
@@ -377,18 +455,19 @@ class MessageHandler:
 
         if conversation is None:
             conversation = Conversation(
-                # For group conversations, user_id is NOT the definitive owner
-                # It's the first sender, kept for legacy DB compat only
-                user_id=user.id if not parsed.is_group else None,
-                signal_id=parsed.sender_id,
-                group_id=parsed.group_id,
+                type=ConversationType.group.value if parsed.is_group else ConversationType.dm.value,
+                user_id=None if parsed.is_group else user.id,
+                dm_user_id=None if parsed.is_group else user.id,
+                signal_id=f"group.{parsed.group_id}" if parsed.is_group else user.signal_id,
+                group_id=parsed.group_id if parsed.is_group else None,
                 mode=ConversationMode.auto.value,
+                message_count=0,
                 is_active=True,
             )
             session.add(conversation)
             await session.flush()
-            logger.debug(
-                f"💬 New conversation #{conversation.id} ({'group' if parsed.is_group else 'DM'})"
+            logger.info(
+                f"💬 New conversation #{conversation.id} created (type={conversation.type})"
             )
 
         return conversation
@@ -399,23 +478,9 @@ class MessageHandler:
         conversation: Conversation,
         parsed: ParsedMessage,
     ) -> str | None:
-        """
-        Generate a reply based on available modules.
-
-        Priority:
-        1. AI engine (if enabled and configured)
-        2. Fallback menu/auto-reply (when AI is disabled)
-        """
+        """Generate a reply via AI engine or fallback catalog."""
         if self._ai_engine is not None:
             try:
-                # P0-1 FIX: pass parsed.text to AI engine.
-                # The AI engine's _build_messages must NOT append user_message
-                # at the end if it's already in the loaded context history.
-                # See AIEngine._build_messages — history loads messages already committed,
-                # then we pass user_message as the current turn. The inbound message
-                # was committed BEFORE this call, so it IS in the DB history.
-                # AIEngine._load_context_messages must exclude the very last message
-                # (the one we just committed) to avoid duplication.
                 reply = await self._ai_engine.generate_response(
                     session=session,
                     conversation=conversation,
@@ -429,7 +494,7 @@ class MessageHandler:
             except Exception as e:
                 logger.error(f"❌ AI engine error: {e}", exc_info=True)
 
-        # Fallback: basic command handling when AI is disabled
+        # Fallback command handling
         text_lower = parsed.text.lower().strip()
         keywords = [
             "menu",
@@ -442,14 +507,9 @@ class MessageHandler:
             "/menu",
             "/start",
         ]
-
         if any(text_lower == k for k in keywords) or any(k in text_lower.split() for k in keywords):
             return await self._generate_fallback_menu(session)
 
-        logger.info(
-            f"📝 [Fallback] Message from {parsed.sender_name} stored "
-            f"(AI module disabled). Sending availability notice."
-        )
         return (
             "✅ Zpráva dorazila. AI asistent je momentálně vypnutý.\n"
             "Napište prosím *menu* pro zobrazení nabídky, nebo vyčkejte na manuální odpověď."
@@ -457,9 +517,7 @@ class MessageHandler:
 
     async def _generate_fallback_menu(self, session: AsyncSession) -> str:
         """Generate a simple text menu of active products when AI is disabled."""
-        result = await session.execute(
-            select(Product).where(Product.is_active == True)  # noqa: E712
-        )
+        result = await session.execute(select(Product).where(Product.is_active == True))  # noqa: E712
         products = result.scalars().all()
 
         if not products:
@@ -475,6 +533,51 @@ class MessageHandler:
         lines.append("🤖 AI asistent je momentálně vypnutý. Majitel vám brzy odpoví osobně.")
         return "\n".join(lines)
 
+    async def _send_outbound_reply(
+        self,
+        session: AsyncSession,
+        conversation: Conversation,
+        reply_text: str,
+        recipient: str,
+        reply_to_id: int | None = None,
+        tokens_used: int | None = None,
+    ) -> Message | None:
+        """Send outbound reply with state transitions (pending -> sent/failed)."""
+        msg = Message(
+            conversation_id=conversation.id,
+            role="assistant",
+            direction=MessageDirection.outbound.value,
+            actor=MessageActor.bot.value,
+            sender_id=settings.signal_phone_number or "bot",
+            content=reply_text,
+            tokens_used=tokens_used,
+            reply_to_id=reply_to_id,
+            delivery_status=MessageDeliveryStatus.pending.value,
+            delivery_error=None,
+        )
+        session.add(msg)
+        await session.flush()
 
-# ---- Singleton instance ----
+        conversation.message_count = (conversation.message_count or 0) + 1
+        conversation.last_message_at = datetime.utcnow()
+
+        success = False
+        try:
+            success = await signal_client.send_reply(recipient, reply_text)
+        except Exception as e:
+            logger.error(f"❌ Error sending reply: {e}", exc_info=True)
+            success = False
+
+        if success:
+            msg.delivery_status = MessageDeliveryStatus.sent.value
+            msg.delivery_error = None
+        else:
+            msg.delivery_status = MessageDeliveryStatus.failed.value
+            msg.delivery_error = "gateway_send_failed"
+
+        await session.commit()
+        return msg
+
+
+# Singleton instance
 message_handler = MessageHandler()

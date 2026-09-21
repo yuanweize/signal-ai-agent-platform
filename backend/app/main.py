@@ -9,7 +9,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
@@ -73,9 +73,12 @@ async def lifespan(app: FastAPI):
 
     # Wire up Signal message pipeline
     from app.services.ai_engine import ai_engine
+    from app.services.event_pipeline import event_pipeline
     from app.services.message_handler import message_handler
 
-    signal_client.on_message = message_handler.handle
+    event_pipeline.set_handler(message_handler.handle)
+    await event_pipeline.start()
+    signal_client.on_message = event_pipeline.enqueue
 
     # Start Signal listener (runs in background)
     if settings.signal_api_url and settings.signal_phone_number:
@@ -100,6 +103,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("🛑 Shutting down...")
     await signal_client.stop()
+    await event_pipeline.stop()
     await close_db()
     logger.info("✅ All services stopped")
 
@@ -149,15 +153,68 @@ app.add_middleware(
 )
 
 
-# ---- Health Check ----
+# ---- Health Checks ----
+@app.get("/health/live", tags=["System"])
+async def health_live():
+    """Liveness probe — verifies the process is alive."""
+    return {"status": "alive"}
+
+
+@app.get("/health/ready", tags=["System"])
+async def health_ready(response: Response):
+    """
+    Readiness probe — verifies DB connectivity and that schema migrations are applied.
+    Returns HTTP 503 if the database or required schema is not ready.
+    """
+    from sqlalchemy import text
+
+    from app.services.event_pipeline import event_pipeline
+
+    db_ok = False
+    migration_ok = False
+    error_detail = None
+
+    try:
+        async with async_session() as session:
+            await session.execute(text("SELECT 1"))
+            db_ok = True
+            try:
+                result = await session.execute(
+                    text("SELECT version_num FROM alembic_version LIMIT 1")
+                )
+                row = result.scalar_one_or_none()
+                # Must be at head
+                if row and row == "c8927140f12a":
+                    migration_ok = True
+                else:
+                    error_detail = f"Migration not at head: {row}"
+            except Exception as e:
+                error_detail = f"Migration table missing or error: {e}"
+    except Exception as e:
+        error_detail = f"DB connection error: {e}"
+
+    if not db_ok or not migration_ok:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {
+            "status": "not_ready",
+            "db": db_ok,
+            "migration_at_head": migration_ok,
+            "error": error_detail,
+        }
+
+    return {
+        "status": "ready",
+        "db": True,
+        "migration_at_head": True,
+        "pipeline_running": event_pipeline.is_running,
+    }
+
+
 @app.get("/health", tags=["System"])
 async def health_check():
-    """Health check with real subsystem status.
+    """Full health check endpoint including DB, migrations, runtime features, and queue metrics."""
+    from app.services.event_pipeline import event_pipeline
 
-    /health returns actual DB and configuration state.
-    A DB failure will reflect in the response but HTTP 200 is still returned
-    so load balancers remain happy. Use the `status` field for alerting.
-    """
     bot_name = settings.bot_name
     db_ok = False
     migration_ok = False
@@ -166,19 +223,17 @@ async def health_check():
 
     try:
         async with async_session() as session:
-            # DB liveness: simple count query
             from sqlalchemy import text
 
             await session.execute(text("SELECT 1"))
             db_ok = True
 
-            # Migration state check
             try:
                 result = await session.execute(
                     text("SELECT version_num FROM alembic_version LIMIT 1")
                 )
                 row = result.scalar_one_or_none()
-                migration_ok = row is not None
+                migration_ok = row == "c8927140f12a"
             except Exception:
                 migration_ok = False
 
@@ -211,7 +266,7 @@ async def health_check():
             "bootstrap_complete": False,
         }
 
-    overall_status = "ok" if db_ok else "degraded"
+    overall_status = "ok" if (db_ok and migration_ok) else "degraded"
 
     return {
         "status": overall_status,
@@ -220,6 +275,13 @@ async def health_check():
         "db": db_ok,
         "migration_applied": migration_ok,
         "features": runtime_features,
+        "queue": {
+            "depth": event_pipeline.queue_depth,
+            "received": event_pipeline.metrics.events_received,
+            "processed": event_pipeline.metrics.events_processed,
+            "dropped": event_pipeline.metrics.events_dropped,
+            "errors": event_pipeline.metrics.worker_errors,
+        },
     }
 
 
