@@ -206,11 +206,11 @@ export default function InboxPage() {
 
   return (
     <SidebarLayout title="Inbox">
-      <div className="flex h-[calc(100vh-8rem)] bg-base-100 rounded-xl shadow-md border border-base-200 overflow-hidden">
+      <div className="relative flex h-[calc(100vh-8rem)] bg-base-100 rounded-xl shadow-md border border-base-200 overflow-hidden">
         {/* ============================================================== */}
         {/* LEFT COLUMN: Conversation List & Filters                      */}
         {/* ============================================================== */}
-        <aside className="w-80 sm:w-96 border-r border-base-200 flex flex-col bg-base-50">
+        <aside className={`${activeConvId ? 'hidden md:flex' : 'flex'} w-full md:w-80 lg:w-96 border-r border-base-200 flex-col bg-base-50 shrink-0`}>
           {/* Header & Search */}
           <div className="p-4 border-b border-base-200 space-y-3">
             <div className="flex items-center justify-between">
@@ -376,7 +376,7 @@ export default function InboxPage() {
         {/* ============================================================== */}
         {/* RIGHT COLUMN: Active Chat Timeline & Composer                 */}
         {/* ============================================================== */}
-        <section className="flex-1 flex flex-col bg-base-100 min-w-0">
+        <section className={`${activeConvId ? 'flex' : 'hidden md:flex'} flex-1 flex-col bg-base-100 min-w-0`}>
           {activeConvId === null || activeConv === null ? (
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-base-content/40">
               <span className="text-6xl mb-4">💬</span>
@@ -388,9 +388,20 @@ export default function InboxPage() {
           ) : (
             <>
               {/* Chat Header */}
-              <div className="px-6 py-3.5 border-b border-base-200 flex items-center justify-between bg-base-100 shadow-xs z-10">
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className="text-2xl">{activeConv.type === 'group' ? '👥' : '👤'}</span>
+              <div className="px-3 sm:px-6 py-3.5 border-b border-base-200 flex items-center justify-between bg-base-100 shadow-xs z-10">
+                <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-xs md:hidden mr-0.5 px-1.5"
+                    onClick={() => {
+                      setActiveConvId(null);
+                      setActiveConv(null);
+                    }}
+                    title="Back to conversations"
+                  >
+                    ←
+                  </button>
+                  <span className="text-2xl shrink-0">{activeConv.type === 'group' ? '👥' : '👤'}</span>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <h3 className="font-bold text-base text-base-content truncate">
@@ -601,7 +612,7 @@ export default function InboxPage() {
                       </Button>
                     </div>
                   </div>
-                  <div className="flex justify-between items-center text-[11px] text-base-content/50 px-1">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1 text-[11px] text-base-content/50 px-1">
                     <span>
                       Mode: <strong className="uppercase">{activeConv.mode}</strong> (Manual replies will be logged as Admin)
                     </span>
@@ -617,7 +628,7 @@ export default function InboxPage() {
         {/* RIGHT DRAWER: Conversation Details                             */}
         {/* ============================================================== */}
         {showDrawer && activeConv && (
-          <aside className="w-80 border-l border-base-200 bg-base-50 p-6 flex flex-col justify-between overflow-y-auto">
+          <aside className="absolute inset-y-0 right-0 z-30 w-full sm:w-80 border-l border-base-200 bg-base-50 p-6 flex flex-col justify-between overflow-y-auto shadow-2xl md:static md:shadow-none">
             <div className="space-y-6">
               <div className="flex items-center justify-between border-b border-base-200 pb-3">
                 <h3 className="font-bold text-base">Conversation Details</h3>
