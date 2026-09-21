@@ -303,14 +303,16 @@ export default function SettingsPage() {
     <SidebarLayout title="Settings">
       <div className="max-w-5xl mx-auto space-y-6">
         {/* Navigation Tabs */}
-        <div role="tablist" className="tabs tabs-bordered bg-base-100 p-2 rounded-box shadow-sm flex flex-wrap gap-1">
+        <div role="tablist" className="bg-[var(--bg-card)] p-1.5 rounded-xl border border-[var(--border)] shadow-[var(--shadow)] flex flex-wrap gap-1.5">
           {tabs.map(t => (
             <button
               key={t.id}
               role="tab"
               type="button"
-              className={`tab text-xs md:text-sm font-medium transition-all ${
-                activeTab === t.id ? 'tab-active font-bold text-primary border-b-2 border-primary' : 'text-base-content/70 hover:text-base-content'
+              className={`px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all cursor-pointer flex items-center ${
+                activeTab === t.id
+                  ? 'bg-[rgba(108,92,231,0.22)] text-white border border-[rgba(108,92,231,0.45)] shadow-[0_2px_10px_rgba(108,92,231,0.15)] font-semibold'
+                  : 'text-[var(--text-secondary)] hover:text-white hover:bg-[rgba(255,255,255,0.04)] border border-transparent'
               }`}
               onClick={() => setActiveTab(t.id)}
             >
@@ -321,13 +323,15 @@ export default function SettingsPage() {
         </div>
 
         {error && (
-          <div className="alert alert-error text-xs shadow-sm">
+          <div className="bg-[rgba(255,107,107,0.12)] border border-[rgba(255,107,107,0.3)] text-[var(--danger)] px-4 py-3 rounded-xl text-xs flex items-center justify-between">
             <span>{error}</span>
+            <button type="button" onClick={() => setError(null)} className="font-bold hover:opacity-80 cursor-pointer">✕</button>
           </div>
         )}
         {saved && (
-          <div className="alert alert-success text-xs shadow-sm">
+          <div className="bg-[rgba(0,214,143,0.12)] border border-[rgba(0,214,143,0.3)] text-[var(--success)] px-4 py-3 rounded-xl text-xs flex items-center justify-between">
             <span>Settings saved successfully!</span>
+            <button type="button" onClick={() => setSaved(false)} className="font-bold hover:opacity-80 cursor-pointer">✕</button>
           </div>
         )}
 

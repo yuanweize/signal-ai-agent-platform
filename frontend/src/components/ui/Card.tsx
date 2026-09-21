@@ -19,17 +19,17 @@ export const Card: React.FC<CardProps> = ({
 }) => {
   const rightAction = headerAction || action;
   return (
-    <div className={`card bg-base-100 shadow-sm border border-base-200 ${className}`}>
+    <div className={`rounded-xl bg-[var(--bg-card)] border border-[var(--border)] shadow-[var(--shadow)] overflow-hidden transition-all ${className}`}>
       {(title || rightAction) && (
-        <div className="card-body pb-2 pt-4 px-5 flex flex-row items-center justify-between border-b border-base-200">
+        <div className="px-5 py-4 flex flex-row items-center justify-between border-b border-[var(--border)] bg-[rgba(255,255,255,0.01)]">
           <div>
-            {title && <h3 className="card-title text-base font-semibold">{title}</h3>}
-            {subtitle && <p className="text-xs text-base-content/60 mt-0.5">{subtitle}</p>}
+            {title && <h3 className="text-base font-semibold text-[var(--text-primary)] tracking-wide">{title}</h3>}
+            {subtitle && <p className="text-xs text-[var(--text-secondary)] mt-0.5">{subtitle}</p>}
           </div>
           {rightAction && <div>{rightAction}</div>}
         </div>
       )}
-      <div className="card-body p-5">{children}</div>
+      <div className="p-5">{children}</div>
     </div>
   );
 };

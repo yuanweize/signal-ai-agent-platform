@@ -206,25 +206,25 @@ export default function InboxPage() {
 
   return (
     <SidebarLayout title="Inbox">
-      <div className="relative flex h-[calc(100vh-8rem)] bg-base-100 rounded-xl shadow-md border border-base-200 overflow-hidden">
+      <div className="inbox-shell">
         {/* ============================================================== */}
         {/* LEFT COLUMN: Conversation List & Filters                      */}
         {/* ============================================================== */}
-        <aside className={`${activeConvId ? 'hidden md:flex' : 'flex'} w-full md:w-80 lg:w-96 border-r border-base-200 flex-col bg-base-50 shrink-0`}>
+        <aside className={`${activeConvId ? 'hidden md:flex' : 'flex'} inbox-sidebar`}>
           {/* Header & Search */}
-          <div className="p-4 border-b border-base-200 space-y-3">
+          <div className="p-4 border-b border-[var(--border)] space-y-3 bg-[rgba(255,255,255,0.01)]">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <h2 className="font-bold text-lg text-base-content">Conversations</h2>
+                <h2 className="font-bold text-base text-[var(--text-primary)] tracking-wide">Conversations</h2>
                 {totalUnread > 0 && (
-                  <span className="badge badge-primary badge-sm text-white font-bold">
+                  <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-[rgba(108,92,231,0.3)] text-[#d9d2ff] border border-[rgba(108,92,231,0.5)]">
                     {totalUnread} new
                   </span>
                 )}
               </div>
               <button
                 type="button"
-                className="btn btn-ghost btn-xs text-base-content/60"
+                className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-white hover:bg-[rgba(255,255,255,0.06)] transition-all cursor-pointer"
                 onClick={() => fetchConversations()}
                 title="Refresh conversations"
               >
@@ -232,43 +232,43 @@ export default function InboxPage() {
               </button>
             </div>
 
-            <input
-              type="text"
-              placeholder="Search conversations..."
-              className="input input-bordered input-sm w-full bg-base-100 text-sm"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
+            <div className="inbox-search-wrap">
+              <span className="inbox-search-icon">🔍</span>
+              <input
+                type="text"
+                placeholder="Search conversations..."
+                className="inbox-search-input"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
+            </div>
 
             {/* Filter Chips */}
             <div className="flex items-center justify-between gap-1 text-xs">
-              <div className="join">
-                <button
-                  type="button"
-                  className={`btn btn-xs join-item ${typeFilter === 'all' ? 'btn-active btn-neutral' : 'btn-ghost'}`}
-                  onClick={() => setTypeFilter('all')}
-                >
-                  All
-                </button>
-                <button
-                  type="button"
-                  className={`btn btn-xs join-item ${typeFilter === 'dm' ? 'btn-active btn-neutral' : 'btn-ghost'}`}
-                  onClick={() => setTypeFilter('dm')}
-                >
-                  DMs
-                </button>
-                <button
-                  type="button"
-                  className={`btn btn-xs join-item ${typeFilter === 'group' ? 'btn-active btn-neutral' : 'btn-ghost'}`}
-                  onClick={() => setTypeFilter('group')}
-                >
-                  Groups
-                </button>
+              <div className="flex items-center gap-1 p-0.5 bg-[var(--bg-input)] rounded-lg border border-[var(--border)]">
+                {(['all', 'dm', 'group'] as const).map(t => (
+                  <button
+                    key={t}
+                    type="button"
+                    className={`px-2.5 py-1 text-xs rounded-md font-medium transition-all ${
+                      typeFilter === t
+                        ? 'bg-[var(--accent)] text-white shadow-sm'
+                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                    }`}
+                    onClick={() => setTypeFilter(t)}
+                  >
+                    {t === 'all' ? 'All' : t === 'dm' ? 'DMs' : 'Groups'}
+                  </button>
+                ))}
               </div>
 
               <button
                 type="button"
-                className={`btn btn-xs ${unreadOnly ? 'btn-primary text-white' : 'btn-outline border-base-300'}`}
+                className={`px-2.5 py-1 text-xs rounded-md font-medium border transition-all ${
+                  unreadOnly
+                    ? 'bg-[var(--accent)] border-transparent text-white shadow-sm'
+                    : 'border-[var(--border)] text-[var(--text-secondary)] hover:text-white bg-[var(--bg-input)]'
+                }`}
                 onClick={() => setUnreadOnly(!unreadOnly)}
               >
                 Unread
@@ -276,31 +276,34 @@ export default function InboxPage() {
             </div>
 
             {/* Mode Filter Selector */}
-            <div className="flex items-center gap-2 text-xs text-base-content/70">
+            <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
               <span>Mode:</span>
               <select
-                className="select select-bordered select-xs bg-base-100"
+                className="px-2 py-1 rounded-md bg-[var(--bg-input)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] cursor-pointer"
                 value={modeFilter}
                 onChange={e => setModeFilter(e.target.value as 'all' | ConversationMode)}
               >
-                <option value="all">Any Mode</option>
-                <option value="auto">Auto 🤖</option>
-                <option value="manual">Manual ✋</option>
-                <option value="paused">Paused ⏸</option>
+                <option value="all" className="bg-[#1a1a2e]">Any Mode</option>
+                <option value="auto" className="bg-[#1a1a2e]">Auto 🤖</option>
+                <option value="manual" className="bg-[#1a1a2e]">Manual ✋</option>
+                <option value="paused" className="bg-[#1a1a2e]">Paused ⏸</option>
               </select>
             </div>
           </div>
 
           {/* Conversation Item List */}
-          <div className="flex-1 overflow-y-auto divide-y divide-base-200">
+          <div className="flex-1 overflow-y-auto divide-y divide-[var(--border)]">
             {loadingList ? (
-              <div className="p-8 text-center text-sm text-base-content/50">
-                <span className="loading loading-spinner loading-md text-primary mb-2" />
+              <div className="p-8 text-center text-sm text-[var(--text-muted)]">
+                <svg className="animate-spin h-6 w-6 mx-auto mb-3 text-[var(--accent)]" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
                 <p>Loading conversations...</p>
               </div>
             ) : conversations.length === 0 ? (
-              <div className="p-8 text-center text-sm text-base-content/50">
-                <span className="text-2xl block mb-2">📭</span>
+              <div className="p-8 text-center text-sm text-[var(--text-muted)]">
+                <span className="text-3xl block mb-2 opacity-60">📭</span>
                 <p>No conversations found</p>
               </div>
             ) : (
@@ -312,24 +315,22 @@ export default function InboxPage() {
                   <div
                     key={conv.id}
                     onClick={() => setActiveConvId(conv.id)}
-                    className={`p-3.5 cursor-pointer transition-colors hover:bg-base-200/60 ${
-                      isSelected ? 'bg-primary/10 border-l-4 border-primary' : ''
-                    }`}
+                    className={`inbox-conv-item ${isSelected ? 'active' : ''}`}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
+                      <div className="flex items-center gap-2.5 min-w-0">
                         <span className="text-xl flex-shrink-0">{isGroup ? '👥' : '👤'}</span>
                         <div className="min-w-0">
-                          <p className="font-semibold text-sm truncate text-base-content">
+                          <p className="font-semibold text-sm truncate text-[var(--text-primary)]">
                             {conv.display_name}
                           </p>
                           <div className="flex items-center gap-1.5 mt-0.5">
-                            <span className="badge badge-ghost badge-xs text-[10px]">
+                            <span className="px-1.5 py-0.2 text-[10px] font-medium rounded bg-[rgba(255,255,255,0.06)] text-[var(--text-muted)]">
                               {isGroup ? 'Group' : 'DM'}
                             </span>
                             <ModeBadge mode={conv.mode} />
                             {conv.is_blocked && (
-                              <span className="badge badge-error badge-xs text-white text-[10px]">
+                              <span className="px-1.5 py-0.2 text-[10px] font-semibold rounded bg-[rgba(255,107,107,0.2)] text-[var(--danger)] border border-[rgba(255,107,107,0.4)]">
                                 Blocked
                               </span>
                             )}
@@ -340,7 +341,7 @@ export default function InboxPage() {
                       {/* Right indicators */}
                       <div className="flex flex-col items-end gap-1 flex-shrink-0">
                         {conv.last_message_at && (
-                          <span className="text-[10px] text-base-content/50">
+                          <span className="text-[10px] text-[var(--text-muted)]">
                             {new Date(conv.last_message_at).toLocaleTimeString([], {
                               hour: '2-digit',
                               minute: '2-digit',
@@ -349,12 +350,12 @@ export default function InboxPage() {
                         )}
                         <div className="flex items-center gap-1">
                           {conv.has_failed_outbound && (
-                            <span className="badge badge-error badge-xs text-white" title="Outbound message failed">
+                            <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-[rgba(255,107,107,0.2)] text-[var(--danger)] border border-[rgba(255,107,107,0.4)]" title="Outbound message failed">
                               !
                             </span>
                           )}
                           {conv.unread_count > 0 && (
-                            <span className="badge badge-primary badge-sm text-white font-bold px-1.5">
+                            <span className="px-1.5 py-0.5 text-xs font-bold rounded-full bg-[var(--accent)] text-white shadow-[0_2px_8px_var(--accent-glow)]">
                               {conv.unread_count}
                             </span>
                           )}
@@ -363,8 +364,8 @@ export default function InboxPage() {
                     </div>
 
                     {/* Snippet */}
-                    <p className="text-xs text-base-content/60 truncate mt-2">
-                      {conv.last_message || <span className="italic">No messages yet</span>}
+                    <p className="text-xs text-[var(--text-secondary)] truncate mt-2 leading-relaxed">
+                      {conv.last_message || <span className="italic opacity-60">No messages yet</span>}
                     </p>
                   </div>
                 );
@@ -376,23 +377,25 @@ export default function InboxPage() {
         {/* ============================================================== */}
         {/* RIGHT COLUMN: Active Chat Timeline & Composer                 */}
         {/* ============================================================== */}
-        <section className={`${activeConvId ? 'flex' : 'hidden md:flex'} flex-1 flex-col bg-base-100 min-w-0`}>
+        <section className={`${activeConvId ? 'flex' : 'hidden md:flex'} inbox-chat-main`}>
           {activeConvId === null || activeConv === null ? (
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-base-content/40">
-              <span className="text-6xl mb-4">💬</span>
-              <h3 className="text-lg font-semibold text-base-content/70">No Conversation Selected</h3>
-              <p className="text-sm max-w-sm mt-1">
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-[var(--text-muted)]">
+              <div className="w-16 h-16 rounded-2xl bg-[rgba(108,92,231,0.08)] flex items-center justify-center text-3xl mb-4 border border-[rgba(108,92,231,0.2)] shadow-[0_4px_20px_rgba(108,92,231,0.1)]">
+                💬
+              </div>
+              <h3 className="text-lg font-semibold text-[var(--text-primary)]">No Conversation Selected</h3>
+              <p className="text-sm max-w-sm mt-1.5 text-[var(--text-secondary)] leading-relaxed">
                 Select a chat from the left sidebar to view message history, monitor AI replies, or manually take over.
               </p>
             </div>
           ) : (
             <>
               {/* Chat Header */}
-              <div className="px-3 sm:px-6 py-3.5 border-b border-base-200 flex items-center justify-between bg-base-100 shadow-xs z-10">
-                <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+              <div className="inbox-chat-header">
+                <div className="flex items-center gap-3 min-w-0">
                   <button
                     type="button"
-                    className="btn btn-ghost btn-xs md:hidden mr-0.5 px-1.5"
+                    className="md:hidden p-1.5 rounded-lg text-[var(--text-secondary)] hover:text-white hover:bg-[rgba(255,255,255,0.06)] cursor-pointer"
                     onClick={() => {
                       setActiveConvId(null);
                       setActiveConv(null);
@@ -404,14 +407,14 @@ export default function InboxPage() {
                   <span className="text-2xl shrink-0">{activeConv.type === 'group' ? '👥' : '👤'}</span>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <h3 className="font-bold text-base text-base-content truncate">
+                      <h3 className="font-bold text-base text-[var(--text-primary)] truncate">
                         {activeConv.display_name}
                       </h3>
-                      <span className="badge badge-ghost badge-sm text-xs">
+                      <span className="px-2 py-0.5 text-[10px] font-medium rounded-full bg-[rgba(255,255,255,0.06)] text-[var(--text-muted)] border border-[var(--border)]">
                         {activeConv.type === 'group' ? 'Group' : 'DM'}
                       </span>
                     </div>
-                    <p className="text-xs text-base-content/50 truncate font-mono">
+                    <p className="text-xs text-[var(--text-muted)] truncate font-mono mt-0.5">
                       {activeConv.signal_id}
                     </p>
                   </div>
@@ -419,23 +422,23 @@ export default function InboxPage() {
 
                 <div className="flex items-center gap-3">
                   {/* Mode switcher */}
-                  <div className="flex items-center gap-2 bg-base-200/60 px-3 py-1.5 rounded-lg border border-base-200">
-                    <span className="text-xs font-medium text-base-content/70">Takeover:</span>
+                  <div className="flex items-center gap-2 bg-[var(--bg-input)] px-3 py-1.5 rounded-lg border border-[var(--border)]">
+                    <span className="text-xs font-medium text-[var(--text-secondary)]">Takeover:</span>
                     <select
                       aria-label="Takeover mode"
-                      className="select select-xs select-bordered bg-base-100 text-xs font-semibold"
+                      className="bg-transparent text-xs font-semibold text-[var(--text-primary)] outline-none cursor-pointer"
                       value={activeConv.mode}
                       onChange={e => handleModeChange(e.target.value as ConversationMode)}
                     >
-                      <option value="auto">🤖 Auto (AI)</option>
-                      <option value="manual">✋ Manual (Human)</option>
-                      <option value="paused">⏸ Paused (Mute)</option>
+                      <option value="auto" className="bg-[#1a1a2e] text-white">🤖 Auto (AI)</option>
+                      <option value="manual" className="bg-[#1a1a2e] text-white">✋ Manual (Human)</option>
+                      <option value="paused" className="bg-[#1a1a2e] text-white">⏸ Paused (Mute)</option>
                     </select>
                   </div>
 
                   <button
                     type="button"
-                    className="btn btn-ghost btn-sm text-base-content/70"
+                    className="px-3 py-1.5 text-xs font-medium rounded-lg text-[var(--text-secondary)] hover:text-white bg-[var(--bg-input)] hover:bg-[var(--bg-card-hover)] border border-[var(--border)] transition-all cursor-pointer flex items-center gap-1.5"
                     onClick={() => setShowDrawer(true)}
                   >
                     ℹ️ Details
@@ -445,9 +448,9 @@ export default function InboxPage() {
 
               {/* Error banner */}
               {errorMsg && (
-                <div className="bg-error/15 text-error px-4 py-2 text-xs flex justify-between items-center">
+                <div className="bg-[rgba(255,107,107,0.12)] border-b border-[rgba(255,107,107,0.25)] text-[var(--danger)] px-4 py-2 text-xs flex justify-between items-center">
                   <span>{errorMsg}</span>
-                  <button type="button" onClick={() => setErrorMsg(null)} className="font-bold">
+                  <button type="button" onClick={() => setErrorMsg(null)} className="font-bold hover:opacity-80">
                     ✕
                   </button>
                 </div>
@@ -455,7 +458,7 @@ export default function InboxPage() {
 
               {/* Blocked warning */}
               {activeConv.is_blocked && (
-                <div className="bg-amber-500/10 border-b border-amber-500/20 text-amber-700 px-6 py-2 text-xs font-medium flex items-center gap-2">
+                <div className="bg-[rgba(255,217,61,0.08)] border-b border-[rgba(255,217,61,0.2)] text-[#ffe680] px-6 py-2.5 text-xs font-medium flex items-center gap-2">
                   <span>🚫</span>
                   <span>
                     This customer is blocked. Incoming messages are recorded, but AI auto-responses are suppressed.
@@ -466,7 +469,7 @@ export default function InboxPage() {
               {/* Messages Timeline */}
               <div
                 ref={timelineRef}
-                className="flex-1 overflow-y-auto p-6 space-y-4 bg-gradient-to-b from-base-50/50 to-base-100"
+                className="inbox-timeline"
               >
                 {/* Load older button */}
                 {hasMoreBefore && (
@@ -483,33 +486,37 @@ export default function InboxPage() {
                 )}
 
                 {loadingMessages && messages.length === 0 ? (
-                  <div className="py-12 text-center text-sm text-base-content/50">
-                    <span className="loading loading-spinner loading-md text-primary mb-2" />
+                  <div className="py-12 text-center text-sm text-[var(--text-muted)]">
+                    <svg className="animate-spin h-6 w-6 mx-auto mb-3 text-[var(--accent)]" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
                     <p>Loading messages...</p>
                   </div>
                 ) : messages.length === 0 ? (
-                  <div className="py-12 text-center text-sm text-base-content/50">
+                  <div className="py-12 text-center text-sm text-[var(--text-muted)]">
                     <p>No messages yet in this conversation.</p>
                   </div>
                 ) : (
                   messages.map(msg => {
                     const isOutbound = msg.direction === 'outbound';
                     const isFailed = msg.delivery_status === 'failed';
+                    const isAdmin = msg.actor === 'admin';
 
                     return (
                       <div
                         key={msg.id}
-                        className={`chat ${isOutbound ? 'chat-end' : 'chat-start'}`}
+                        className={`flex flex-col ${isOutbound ? 'items-end' : 'items-start'}`}
                       >
-                        <div className="chat-header text-xs text-base-content/60 mb-1 flex items-center gap-2">
+                        <div className="text-xs text-[var(--text-secondary)] mb-1 flex items-center gap-2 px-1">
                           <span className="font-semibold">
                             {isOutbound
-                              ? msg.actor === 'bot'
-                                ? '🤖 AI Bot'
-                                : '👤 Admin'
+                              ? isAdmin
+                                ? '👤 Admin'
+                                : '🤖 AI Bot'
                               : msg.sender_name || 'Customer'}
                           </span>
-                          <time className="text-[10px] text-base-content/40">
+                          <time className="text-[10px] text-[var(--text-muted)]">
                             {new Date(msg.timestamp).toLocaleTimeString([], {
                               hour: '2-digit',
                               minute: '2-digit',
@@ -518,13 +525,15 @@ export default function InboxPage() {
                         </div>
 
                         <div
-                          className={`chat-bubble max-w-lg text-sm leading-relaxed shadow-xs ${
+                          className={
                             isOutbound
                               ? isFailed
-                                ? 'bg-red-50 text-red-900 border border-red-200'
-                                : 'bg-primary text-white'
-                              : 'bg-base-200 text-base-content'
-                          }`}
+                                ? 'inbox-bubble-failed'
+                                : isAdmin
+                                ? 'inbox-bubble-admin'
+                                : 'inbox-bubble-bot'
+                              : 'inbox-bubble-user'
+                          }
                         >
                           {/* Text content */}
                           <div className="whitespace-pre-wrap break-words">{msg.content}</div>
@@ -535,7 +544,7 @@ export default function InboxPage() {
                               {msg.attachments.map(att => (
                                 <div
                                   key={att.id}
-                                  className="flex items-center gap-2 p-2 bg-black/10 rounded text-xs"
+                                  className="flex items-center gap-2 p-2 bg-[rgba(0,0,0,0.25)] rounded-lg text-xs border border-[rgba(255,255,255,0.06)]"
                                 >
                                   <span>📎</span>
                                   <span className="font-medium truncate">
@@ -553,11 +562,11 @@ export default function InboxPage() {
 
                           {/* Reactions */}
                           {msg.reactions && msg.reactions.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mt-1.5 pt-1 border-t border-black/10">
+                            <div className="flex flex-wrap gap-1 mt-1.5 pt-1 border-t border-[rgba(255,255,255,0.08)]">
                               {msg.reactions.map(rx => (
                                 <span
                                   key={rx.id}
-                                  className="badge badge-xs bg-black/20 text-white font-mono"
+                                  className="px-1.5 py-0.5 rounded text-xs bg-[rgba(0,0,0,0.3)] text-white font-mono"
                                   title={`Reacted by ${rx.reactor_identity}`}
                                 >
                                   {rx.emoji}
@@ -568,12 +577,12 @@ export default function InboxPage() {
                         </div>
 
                         {/* Footer Status and Retry */}
-                        <div className="chat-footer text-xs mt-1 flex items-center gap-2">
+                        <div className="text-xs mt-1 flex items-center gap-2 px-1">
                           {isOutbound && <DeliveryBadge status={msg.delivery_status} />}
                           {isFailed && (
                             <button
                               type="button"
-                              className="text-xs text-error font-bold underline cursor-pointer hover:text-error/80"
+                              className="text-xs text-[var(--danger)] font-bold underline cursor-pointer hover:brightness-125"
                               onClick={() => handleRetry(msg.id)}
                             >
                               Retry Now
@@ -588,19 +597,19 @@ export default function InboxPage() {
               </div>
 
               {/* Composer */}
-              <div className="p-4 border-t border-base-200 bg-base-100">
+              <div className="inbox-composer">
                 <form onSubmit={handleSendMessage} className="space-y-2">
                   <div className="relative">
                     <textarea
                       rows={2}
-                      className="textarea textarea-bordered w-full text-sm resize-none focus:outline-none focus:border-primary pr-24"
+                      className="inbox-composer-textarea pr-24"
                       placeholder="Type a manual reply... (Press Enter to send, Shift+Enter for newline)"
                       value={inputText}
                       onChange={e => setInputText(e.target.value)}
                       onKeyDown={handleKeyDown}
                       disabled={sending}
                     />
-                    <div className="absolute right-3 bottom-3">
+                    <div className="absolute right-2.5 bottom-3">
                       <Button
                         type="submit"
                         variant="primary"
@@ -612,9 +621,9 @@ export default function InboxPage() {
                       </Button>
                     </div>
                   </div>
-                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1 text-[11px] text-base-content/50 px-1">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1 text-[11px] text-[var(--text-muted)] px-1">
                     <span>
-                      Mode: <strong className="uppercase">{activeConv.mode}</strong> (Manual replies will be logged as Admin)
+                      Mode: <strong className="text-[var(--text-primary)] uppercase">{activeConv.mode}</strong> (Manual replies will be logged as Admin)
                     </span>
                     <span>Enter to send · Shift+Enter for newline</span>
                   </div>
@@ -628,13 +637,13 @@ export default function InboxPage() {
         {/* RIGHT DRAWER: Conversation Details                             */}
         {/* ============================================================== */}
         {showDrawer && activeConv && (
-          <aside className="absolute inset-y-0 right-0 z-30 w-full sm:w-80 border-l border-base-200 bg-base-50 p-6 flex flex-col justify-between overflow-y-auto shadow-2xl md:static md:shadow-none">
-            <div className="space-y-6">
-              <div className="flex items-center justify-between border-b border-base-200 pb-3">
-                <h3 className="font-bold text-base">Conversation Details</h3>
+          <aside className="inbox-drawer absolute inset-y-0 right-0 shadow-2xl md:static md:shadow-none">
+            <div className="space-y-5">
+              <div className="flex items-center justify-between border-b border-[var(--border)] pb-3">
+                <h3 className="font-bold text-base text-white">Conversation Details</h3>
                 <button
                   type="button"
-                  className="btn btn-ghost btn-xs text-base-content/50"
+                  className="p-1 rounded text-[var(--text-muted)] hover:text-white hover:bg-[rgba(255,255,255,0.06)] cursor-pointer"
                   onClick={() => setShowDrawer(false)}
                 >
                   ✕
@@ -642,46 +651,46 @@ export default function InboxPage() {
               </div>
 
               <div>
-                <span className="text-xs text-base-content/50 uppercase font-semibold">Display Name</span>
-                <p className="font-semibold text-sm text-base-content mt-0.5">{activeConv.display_name}</p>
+                <span className="text-[10px] text-[var(--text-muted)] uppercase font-semibold tracking-wider">Display Name</span>
+                <p className="font-semibold text-sm text-[var(--text-primary)] mt-0.5">{activeConv.display_name}</p>
               </div>
 
               <div>
-                <span className="text-xs text-base-content/50 uppercase font-semibold">Signal Identifier</span>
-                <p className="text-xs font-mono bg-base-200 p-2 rounded mt-0.5 break-all">
+                <span className="text-[10px] text-[var(--text-muted)] uppercase font-semibold tracking-wider">Signal Identifier</span>
+                <p className="text-xs font-mono bg-[var(--bg-input)] border border-[var(--border)] p-2 rounded-lg mt-0.5 break-all text-[var(--text-secondary)]">
                   {activeConv.signal_id}
                 </p>
               </div>
 
               {activeConv.phone_number && (
                 <div>
-                  <span className="text-xs text-base-content/50 uppercase font-semibold">Phone</span>
-                  <p className="text-sm mt-0.5">{activeConv.phone_number}</p>
+                  <span className="text-[10px] text-[var(--text-muted)] uppercase font-semibold tracking-wider">Phone</span>
+                  <p className="text-sm mt-0.5 text-[var(--text-primary)]">{activeConv.phone_number}</p>
                 </div>
               )}
 
               {activeConv.signal_uuid && (
                 <div>
-                  <span className="text-xs text-base-content/50 uppercase font-semibold">Signal UUID</span>
-                  <p className="text-xs font-mono text-base-content/70 mt-0.5 break-all">
+                  <span className="text-[10px] text-[var(--text-muted)] uppercase font-semibold tracking-wider">Signal UUID</span>
+                  <p className="text-xs font-mono text-[var(--text-secondary)] mt-0.5 break-all">
                     {activeConv.signal_uuid}
                   </p>
                 </div>
               )}
 
               {activeConv.type === 'group' && (
-                <div className="bg-base-200/60 p-3 rounded-lg border border-base-200 space-y-2">
+                <div className="bg-[var(--bg-input)] p-3 rounded-xl border border-[var(--border)] space-y-2">
                   <div className="flex justify-between text-xs">
-                    <span className="text-base-content/60">Members:</span>
-                    <strong className="text-base-content">{activeConv.members_count}</strong>
+                    <span className="text-[var(--text-secondary)]">Members:</span>
+                    <strong className="text-white">{activeConv.members_count}</strong>
                   </div>
                   <div className="flex justify-between text-xs">
-                    <span className="text-base-content/60">Admins:</span>
-                    <strong className="text-base-content">{activeConv.admins_count}</strong>
+                    <span className="text-[var(--text-secondary)]">Admins:</span>
+                    <strong className="text-white">{activeConv.admins_count}</strong>
                   </div>
                   <div className="flex justify-between text-xs">
-                    <span className="text-base-content/60">Sync Status:</span>
-                    <span className="badge badge-success badge-xs text-white">
+                    <span className="text-[var(--text-secondary)]">Sync Status:</span>
+                    <span className="px-1.5 py-0.2 text-[10px] rounded bg-[rgba(0,214,143,0.16)] text-[#6effcf] border border-[rgba(0,214,143,0.35)]">
                       {activeConv.sync_status || 'synced'}
                     </span>
                   </div>
@@ -689,19 +698,19 @@ export default function InboxPage() {
               )}
 
               <div>
-                <span className="text-xs text-base-content/50 uppercase font-semibold">Stats</span>
-                <p className="text-xs text-base-content/70 mt-1">
-                  Total messages: <strong>{activeConv.message_count}</strong>
+                <span className="text-[10px] text-[var(--text-muted)] uppercase font-semibold tracking-wider">Stats</span>
+                <p className="text-xs text-[var(--text-secondary)] mt-1">
+                  Total messages: <strong className="text-white">{activeConv.message_count}</strong>
                 </p>
-                <p className="text-xs text-base-content/70 mt-0.5">
+                <p className="text-xs text-[var(--text-secondary)] mt-0.5">
                   Created: {new Date(activeConv.created_at).toLocaleDateString()}
                 </p>
               </div>
 
               {activeConv.notes && (
                 <div>
-                  <span className="text-xs text-base-content/50 uppercase font-semibold">Admin Notes</span>
-                  <p className="text-xs bg-amber-50 p-2.5 rounded border border-amber-200 mt-1 text-amber-900 whitespace-pre-wrap">
+                  <span className="text-[10px] text-[var(--text-muted)] uppercase font-semibold tracking-wider">Admin Notes</span>
+                  <p className="text-xs bg-[rgba(255,217,61,0.08)] p-2.5 rounded-lg border border-[rgba(255,217,61,0.2)] mt-1 text-[#ffe680] whitespace-pre-wrap leading-relaxed">
                     {activeConv.notes}
                   </p>
                 </div>
@@ -709,7 +718,7 @@ export default function InboxPage() {
             </div>
 
             <Button
-              variant="outline"
+              variant="secondary"
               size="sm"
               className="w-full mt-6"
               onClick={() => setShowDrawer(false)}

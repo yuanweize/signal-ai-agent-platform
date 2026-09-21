@@ -28,21 +28,24 @@ export const Modal: React.FC<ModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="modal modal-open modal-bottom sm:modal-middle" role="dialog" aria-modal="true">
-      <div className="modal-box">
-        {title && <h3 className="font-bold text-lg mb-4">{title}</h3>}
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in" role="dialog" aria-modal="true">
+      <div className="relative z-10 w-full max-w-lg bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow)] p-6 text-[var(--text-primary)]">
+        {title && <h3 className="font-bold text-lg text-white mb-4 border-b border-[var(--border)] pb-3">{title}</h3>}
         <div className="py-2">{children}</div>
-        <div className="modal-action mt-6 flex justify-end gap-2">
+        <div className="mt-6 flex justify-end gap-2">
           {footer ? (
             footer
           ) : (
-            <button className="btn btn-ghost btn-sm" onClick={onClose}>
+            <button
+              className="px-3 py-1.5 text-xs rounded-lg text-[var(--text-secondary)] hover:text-white hover:bg-[rgba(255,255,255,0.06)] border border-transparent transition-all cursor-pointer"
+              onClick={onClose}
+            >
               Close
             </button>
           )}
         </div>
       </div>
-      <div className="modal-backdrop bg-black/40" onClick={onClose} />
+      <div className="fixed inset-0" onClick={onClose} />
     </div>
   );
 };
