@@ -57,9 +57,9 @@ export default function SidebarLayout({ children, title }: SidebarLayoutProps) {
             <span className="nav-icon">📦</span>
             <span>Products</span>
           </NavLink>
-          <NavLink to="/logs" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-            <span className="nav-icon">💬</span>
-            <span>Chat Logs</span>
+          <NavLink to="/inbox" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+            <span className="nav-icon">📥</span>
+            <span>Inbox</span>
           </NavLink>
           <NavLink to="/groups" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <span className="nav-icon">👥</span>

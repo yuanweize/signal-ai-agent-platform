@@ -7,6 +7,15 @@
 
 const API_BASE = '/api';
 
+export * from './types/inbox';
+import type {
+  ConversationDTO,
+  ConversationDetailDTO,
+  ConversationListResponse,
+  ConversationMessagesResponse,
+  MessageDTO,
+} from './types/inbox';
+
 interface ApiOptions {
   method?: string;
   body?: unknown;
@@ -337,6 +346,89 @@ class ApiClient {
       body: { members },
     });
   }
+
+  // ---- Inbox Conversations API (Round 2) ----
+  async getConversations(params?: {
+    search?: string;
+    type?: string;
+    mode?: string;
+    unread_only?: boolean;
+    limit?: number;
+    offset?: number;
+  }) {
+    const q = new URLSearchParams();
+    if (params?.search) q.append('search', params.search);
+    if (params?.type) q.append('type', params.type);
+    if (params?.mode) q.append('mode', params.mode);
+    if (params?.unread_only) q.append('unread_only', 'true');
+    if (params?.limit) q.append('limit', String(params.limit));
+    if (params?.offset) q.append('offset', String(params.offset));
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return this.request<ConversationListResponse>(`/conversations${qs}`);
+  }
+
+  async getConversation(id: number) {
+    return this.request<ConversationDetailDTO>(`/conversations/${id}`);
+  }
+
+  async getConversationMessages(
+    id: number,
+    params?: { limit?: number; before_id?: number; after_id?: number }
+  ) {
+    const q = new URLSearchParams();
+    if (params?.limit) q.append('limit', String(params.limit));
+    if (params?.before_id) q.append('before_id', String(params.before_id));
+    if (params?.after_id) q.append('after_id', String(params.after_id));
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return this.request<ConversationMessagesResponse>(`/conversations/${id}/messages${qs}`);
+  }
+
+  async sendConversationMessage(id: number, message: string, reply_to_id?: number) {
+    return this.request<MessageDTO>(`/conversations/${id}/messages`, {
+      method: 'POST',
+      body: { message, reply_to_id },
+    });
+  }
+
+  async updateConversationMode(id: number, mode: 'auto' | 'manual' | 'paused') {
+    return this.request<ConversationDTO>(`/conversations/${id}/mode`, {
+      method: 'PATCH',
+      body: { mode },
+    });
+  }
+
+  async markConversationRead(id: number, last_message_id?: number) {
+    return this.request<{ ok: boolean; conversation_id: number; last_read_message_id: number }>(
+      `/conversations/${id}/read`,
+      {
+        method: 'POST',
+        body: { last_message_id },
+      }
+    );
+  }
+
+  async retryConversationMessage(conversationId: number, messageId: number) {
+    return this.request<MessageDTO>(
+      `/conversations/${conversationId}/messages/${messageId}/retry`,
+      { method: 'POST' }
+    );
+  }
+
+  async getGroupMembers(groupId: string) {
+    return this.request<GroupMemberDTO[]>(`/groups/${encodeURIComponent(groupId)}/members`);
+  }
+}
+
+export interface GroupMemberDTO {
+  id: number;
+  group_id: number;
+  user_id?: number | null;
+  external_identifier: string;
+  display_name?: string | null;
+  is_admin: boolean;
+  role: string;
+  first_seen_at: string;
+  last_seen_at: string;
 }
 
 export interface SignalDevice {

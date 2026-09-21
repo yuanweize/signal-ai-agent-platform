@@ -4,7 +4,7 @@ import LoginPage from './LoginPage';
 import DashboardPage from './DashboardPage';
 import ProductsPage from './ProductsPage';
 import SettingsPage from './SettingsPage';
-import ChatLogsPage from './ChatLogsPage';
+import InboxPage from './InboxPage';
 import CampaignsPage from './CampaignsPage';
 import UsersPage from './UsersPage';
 import GroupsPage from './GroupsPage';
@@ -50,12 +50,16 @@ function App() {
           }
         />
         <Route
-          path="/logs"
+          path="/inbox"
           element={
             <ProtectedRoute>
-              <ChatLogsPage />
+              <InboxPage />
             </ProtectedRoute>
           }
+        />
+        <Route
+          path="/logs"
+          element={<Navigate to="/inbox" replace />}
         />
         <Route
           path="/campaigns"
