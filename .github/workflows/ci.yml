@@ -7,7 +7,7 @@ on:
 
 jobs:
   # ============================================================
-  # Backend — lint, type-check, compile, pytest
+  # Backend — lint, format, type-check, compile, pytest, migrations
   # ============================================================
   backend-check:
     runs-on: ubuntu-latest
@@ -30,27 +30,31 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Ruff lint
-        run: ruff check app/
+        run: ruff check app/ tests/
 
       - name: Ruff format check
-        run: ruff format --check app/
+        run: ruff format --check app/ tests/
 
       - name: Compile check
         run: python -m compileall app/
 
-      - name: Run tests
+      - name: Run unit & integration tests
         run: pytest tests/ -v --tb=short
         env:
           DATABASE_URL: "sqlite+aiosqlite:///:memory:"
 
-      - name: Alembic migration check (fresh DB)
+      - name: Alembic migration tests (fresh & legacy 112aa6e)
+        run: pytest tests/test_migrations.py -v
+        env:
+          DATABASE_URL: "sqlite+aiosqlite:////tmp/ci_test.db"
+
+      - name: CLI migration check against fresh DB
         run: |
-          # Verify migrations run cleanly against a fresh empty DB
-          DATABASE_URL="sqlite+aiosqlite:////tmp/ci_test.db" alembic upgrade head
-          DATABASE_URL="sqlite+aiosqlite:////tmp/ci_test.db" alembic current
+          DATABASE_URL="sqlite+aiosqlite:////tmp/ci_fresh.db" alembic upgrade head
+          DATABASE_URL="sqlite+aiosqlite:////tmp/ci_fresh.db" alembic current
 
   # ============================================================
-  # Frontend — install, lint, typecheck, build
+  # Frontend — install, lint, typecheck, unit tests, build
   # ============================================================
   frontend-check:
     runs-on: ubuntu-latest
@@ -72,8 +76,32 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: ESLint check
+        run: npm run lint
+
       - name: TypeScript type check
         run: npx tsc --noEmit
 
-      - name: Build
+      - name: Unit & Component tests (Vitest)
+        run: npm test
+
+      - name: Production Build
         run: npm run build
+
+  # ============================================================
+  # Docker — compose config and image build smoke
+  # ============================================================
+  docker-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Compose Config
+        run: docker compose config
+
+      - name: Build backend Docker image
+        run: docker build -t smb-backend:smoke ./backend
+
+      - name: Build frontend Docker image
+        run: docker build -t smb-frontend:smoke ./frontend
