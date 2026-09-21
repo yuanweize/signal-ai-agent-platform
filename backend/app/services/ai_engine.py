@@ -399,6 +399,8 @@ class AIEngine:
         conversation: Conversation,
         user_message: str,
         group_id: str | None = None,
+        sender_name: str | None = None,
+        current_signal_timestamp_ms: int | None = None,
     ) -> str | None:
         """
         Generate an AI response given a conversation and new user message.
@@ -406,8 +408,11 @@ class AIEngine:
         Args:
             session: DB session for loading context
             conversation: Current conversation record
-            user_message: The new message from the user
+            user_message: The new message from the user (current turn)
             group_id: Group ID for per-group prompt override
+            sender_name: Display name of the sender (for group context)
+            current_signal_timestamp_ms: Signal timestamp of current message
+                (used to exclude it from history to avoid duplication)
 
         Returns:
             AI response text, or None if generation fails
@@ -415,6 +420,8 @@ class AIEngine:
         runtime = await self._refresh_runtime_client(session)
         if not self.is_enabled:
             return None
+
+        tokens_used: int | None = None
 
         try:
             # Build the message list for the API call
@@ -424,17 +431,19 @@ class AIEngine:
                 user_message,
                 group_id,
                 runtime,
+                sender_name=sender_name,
+                current_signal_timestamp_ms=current_signal_timestamp_ms,
             )
 
-            # Call the LLM with endpoint/model adaptation
+            # Call the LLM
             response = await self._create_completion_with_adaptation(runtime, messages)
 
             # Extract response
             choice = response.choices[0]
             reply = choice.message.content
 
-            # Track token usage
-            tokens_used = None
+            # Track token usage — use local variable, NOT instance state
+            # (P1-13 fix: concurrent requests raced on self._last_tokens_used)
             if response.usage:
                 tokens_used = response.usage.total_tokens
                 logger.debug(
@@ -442,10 +451,6 @@ class AIEngine:
                     f"{response.usage.completion_tokens} completion = "
                     f"{tokens_used} total"
                 )
-
-            # Store token count on the latest assistant message (will be saved by handler)
-            # Return as tuple-like info — handler will use it
-            self._last_tokens_used = tokens_used
 
             if reply:
                 preview = reply[:80].replace("\n", " ")
@@ -476,7 +481,7 @@ class AIEngine:
 
     @property
     def last_tokens_used(self) -> int | None:
-        """Token count from the last API call (for tracking)."""
+        """Token count from the last API call — deprecated, use return value instead."""
         return getattr(self, "_last_tokens_used", None)
 
     async def _refresh_runtime_client(self, session: AsyncSession) -> dict:
@@ -590,6 +595,9 @@ class AIEngine:
         user_message: str,
         group_id: str | None = None,
         runtime: dict | None = None,
+        *,
+        sender_name: str | None = None,
+        current_signal_timestamp_ms: int | None = None,
     ) -> list[dict]:
         """
         Build the messages list for the OpenAI API call.
@@ -597,11 +605,19 @@ class AIEngine:
         Structure:
         1. System prompt (global or per-group override)
         2. Conversation summary (if exists, for long-term memory)
-        3. Recent messages from DB (short-term context window)
-        4. Current user message
+        3. Recent messages from DB (short-term context, excluding current turn)
+        4. Current user message (exactly once — P0-1 fix)
+
+        P0-1 fix: The inbound message is already committed to DB before this
+        call. We exclude it from context history using current_signal_timestamp_ms
+        so it is NOT appended twice.
+
+        P1-14 fix: For group conversations, messages include sender name prefix
+        so the model knows who said what.
         """
         messages = []
         runtime = runtime or {}
+        is_group = bool(group_id)
 
         # 1. System prompt
         system_prompt = await self._get_system_prompt(
@@ -628,15 +644,23 @@ class AIEngine:
             })
 
         # 4. Load recent messages from DB (short-term context)
+        # Exclude the current message (already committed) to prevent duplication.
         history = await self._load_context_messages(
             session,
             conversation.id,
             runtime.get("ai_context_messages", settings.ai_context_messages),
+            exclude_signal_timestamp_ms=current_signal_timestamp_ms,
+            is_group=is_group,
         )
         messages.extend(history)
 
-        # 5. Current user message
-        messages.append({"role": "user", "content": user_message})
+        # 5. Current user message (exactly once — P0-1)
+        if is_group and sender_name:
+            # P1-14: prefix group messages with sender name so model knows who spoke
+            current_content = f"[{sender_name}]: {user_message}"
+        else:
+            current_content = user_message
+        messages.append({"role": "user", "content": current_content})
 
         return messages
 
@@ -708,28 +732,48 @@ class AIEngine:
         session: AsyncSession,
         conversation_id: int,
         max_messages: int,
+        *,
+        exclude_signal_timestamp_ms: int | None = None,
+        is_group: bool = False,
     ) -> list[dict]:
         """
         Load the last N messages from the conversation for context.
 
+        P0-1 fix: exclude the current inbound message by signal_timestamp_ms
+        so it does not appear twice in the prompt.
+
+        P1-14 fix: for group conversations, prefix user messages with sender name.
         Only loads 'user' and 'assistant' roles (not system messages).
         """
-        result = await session.execute(
+        query = (
             select(Message)
             .where(Message.conversation_id == conversation_id)
             .where(Message.role.in_(["user", "assistant"]))
-            .order_by(Message.timestamp.desc())
-            .limit(max_messages)
         )
+
+        # Exclude the current message to prevent P0-1 duplication
+        if exclude_signal_timestamp_ms is not None:
+            query = query.where(
+                Message.signal_timestamp_ms != exclude_signal_timestamp_ms
+            )
+
+        query = query.order_by(Message.timestamp.desc()).limit(max_messages)
+        result = await session.execute(query)
         db_messages = result.scalars().all()
 
         # Reverse to get chronological order (we queried desc for limit)
         db_messages = list(reversed(db_messages))
 
-        return [
-            {"role": msg.role, "content": msg.content}
-            for msg in db_messages
-        ]
+        context = []
+        for msg in db_messages:
+            if msg.role == "user" and is_group and msg.sender_name:
+                # P1-14: include sender name so model knows who said what in group
+                content = f"[{msg.sender_name}]: {msg.content}"
+            else:
+                content = msg.content
+            context.append({"role": msg.role, "content": content})
+
+        return context
 
 
 # ---- Singleton instance ----

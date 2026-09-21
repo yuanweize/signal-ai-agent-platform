@@ -8,9 +8,11 @@ from pydantic import BaseModel, Field
 
 
 class ChatConversationItem(BaseModel):
+    id: int = 0  # internal conversation ID (use for mode API)
     signal_id: str
     display_name: str | None = None
     group_id: str | None = None
+    mode: str = "auto"  # "auto" | "manual" | "paused"
     last_message: str = ""
     last_message_at: datetime | None = None
     message_count: int = 0
@@ -27,12 +29,18 @@ class ChatMessageItem(BaseModel):
     content: str
     timestamp: datetime
     sender_name: str | None = None
+    sender_id: str | None = None
+    signal_timestamp_ms: int | None = None
+    delivery_status: str | None = None
+    delivery_error: str | None = None
 
 
 class ChatMessagesResponse(BaseModel):
     signal_id: str
     display_name: str | None = None
     group_id: str | None = None
+    conversation_id: int | None = None
+    mode: str = "auto"
     items: list[ChatMessageItem]
     total: int
     page: int

@@ -18,6 +18,31 @@ class UpdateProfileRequest(BaseModel):
     about: Optional[str] = None
 
 
+@router.get("/profile")
+async def get_profile(
+    admin: AdminUser = Depends(get_current_admin),
+):
+    """Get the bot's Signal profile info.
+
+    Note: signal-cli-rest-api does not expose a GET /v1/profiles endpoint.
+    We return the profile from the contacts list (own number) if available,
+    otherwise return the configured phone number.
+    """
+    phone = None
+    try:
+        from app.config import settings as app_settings
+        phone = app_settings.signal_phone_number
+    except Exception:
+        pass
+
+    return {
+        "number": phone or "",
+        "name": None,
+        "about": None,
+        "note": "Signal CLI REST API does not provide a GET profile endpoint. Use PUT to update.",
+    }
+
+
 @router.put("/profile")
 async def update_profile(
     request: UpdateProfileRequest,
