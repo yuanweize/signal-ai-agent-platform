@@ -86,9 +86,7 @@ async def get_product(
     """Get a single product by ID."""
     await _check_market_enabled(session)
 
-    result = await session.execute(
-        select(Product).where(Product.id == product_id)
-    )
+    result = await session.execute(select(Product).where(Product.id == product_id))
     product = result.scalar_one_or_none()
 
     if product is None:
@@ -125,9 +123,7 @@ async def update_product(
     """Update an existing product (partial update)."""
     await _check_market_enabled(session)
 
-    result = await session.execute(
-        select(Product).where(Product.id == product_id)
-    )
+    result = await session.execute(select(Product).where(Product.id == product_id))
     product = result.scalar_one_or_none()
 
     if product is None:
@@ -154,9 +150,7 @@ async def delete_product(
     """Delete a product (hard delete)."""
     await _check_market_enabled(session)
 
-    result = await session.execute(
-        select(Product).where(Product.id == product_id)
-    )
+    result = await session.execute(select(Product).where(Product.id == product_id))
     product = result.scalar_one_or_none()
 
     if product is None:

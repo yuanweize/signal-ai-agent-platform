@@ -12,13 +12,13 @@ from app.models.conversation import Conversation, Message
 from app.models.user import User
 from app.schemas.user import (
     ManagedUserActivityResponse,
-    ManagedUsersBatchRequest,
-    ManagedUsersBatchResponse,
     ManagedUserItem,
     ManagedUserListResponse,
+    ManagedUsersBatchRequest,
+    ManagedUsersBatchResponse,
+    ManagedUserUpdateRequest,
     UserConversationSummary,
     UserRecentMessage,
-    ManagedUserUpdateRequest,
 )
 from app.services.audit_log import write_audit_log
 
@@ -63,17 +63,19 @@ async def list_users(
     if blocked is not None:
         query = query.where(User.is_blocked == blocked)
 
-    total = (
-        await session.execute(select(func.count()).select_from(query.subquery()))
-    ).scalar_one()
+    total = (await session.execute(select(func.count()).select_from(query.subquery()))).scalar_one()
 
     rows = (
-        await session.execute(
-            query.order_by(User.last_seen.desc())
-            .offset((page - 1) * page_size)
-            .limit(page_size)
+        (
+            await session.execute(
+                query.order_by(User.last_seen.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     return ManagedUserListResponse(
         items=[_to_user_item(row) for row in rows],
@@ -91,9 +93,7 @@ async def batch_users_action(
     admin: AdminUser = Depends(get_current_admin),
 ):
     normalized_ids = sorted(set(payload.user_ids))
-    rows = (
-        await session.execute(select(User).where(User.id.in_(normalized_ids)))
-    ).scalars().all()
+    rows = (await session.execute(select(User).where(User.id.in_(normalized_ids)))).scalars().all()
 
     should_block = payload.action == "block"
     updated_count = 0
@@ -129,20 +129,22 @@ async def get_user_activity(
     session: AsyncSession = Depends(get_session),
     _admin: AdminUser = Depends(get_current_admin),
 ):
-    user = (
-        await session.execute(select(User).where(User.id == user_id))
-    ).scalar_one_or_none()
+    user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
 
     conversation_rows = (
-        await session.execute(
-            select(Conversation)
-            .where(Conversation.user_id == user_id)
-            .order_by(Conversation.updated_at.desc())
-            .limit(conversation_limit)
+        (
+            await session.execute(
+                select(Conversation)
+                .where(Conversation.user_id == user_id)
+                .order_by(Conversation.updated_at.desc())
+                .limit(conversation_limit)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     conversation_count = (
         await session.execute(

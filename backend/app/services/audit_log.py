@@ -50,10 +50,14 @@ async def list_audit_logs(
 
     total = len((await session.execute(total_query)).scalars().all())
     items = (
-        await session.execute(
-            query.order_by(AuditLog.created_at.desc())
-            .offset((page - 1) * page_size)
-            .limit(page_size)
+        (
+            await session.execute(
+                query.order_by(AuditLog.created_at.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return items, total

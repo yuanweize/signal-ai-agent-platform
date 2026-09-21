@@ -21,14 +21,14 @@ class Order(Base):
 
     # Order details
     quantity: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
-    unit_price: Mapped[float] = mapped_column(Float, nullable=False, comment="Price at time of order")
+    unit_price: Mapped[float] = mapped_column(
+        Float, nullable=False, comment="Price at time of order"
+    )
     total_price: Mapped[float] = mapped_column(Float, nullable=False)
     currency: Mapped[str] = mapped_column(String(10), default="CZK", nullable=False)
 
     # Status: pending → confirmed → paid → shipped → delivered / cancelled
-    status: Mapped[str] = mapped_column(
-        String(20), default="pending", nullable=False, index=True
-    )
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False, index=True)
 
     # Notes (customer message, delivery instructions, etc.)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)

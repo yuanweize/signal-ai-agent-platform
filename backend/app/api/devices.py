@@ -2,10 +2,8 @@
 Devices and Accounts API Router — manage Signal profile and linked devices.
 """
 
-from typing import Optional
-
-from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 from app.api.deps import AdminUser, get_current_admin
 from app.services.signal_client import signal_client
@@ -14,8 +12,34 @@ router = APIRouter(prefix="/account", tags=["Account"])
 
 
 class UpdateProfileRequest(BaseModel):
-    name: Optional[str] = None
-    about: Optional[str] = None
+    name: str | None = None
+    about: str | None = None
+
+
+@router.get("/profile")
+async def get_profile(
+    admin: AdminUser = Depends(get_current_admin),
+):
+    """Get the bot's Signal profile info.
+
+    Note: signal-cli-rest-api does not expose a GET /v1/profiles endpoint.
+    We return the profile from the contacts list (own number) if available,
+    otherwise return the configured phone number.
+    """
+    phone = None
+    try:
+        from app.config import settings as app_settings
+
+        phone = app_settings.signal_phone_number
+    except Exception:
+        pass
+
+    return {
+        "number": phone or "",
+        "name": None,
+        "about": None,
+        "note": "Signal CLI REST API does not provide a GET profile endpoint. Use PUT to update.",
+    }
 
 
 @router.put("/profile")

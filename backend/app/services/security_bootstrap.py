@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import re
-import secrets
 import base64
 import hashlib
 import hmac
+import re
+import secrets
 from dataclasses import dataclass
 
 import pyotp

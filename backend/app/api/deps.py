@@ -4,11 +4,11 @@ Shared API dependencies — authentication and database session.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-from jose import jwt, JWTError
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError, jwt
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -28,12 +28,12 @@ async def create_access_token(username: str, session: AsyncSession) -> tuple[str
         Tuple of (token_string, expires_in_seconds)
     """
     expires_delta = timedelta(minutes=settings.jwt_expire_minutes)
-    expire = datetime.now(timezone.utc) + expires_delta
+    expire = datetime.now(UTC) + expires_delta
 
     payload = {
         "sub": username,
         "exp": expire,
-        "iat": datetime.now(timezone.utc),
+        "iat": datetime.now(UTC),
     }
 
     token = jwt.encode(

@@ -1,6 +1,6 @@
 [project]
 name = "signal-market-bot"
-version = "0.2.1"
+version = "0.3.0"
 description = "AI-powered Signal group market bot with admin dashboard"
 readme = "README.md"
 license = {text = "MIT"}
@@ -37,6 +37,7 @@ dev = [
     "pytest-asyncio>=0.24.0",
     "httpx>=0.28.0",
     "ruff>=0.8.0",
+    "anyio>=4.0",
 ]
 
 [build-system]
@@ -52,6 +53,10 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+ignore = [
+    "E501",   # Line too long — pre-existing in legacy code, tracked as P3
+    "UP042",  # StrEnum not available in Python 3.10; compat with str+Enum kept
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

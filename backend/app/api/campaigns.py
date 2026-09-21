@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select
@@ -45,6 +46,19 @@ def _is_in_quiet_hours(current_hour: int, start_hour: int, end_hour: int) -> boo
     return current_hour >= start_hour or current_hour < end_hour
 
 
+def _get_current_hour_in_tz(tz_name: str) -> int:
+    """Get current hour in the specified timezone.
+
+    P1-1 fix: campaign quiet hours now use the configured timezone, not
+    container local time. Falls back to UTC if timezone is invalid.
+    """
+    try:
+        tz = ZoneInfo(tz_name)
+    except (ZoneInfoNotFoundError, Exception):
+        tz = UTC
+    return datetime.now(tz=tz).hour
+
+
 @router.post("/broadcast", response_model=CampaignBroadcastResponse)
 async def run_broadcast(
     payload: CampaignBroadcastRequest,
@@ -59,7 +73,9 @@ async def run_broadcast(
     targets_result = await session.execute(
         select(Group.group_id).where(Group.is_active == True)  # noqa: E712
     )
-    active_group_ids = [_normalize_group_id(group_id) for group_id in targets_result.scalars().all()]
+    active_group_ids = [
+        _normalize_group_id(group_id) for group_id in targets_result.scalars().all()
+    ]
     if payload.target_group_ids:
         requested = {_normalize_group_id(group_id) for group_id in payload.target_group_ids}
         target_group_ids = [group_id for group_id in active_group_ids if group_id in requested]
@@ -69,8 +85,10 @@ async def run_broadcast(
     if not target_group_ids:
         raise HTTPException(status_code=400, detail="No active target groups available")
 
-    now = datetime.now()
-    current_hour = now.hour
+    now = datetime.now(tz=UTC)
+    # P1-1 fix: use configured timezone for quiet hours, not container local time
+    campaign_tz = settings_data.get("ad_campaign_timezone", "UTC")
+    current_hour = _get_current_hour_in_tz(campaign_tz)
     quiet_start = settings_data["ad_quiet_hour_start"]
     quiet_end = settings_data["ad_quiet_hour_end"]
     in_quiet_hours = _is_in_quiet_hours(current_hour, quiet_start, quiet_end)
@@ -273,9 +291,7 @@ async def get_campaign_summary(
         select(func.count(CampaignDeliveryLog.id)).where(CampaignDeliveryLog.status == "failed")
     )
     recent_result = await session.execute(
-        select(CampaignDeliveryLog)
-        .order_by(CampaignDeliveryLog.created_at.desc())
-        .limit(20)
+        select(CampaignDeliveryLog).order_by(CampaignDeliveryLog.created_at.desc()).limit(20)
     )
     recent_rows = recent_result.scalars().all()
 
@@ -291,7 +307,9 @@ async def get_campaign_summary(
                 "status": row.status,
                 "reason": row.reason,
                 "created_at": row.created_at.isoformat(),
-                "details": json.loads(row.details) if row.details and row.details.startswith("{") else row.details,
+                "details": json.loads(row.details)
+                if row.details and row.details.startswith("{")
+                else row.details,
             }
             for row in recent_rows
         ],

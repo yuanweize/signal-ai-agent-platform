@@ -15,7 +15,7 @@ import json
 import logging
 import re
 import time
-from typing import Callable, Awaitable
+from collections.abc import Awaitable, Callable
 
 import httpx
 import websockets
@@ -38,6 +38,7 @@ def _sanitize_log(text: str, max_len: int = 120) -> str:
     if len(cleaned) > max_len:
         return cleaned[:max_len] + "…"
     return cleaned
+
 
 # Type for the callback that handles incoming messages
 MessageCallback = Callable[[SignalIncomingMessage], Awaitable[None]]
@@ -135,15 +136,10 @@ class SignalClient:
             )
 
             if response.status_code == 201:
-                logger.info(
-                    f"✉️  Message sent to {recipients} "
-                    f"({len(text)} chars)"
-                )
+                logger.info(f"✉️  Message sent to {recipients} ({len(text)} chars)")
                 return True
             else:
-                logger.error(
-                    f"❌ Send failed: HTTP {response.status_code} — {response.text}"
-                )
+                logger.error(f"❌ Send failed: HTTP {response.status_code} — {response.text}")
                 return False
 
         except httpx.HTTPError as e:
@@ -187,13 +183,17 @@ class SignalClient:
         Args:
             recipient: Phone number or "group.{groupId}"
             number: Bot's phone number (defaults to settings)
+
+        Note: swagger spec requires body JSON {"recipient": ...} for DELETE,
+        not query params.
         """
         phone = number or settings.signal_phone_number
         try:
             client = self._get_http_client()
-            response = await client.delete(
+            response = await client.request(
+                "DELETE",
                 f"/v1/typing-indicator/{phone}",
-                params={"recipient": recipient},
+                json={"recipient": recipient},
             )
             return response.status_code in {200, 201, 204}
         except httpx.HTTPError as e:
@@ -212,9 +212,12 @@ class SignalClient:
         Send a read receipt to acknowledge a message.
 
         Args:
-            recipient: Sender's phone number
-            timestamp: Timestamp of the message to mark as read
+            recipient: Sender's phone number (the "recipient" in swagger Receipt schema)
+            timestamp: Timestamp of the message to mark as read (integer, not string)
             number: Bot's phone number (defaults to settings)
+
+        Swagger: POST /v1/receipts/{number}
+        Body: { "receipt_type": "read", "recipient": <str>, "timestamp": <int> }
         """
         phone = number or settings.signal_phone_number
         try:
@@ -223,7 +226,7 @@ class SignalClient:
                 f"/v1/receipts/{phone}",
                 json={
                     "receipt_type": "read",
-                    "target_author": recipient,
+                    "recipient": recipient,
                     "timestamp": timestamp,
                 },
             )
@@ -242,7 +245,12 @@ class SignalClient:
         emoji: str,
         number: str | None = None,
     ) -> bool:
-        """Send a reaction emoji to a specific message."""
+        """Send a reaction emoji to a specific message.
+
+        Swagger: POST /v1/reactions/{number}
+        Body: { "reaction": <str>, "recipient": <str>, "target_author": <str>, "timestamp": <int> }
+        Note: field name is "reaction", not "emoji".
+        """
         phone = number or settings.signal_phone_number
         try:
             client = self._get_http_client()
@@ -252,7 +260,7 @@ class SignalClient:
                     "recipient": recipient,
                     "reaction": emoji,
                     "target_author": target_author,
-                    "target_timestamp": timestamp,
+                    "timestamp": timestamp,
                 },
             )
             return response.status_code in {200, 201, 204}
@@ -267,16 +275,22 @@ class SignalClient:
         timestamp: int,
         number: str | None = None,
     ) -> bool:
-        """Remove a previously sent reaction."""
+        """Remove a previously sent reaction.
+
+        Swagger: DELETE /v1/reactions/{number}
+        Body: { "recipient": <str>, "target_author": <str>, "timestamp": <int> }
+        Note: body JSON, NOT query params.
+        """
         phone = number or settings.signal_phone_number
         try:
             client = self._get_http_client()
-            response = await client.delete(
+            response = await client.request(
+                "DELETE",
                 f"/v1/reactions/{phone}",
-                params={
+                json={
                     "recipient": recipient,
                     "target_author": target_author,
-                    "target_timestamp": timestamp,
+                    "timestamp": timestamp,
                 },
             )
             return response.status_code in {200, 201, 204}
@@ -290,15 +304,21 @@ class SignalClient:
         target_timestamp: int,
         number: str | None = None,
     ) -> bool:
-        """Remote delete a message sent by this bot."""
+        """Remote delete a message sent by this bot.
+
+        Swagger: DELETE /v1/remote-delete/{number}
+        Body: { "recipient": <str>, "timestamp": <int> }
+        Note: body JSON, NOT query params.
+        """
         phone = number or settings.signal_phone_number
         try:
             client = self._get_http_client()
-            response = await client.delete(
+            response = await client.request(
+                "DELETE",
                 f"/v1/remote-delete/{phone}",
-                params={
+                json={
                     "recipient": recipient,
-                    "target_timestamp": target_timestamp,
+                    "timestamp": target_timestamp,
                 },
             )
             return response.status_code in {200, 201, 204}
@@ -458,9 +478,7 @@ class SignalClient:
             if ok:
                 logger.info(f"👋 Left group {_sanitize_log(group_id, 32)}")
             else:
-                logger.warning(
-                    f"Quit group returned HTTP {response.status_code}"
-                )
+                logger.warning(f"Quit group returned HTTP {response.status_code}")
             return ok
         except httpx.HTTPError as e:
             logger.error(f"Quit group failed: {e}")
@@ -504,7 +522,7 @@ class SignalClient:
                 payload["name"] = name
             if description is not None:
                 payload["description"] = description
-            
+
             client = self._get_http_client()
             response = await client.put(
                 f"/v1/groups/{phone}/{group_id}",
@@ -590,7 +608,7 @@ class SignalClient:
                 payload["name"] = name
             if about is not None:
                 payload["about"] = about
-                
+
             client = self._get_http_client()
             response = await client.put(f"/v1/profiles/{phone}", json=payload)
             return response.status_code in {200, 201, 204}
@@ -716,22 +734,19 @@ class SignalClient:
         signal_api_token: str,
         signal_phone_number: str,
     ) -> dict:
-        """Perform an explicit Signal gateway connection check."""
+        """Perform an explicit Signal gateway connection check.
+
+        Uses GET /v1/about (no side effects) to verify reachability,
+        then checks account existence via GET /v1/accounts.
+        We intentionally do NOT call /v1/receive which would consume messages.
+        """
         base_url = signal_api_url.strip()
-        phone_number = signal_phone_number.strip()
         token = signal_api_token.strip()
 
         if not base_url:
             return {
                 "ok": False,
                 "message": "Signal API URL is required",
-                "status_code": None,
-                "latency_ms": 0,
-            }
-        if not phone_number:
-            return {
-                "ok": False,
-                "message": "Signal phone number is required",
                 "status_code": None,
                 "latency_ms": 0,
             }
@@ -747,12 +762,18 @@ class SignalClient:
                 headers=headers,
                 timeout=10.0,
             ) as client:
-                response = await client.get(f"/v1/receive/{phone_number}")
+                # Use /v1/about — no side effects, confirms gateway is reachable and auth works
+                response = await client.get("/v1/about")
             latency_ms = int((time.perf_counter() - started) * 1000)
             ok = response.status_code in {200, 204}
+            message = (
+                "Signal gateway reachable"
+                if ok
+                else f"Signal gateway responded with HTTP {response.status_code}"
+            )
             return {
                 "ok": ok,
-                "message": "Signal gateway reachable" if ok else f"Signal gateway responded with HTTP {response.status_code}",
+                "message": message,
                 "status_code": response.status_code,
                 "latency_ms": latency_ms,
             }
@@ -830,9 +851,7 @@ class SignalClient:
             ) as e:
                 if not self._running:
                     break
-                logger.warning(
-                    f"⚠️  WebSocket connection failed: {e.__class__.__name__}: {e}"
-                )
+                logger.warning(f"⚠️  WebSocket connection failed: {e.__class__.__name__}: {e}")
                 logger.info("📡 Falling back to HTTP polling...")
 
                 try:
@@ -952,9 +971,7 @@ class SignalClient:
                         runtime_metrics.inc("signal.pull.401")
                     if response.status_code >= 500:
                         runtime_metrics.inc("signal.pull.5xx")
-                    logger.warning(
-                        f"⚠️  Poll response: HTTP {response.status_code}"
-                    )
+                    logger.warning(f"⚠️  Poll response: HTTP {response.status_code}")
                     empty_polls += 1
 
             except httpx.HTTPError as e:
@@ -1012,7 +1029,9 @@ class SignalClient:
 
         source = _sanitize_log(msg.envelope.sender_name, 40)
         text_preview = _sanitize_log((msg.envelope.text or ""), 60)
-        context = f"in group {msg.envelope.group_id[:16]}" if msg.envelope.is_group_message else "DM"
+        context = (
+            f"in group {msg.envelope.group_id[:16]}" if msg.envelope.is_group_message else "DM"
+        )
         logger.info(f"📨 [{context}] {source}: {text_preview}")
 
         # Dispatch to handler
@@ -1020,9 +1039,7 @@ class SignalClient:
             try:
                 await self._on_message(msg)
             except Exception as e:
-                logger.error(
-                    f"❌ Message handler error: {e}", exc_info=True
-                )
+                logger.error(f"❌ Message handler error: {e}", exc_info=True)
         else:
             logger.warning("⚠️  No message handler registered!")
 

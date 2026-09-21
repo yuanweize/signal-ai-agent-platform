@@ -37,20 +37,14 @@ async def get_stats(
             select(func.count(Product.id)).where(Product.is_active == True)  # noqa: E712
         )
     ).scalar() or 0
-    conversations = (
-        await session.execute(select(func.count(Conversation.id)))
-    ).scalar() or 0
-    messages = (
-        await session.execute(select(func.count(Message.id)))
-    ).scalar() or 0
+    conversations = (await session.execute(select(func.count(Conversation.id)))).scalar() or 0
+    messages = (await session.execute(select(func.count(Message.id)))).scalar() or 0
     groups = (
         await session.execute(
             select(func.count(Group.id)).where(Group.is_active == True)  # noqa: E712
         )
     ).scalar() or 0
-    orders = (
-        await session.execute(select(func.count(Order.id)))
-    ).scalar() or 0
+    orders = (await session.execute(select(func.count(Order.id)))).scalar() or 0
     runtime = await get_runtime_settings(session)
     bootstrap_status = await get_bootstrap_status(session)
     ai_base_url = runtime.get("ai_api_base_url") or ""

@@ -2,12 +2,19 @@ name: CI
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "refactor/**"]
   pull_request:
 
 jobs:
+  # ============================================================
+  # Backend — lint, format, type-check, compile, pytest, migrations
+  # ============================================================
   backend-check:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -16,17 +23,45 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/pyproject.toml
 
-      - name: Install backend dependencies
+      - name: Install dev dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Ruff lint
+        run: ruff check app/ tests/
+
+      - name: Ruff format check
+        run: ruff format --check app/ tests/
+
+      - name: Compile check
+        run: python -m compileall app/
+
+      - name: Run unit & integration tests
+        run: pytest tests/ -v --tb=short
+        env:
+          DATABASE_URL: "sqlite+aiosqlite:///:memory:"
+
+      - name: Alembic migration tests (fresh & legacy 112aa6e)
+        run: pytest tests/test_migrations.py -v
+        env:
+          DATABASE_URL: "sqlite+aiosqlite:////tmp/ci_test.db"
+
+      - name: CLI migration check against fresh DB
         run: |
-          python -m pip install --upgrade pip
-          pip install -e "./backend[prod]"
+          DATABASE_URL="sqlite+aiosqlite:////tmp/ci_fresh.db" alembic upgrade head
+          DATABASE_URL="sqlite+aiosqlite:////tmp/ci_fresh.db" alembic current
 
-      - name: Compile backend
-        run: python -m compileall backend/app
-
+  # ============================================================
+  # Frontend — install, lint, typecheck, unit tests, build
+  # ============================================================
   frontend-check:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,14 +69,39 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install frontend dependencies
+      - name: Install dependencies
         run: npm ci
-        working-directory: frontend
 
-      - name: Build frontend
+      - name: ESLint check
+        run: npm run lint
+
+      - name: TypeScript type check
+        run: npx tsc --noEmit
+
+      - name: Unit & Component tests (Vitest)
+        run: npm test
+
+      - name: Production Build
         run: npm run build
-        working-directory: frontend
+
+  # ============================================================
+  # Docker — compose config and image build smoke
+  # ============================================================
+  docker-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Compose Config
+        run: docker compose config
+
+      - name: Build backend Docker image
+        run: docker build -t smb-backend:smoke ./backend
+
+      - name: Build frontend Docker image
+        run: docker build -t smb-frontend:smoke ./frontend

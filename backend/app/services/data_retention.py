@@ -21,15 +21,11 @@ async def cleanup_expired_data(session: AsyncSession, retention_days: int | None
     days = retention_days if retention_days is not None else settings.data_retention_days
     cutoff = datetime.now() - timedelta(days=days)
 
-    message_delete = await session.execute(
-        delete(Message).where(Message.timestamp < cutoff)
-    )
+    message_delete = await session.execute(delete(Message).where(Message.timestamp < cutoff))
     conversation_delete = await session.execute(
         delete(Conversation).where(Conversation.updated_at < cutoff)
     )
-    audit_delete = await session.execute(
-        delete(AuditLog).where(AuditLog.created_at < cutoff)
-    )
+    audit_delete = await session.execute(delete(AuditLog).where(AuditLog.created_at < cutoff))
     campaign_delete = await session.execute(
         delete(CampaignDeliveryLog).where(CampaignDeliveryLog.created_at < cutoff)
     )
@@ -75,9 +71,7 @@ async def purge_all_chat_and_audit_data(session: AsyncSession) -> dict:
     group_delete = await session.execute(delete(Group))
 
     # 8. Users — preserve admin accounts
-    user_delete = await session.execute(
-        delete(User).where(User.role != "admin")
-    )
+    user_delete = await session.execute(delete(User).where(User.role != "admin"))
 
     await session.commit()
     return {

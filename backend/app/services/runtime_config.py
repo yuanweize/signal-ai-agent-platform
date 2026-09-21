@@ -10,17 +10,15 @@ import base64
 import hashlib
 import ipaddress
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import urlparse
 
+from cryptography.fernet import Fernet
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cryptography.fernet import Fernet
-
 from app.config import settings
 from app.models.config import BotConfig
-
 
 KEY_AI_PROMPT = "ai_prompt"
 KEY_AI_ENABLED = "is_ai_enabled"
@@ -46,9 +44,7 @@ KEY_SIGNAL_API_TOKEN_ENC = "signal_api_token_enc"
 KEY_SIGNAL_PHONE_NUMBER = "signal_phone_number"
 KEY_BOT_DEFAULT_LANGUAGE = "bot_default_language"
 
-DEFAULT_AI_PROMPT = (
-    "You are a helpful sales assistant. Reply naturally and professionally."
-)
+DEFAULT_AI_PROMPT = "You are a helpful sales assistant. Reply naturally and professionally."
 DEFAULT_AI_ENABLED = False
 DEFAULT_MARKET_ENABLED = True
 DEFAULT_AI_API_BASE_URL = ""
@@ -79,7 +75,9 @@ def _to_bool(value: str | None, default: bool) -> bool:
     return default
 
 
-def _to_int(value: str | None, default: int, minimum: int | None = None, maximum: int | None = None) -> int:
+def _to_int(
+    value: str | None, default: int, minimum: int | None = None, maximum: int | None = None
+) -> int:
     if value is None:
         return default
     try:
@@ -93,7 +91,9 @@ def _to_int(value: str | None, default: int, minimum: int | None = None, maximum
     return parsed
 
 
-def _to_float(value: str | None, default: float, minimum: float | None = None, maximum: float | None = None) -> float:
+def _to_float(
+    value: str | None, default: float, minimum: float | None = None, maximum: float | None = None
+) -> float:
     if value is None:
         return default
     try:
@@ -259,7 +259,9 @@ async def get_runtime_settings(session: AsyncSession) -> dict:
         minimum=1,
         maximum=200,
     )
-    ai_models_cached, ai_models_invalid, ai_models_listed_total, ai_models_cached_at = _parse_models_cache(values.get(KEY_AI_MODELS_CACHE))
+    ai_models_cached, ai_models_invalid, ai_models_listed_total, ai_models_cached_at = (
+        _parse_models_cache(values.get(KEY_AI_MODELS_CACHE))
+    )
 
     retention_days_raw = values.get(KEY_RETENTION_DAYS)
     retention_days = _to_int(retention_days_raw, DEFAULT_RETENTION_DAYS, minimum=1)
@@ -287,9 +289,19 @@ async def get_runtime_settings(session: AsyncSession) -> dict:
     )
     ad_group_blacklist = _to_csv_list(values.get(KEY_AD_GROUP_BLACKLIST))
     bot_name = (values.get(KEY_BOT_NAME) or DEFAULT_BOT_NAME).strip() or DEFAULT_BOT_NAME
-    signal_api_url = (values.get(KEY_SIGNAL_API_URL) or settings.signal_api_url or DEFAULT_SIGNAL_API_URL).strip()
-    signal_phone_number = (values.get(KEY_SIGNAL_PHONE_NUMBER) or settings.signal_phone_number or DEFAULT_SIGNAL_PHONE_NUMBER).strip()
-    bot_default_language = (values.get(KEY_BOT_DEFAULT_LANGUAGE) or settings.bot_default_language or DEFAULT_BOT_DEFAULT_LANGUAGE).strip() or DEFAULT_BOT_DEFAULT_LANGUAGE
+    signal_api_url = (
+        values.get(KEY_SIGNAL_API_URL) or settings.signal_api_url or DEFAULT_SIGNAL_API_URL
+    ).strip()
+    signal_phone_number = (
+        values.get(KEY_SIGNAL_PHONE_NUMBER)
+        or settings.signal_phone_number
+        or DEFAULT_SIGNAL_PHONE_NUMBER
+    ).strip()
+    bot_default_language = (
+        values.get(KEY_BOT_DEFAULT_LANGUAGE)
+        or settings.bot_default_language
+        or DEFAULT_BOT_DEFAULT_LANGUAGE
+    ).strip() or DEFAULT_BOT_DEFAULT_LANGUAGE
 
     signal_api_token_enc = values.get(KEY_SIGNAL_API_TOKEN_ENC, "")
     signal_api_token_plain = values.get(KEY_SIGNAL_API_TOKEN, "")
@@ -489,8 +501,12 @@ async def cache_ai_probe_models(
     probe_ok: bool,
 ) -> None:
     config_map = await get_config_map(session)
-    normalized_listed = sorted({m.strip() for m in listed_models if m and m.strip()}, key=lambda v: v.lower())[:500]
-    normalized_valid = sorted({m.strip() for m in valid_models if m and m.strip()}, key=lambda v: v.lower())[:500]
+    normalized_listed = sorted(
+        {m.strip() for m in listed_models if m and m.strip()}, key=lambda v: v.lower()
+    )[:500]
+    normalized_valid = sorted(
+        {m.strip() for m in valid_models if m and m.strip()}, key=lambda v: v.lower()
+    )[:500]
     normalized_invalid = []
     for item in invalid_models[:1000]:
         model_id = str(item.get("model") or "").strip()
@@ -516,12 +532,14 @@ async def cache_ai_probe_models(
         "effective_base_url": effective_base_url,
         "message": message,
         "probe_ok": probe_ok,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(UTC).isoformat(),
     }
     value = json.dumps(payload, ensure_ascii=False)
 
     if KEY_AI_MODELS_CACHE in config_map:
-        result = await session.execute(select(BotConfig).where(BotConfig.key == KEY_AI_MODELS_CACHE))
+        result = await session.execute(
+            select(BotConfig).where(BotConfig.key == KEY_AI_MODELS_CACHE)
+        )
         row = result.scalar_one()
         row.value = value
     else:

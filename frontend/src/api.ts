@@ -7,6 +7,15 @@
 
 const API_BASE = '/api';
 
+export * from './types/inbox';
+import type {
+  ConversationDTO,
+  ConversationDetailDTO,
+  ConversationListResponse,
+  ConversationMessagesResponse,
+  MessageDTO,
+} from './types/inbox';
+
 interface ApiOptions {
   method?: string;
   body?: unknown;
@@ -43,9 +52,15 @@ class ApiClient {
       headers['Content-Type'] = 'application/json';
     }
 
+    // Only retry GET requests by default.
+    // POST/PUT/DELETE are non-idempotent and must not be auto-retried
+    // (risk of duplicate sends, double-charge, etc.).
+    // retryCount is ignored for mutating methods unless caller explicitly overrides.
+    const effectiveRetries = (method === 'GET') ? retryCount : 0;
+
     let lastError: unknown = null;
 
-    for (let attempt = 0; attempt <= retryCount; attempt += 1) {
+    for (let attempt = 0; attempt <= effectiveRetries; attempt += 1) {
       try {
         const response = await fetch(`${API_BASE}${endpoint}`, {
           method,
@@ -66,8 +81,9 @@ class ApiClient {
         if (!response.ok) {
           const error = await response.json().catch(() => ({ detail: 'Request failed' }));
           const message = error.detail || `HTTP ${response.status}`;
-          const retriable = response.status >= 500 || response.status === 429;
-          if (retriable && attempt < retryCount) {
+          // Only retry 5xx/429 on GET; never on mutations
+          const retriable = method === 'GET' && (response.status >= 500 || response.status === 429);
+          if (retriable && attempt < effectiveRetries) {
             await new Promise(resolve => setTimeout(resolve, (attempt + 1) * 300));
             continue;
           }
@@ -77,7 +93,7 @@ class ApiClient {
         return response.json();
       } catch (error) {
         lastError = error;
-        const retriable = method === 'GET' && attempt < retryCount;
+        const retriable = method === 'GET' && attempt < effectiveRetries;
         if (!retriable) break;
         await new Promise(resolve => setTimeout(resolve, (attempt + 1) * 300));
       }
@@ -251,6 +267,17 @@ class ApiClient {
       body: payload,
     });
   }
+
+  async getConversationMode(conversationId: number) {
+    return this.request<{ id: number; mode: string }>(`/chats/${conversationId}/mode`);
+  }
+
+  async setConversationMode(conversationId: number, mode: 'auto' | 'manual' | 'paused') {
+    return this.request<{ id: number; mode: string; previous_mode: string }>(
+      `/chats/${conversationId}/mode`,
+      { method: 'PUT', body: { mode } }
+    );
+  }
   // Account & Devices
   async getProfile() {
     return this.request<{ name?: string; about?: string }>('/account/profile');
@@ -319,6 +346,89 @@ class ApiClient {
       body: { members },
     });
   }
+
+  // ---- Inbox Conversations API (Round 2) ----
+  async getConversations(params?: {
+    search?: string;
+    type?: string;
+    mode?: string;
+    unread_only?: boolean;
+    limit?: number;
+    offset?: number;
+  }) {
+    const q = new URLSearchParams();
+    if (params?.search) q.append('search', params.search);
+    if (params?.type) q.append('type', params.type);
+    if (params?.mode) q.append('mode', params.mode);
+    if (params?.unread_only) q.append('unread_only', 'true');
+    if (params?.limit) q.append('limit', String(params.limit));
+    if (params?.offset) q.append('offset', String(params.offset));
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return this.request<ConversationListResponse>(`/conversations${qs}`);
+  }
+
+  async getConversation(id: number) {
+    return this.request<ConversationDetailDTO>(`/conversations/${id}`);
+  }
+
+  async getConversationMessages(
+    id: number,
+    params?: { limit?: number; before_id?: number; after_id?: number }
+  ) {
+    const q = new URLSearchParams();
+    if (params?.limit) q.append('limit', String(params.limit));
+    if (params?.before_id) q.append('before_id', String(params.before_id));
+    if (params?.after_id) q.append('after_id', String(params.after_id));
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return this.request<ConversationMessagesResponse>(`/conversations/${id}/messages${qs}`);
+  }
+
+  async sendConversationMessage(id: number, message: string, reply_to_id?: number) {
+    return this.request<MessageDTO>(`/conversations/${id}/messages`, {
+      method: 'POST',
+      body: { message, reply_to_id },
+    });
+  }
+
+  async updateConversationMode(id: number, mode: 'auto' | 'manual' | 'paused') {
+    return this.request<ConversationDTO>(`/conversations/${id}/mode`, {
+      method: 'PATCH',
+      body: { mode },
+    });
+  }
+
+  async markConversationRead(id: number, last_message_id?: number) {
+    return this.request<{ ok: boolean; conversation_id: number; last_read_message_id: number }>(
+      `/conversations/${id}/read`,
+      {
+        method: 'POST',
+        body: { last_message_id },
+      }
+    );
+  }
+
+  async retryConversationMessage(conversationId: number, messageId: number) {
+    return this.request<MessageDTO>(
+      `/conversations/${conversationId}/messages/${messageId}/retry`,
+      { method: 'POST' }
+    );
+  }
+
+  async getGroupMembers(groupId: string) {
+    return this.request<GroupMemberDTO[]>(`/groups/${encodeURIComponent(groupId)}/members`);
+  }
+}
+
+export interface GroupMemberDTO {
+  id: number;
+  group_id: number;
+  user_id?: number | null;
+  external_identifier: string;
+  display_name?: string | null;
+  is_admin: boolean;
+  role: string;
+  first_seen_at: string;
+  last_seen_at: string;
 }
 
 export interface SignalDevice {
@@ -534,9 +644,11 @@ export interface CampaignSummaryResponse {
 }
 
 export interface ChatConversation {
+  id: number;
   signal_id: string;
   display_name?: string;
   group_id?: string;
+  mode: 'auto' | 'manual' | 'paused';
   last_message: string;
   last_message_at?: string;
   message_count: number;
@@ -548,12 +660,18 @@ export interface ChatMessage {
   content: string;
   timestamp: string;
   sender_name?: string;
+  sender_id?: string;
+  signal_timestamp_ms?: number | null;
+  delivery_status?: string | null;
+  delivery_error?: string | null;
 }
 
 export interface ChatMessagesResponse {
   signal_id: string;
   display_name?: string;
   group_id?: string;
+  conversation_id?: number | null;
+  mode: 'auto' | 'manual' | 'paused';
   items: ChatMessage[];
   total: number;
   page: number;
