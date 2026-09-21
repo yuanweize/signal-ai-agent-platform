@@ -5,6 +5,7 @@ Registers lifespan events, CORS, routes, and health check.
 """
 
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 
@@ -127,13 +128,24 @@ async def metrics_middleware(request: Request, call_next):
     runtime_metrics.observe_latency("api.request", duration)
     return response
 
+import os
+
 # ---- CORS ----
+# In production, restrict origins to configured ALLOWED_ORIGINS env var.
+# Default to localhost variants for local development only.
+_raw_origins = os.environ.get("ALLOWED_ORIGINS", "").strip()
+if _raw_origins:
+    _allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+else:
+    # Development fallback — still restrictive, not wildcard
+    _allowed_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Restricted in production via nginx proxy
+    allow_origins=_allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 

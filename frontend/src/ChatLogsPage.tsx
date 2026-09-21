@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { api, ChatConversation, ChatMessage } from './api';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { api, ChatConversation, ChatMessage, ChatMessagesResponse } from './api';
 import SidebarLayout from './SidebarLayout';
 
 function formatTime(iso?: string): string {
@@ -20,19 +20,46 @@ function formatListTime(iso?: string): string {
     : date.toLocaleDateString();
 }
 
-/** Build a unique key for list entry: group_id for groups, signal_id for DMs */
 function contactKey(c: ChatConversation): string {
   return c.group_id ? `group::${c.group_id}` : `dm::${c.signal_id}`;
+}
+
+function modeBadge(mode: string): string {
+  switch (mode) {
+    case 'manual': return '✋ Manual';
+    case 'paused': return '⏸ Paused';
+    default: return '🤖 AI';
+  }
+}
+
+function modeBadgeClass(mode: string): string {
+  switch (mode) {
+    case 'manual': return 'badge-manual';
+    case 'paused': return 'badge-paused';
+    default: return 'badge-auto';
+  }
+}
+
+function deliveryIcon(status?: string | null): string {
+  switch (status) {
+    case 'sent': return '✓';
+    case 'failed': return '✗';
+    case 'pending': return '⏳';
+    default: return '';
+  }
 }
 
 export default function ChatLogsPage() {
   const [loadingContacts, setLoadingContacts] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
+  const [settingMode, setSettingMode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [contacts, setContacts] = useState<ChatConversation[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activeKey, setActiveKey] = useState<string>('');
+  const [activeConvId, setActiveConvId] = useState<number | null>(null);
+  const [activeMode, setActiveMode] = useState<'auto' | 'manual' | 'paused'>('auto');
   const [draft, setDraft] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -40,11 +67,19 @@ export default function ChatLogsPage() {
   const [totalMessages, setTotalMessages] = useState(0);
   const [unreadMap, setUnreadMap] = useState<Record<string, number>>({});
   const lastMessageCountRef = useRef<Record<string, number>>({});
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const currentContact = useMemo(
     () => contacts.find(c => contactKey(c) === activeKey),
     [contacts, activeKey]
   );
+
+  // Auto-scroll to bottom when new messages load (only on last page)
+  useEffect(() => {
+    if (page * pageSize >= totalMessages) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, page, pageSize, totalMessages]);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,7 +110,6 @@ export default function ChatLogsPage() {
         });
 
         lastMessageCountRef.current = nextCounts;
-
         setContacts(data.items);
         if (data.items.length > 0) {
           setActiveKey(prev => prev || contactKey(data.items[0]));
@@ -90,15 +124,9 @@ export default function ChatLogsPage() {
     };
 
     loadChats();
-    const interval = setInterval(() => {
-      void loadChats(true);
-    }, 10000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
+    const interval = setInterval(() => { void loadChats(true); }, 10000);
+    return () => { cancelled = true; clearInterval(interval); };
   }, [activeKey]);
-
 
   useEffect(() => {
     let cancelled = false;
@@ -112,12 +140,11 @@ export default function ChatLogsPage() {
         setLoadingMessages(true);
         setError(null);
 
-        // For groups: pass group_id. For DMs: pass signal_id with no group_id.
         const signalId = currentContact.group_id
-          ? currentContact.group_id  // API accepts group_id in signal_id path param for groups
+          ? currentContact.group_id
           : currentContact.signal_id;
 
-        const data = await api.getChatMessages(
+        const data: ChatMessagesResponse = await api.getChatMessages(
           signalId,
           currentContact.group_id || undefined,
           page,
@@ -126,6 +153,8 @@ export default function ChatLogsPage() {
         if (cancelled) return;
         setMessages(data.items);
         setTotalMessages(data.total);
+        setActiveConvId(data.conversation_id ?? null);
+        setActiveMode((data.mode as 'auto' | 'manual' | 'paused') || 'auto');
         setUnreadMap(prev => ({ ...prev, [contactKey(currentContact)]: 0 }));
       } catch (e) {
         if (!cancelled) {
@@ -137,9 +166,7 @@ export default function ChatLogsPage() {
     };
 
     loadMessages();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [currentContact?.signal_id, currentContact?.group_id, page, pageSize]);
 
   const filteredContacts = useMemo(() => {
@@ -169,6 +196,7 @@ export default function ChatLogsPage() {
           role: 'assistant',
           content: justSent,
           timestamp: new Date().toISOString(),
+          delivery_status: 'sent',
         },
       ]);
     } catch (e) {
@@ -178,16 +206,35 @@ export default function ChatLogsPage() {
     }
   };
 
+  const handleModeChange = useCallback(async (newMode: 'auto' | 'manual' | 'paused') => {
+    if (!activeConvId || settingMode) return;
+    try {
+      setSettingMode(true);
+      setError(null);
+      await api.setConversationMode(activeConvId, newMode);
+      setActiveMode(newMode);
+      // Update the contact list entry too
+      setContacts(prev => prev.map(c =>
+        contactKey(c) === activeKey ? { ...c, mode: newMode } : c
+      ));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to set mode');
+    } finally {
+      setSettingMode(false);
+    }
+  }, [activeConvId, activeKey, settingMode]);
+
   const isGroupChat = !!currentContact?.group_id;
 
   return (
-    <SidebarLayout title="Chat Logs (Audit)">
+    <SidebarLayout title="Chats">
       {error && (
-        <div className="form-error chat-banner-error">
+        <div className="form-error chat-banner-error" style={{ margin: '0.5rem 1rem' }}>
           {error}
         </div>
       )}
       <div className="chat-container">
+        {/* ---- Sidebar ---- */}
         <aside className="chat-sidebar">
           <div className="chat-sidebar-search">
             <input
@@ -200,9 +247,7 @@ export default function ChatLogsPage() {
           </div>
 
           <div className="chat-list">
-            {loadingContacts && (
-              <div className="chat-status">Loading chats...</div>
-            )}
+            {loadingContacts && <div className="chat-status">Loading chats...</div>}
             {!loadingContacts && filteredContacts.length === 0 && (
               <div className="chat-status">No conversations found</div>
             )}
@@ -232,82 +277,121 @@ export default function ChatLogsPage() {
                     <div className="contact-time">{formatListTime(contact.last_message_at)}</div>
                   </div>
                   <div className="contact-preview">{contact.last_message || 'No messages yet'}</div>
-                  {unread > 0 && (
-                    <span className="contact-unread-badge">{unread} unread</span>
-                  )}
+                  <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.2rem', alignItems: 'center' }}>
+                    {unread > 0 && (
+                      <span className="contact-unread-badge">{unread}</span>
+                    )}
+                    <span className={`mode-badge ${modeBadgeClass(contact.mode || 'auto')}`} style={{ fontSize: '0.7rem' }}>
+                      {modeBadge(contact.mode || 'auto')}
+                    </span>
+                  </div>
                 </button>
               );
             })}
           </div>
         </aside>
 
+        {/* ---- Chat main ---- */}
         <div className="chat-main">
           {currentContact ? (
             <>
+              {/* Header */}
               <div className="chat-header">
-                <div className="chat-header-title">
-                  <span style={{ marginRight: '0.4rem' }}>
-                    {isGroupChat ? '👥' : '💬'}
-                  </span>
-                  {currentContact.display_name || currentContact.signal_id}
+                <div style={{ flex: 1 }}>
+                  <div className="chat-header-title">
+                    <span style={{ marginRight: '0.4rem' }}>
+                      {isGroupChat ? '👥' : '💬'}
+                    </span>
+                    {currentContact.display_name || currentContact.signal_id}
+                    <span className={`mode-badge ${modeBadgeClass(activeMode)}`} style={{ marginLeft: '0.6rem', fontSize: '0.8rem' }}>
+                      {modeBadge(activeMode)}
+                    </span>
+                  </div>
+                  <div className="chat-header-subtitle">
+                    {isGroupChat
+                      ? `Group · ${currentContact.group_id}`
+                      : `DM · ${currentContact.signal_id}`}
+                  </div>
                 </div>
-                <div className="chat-header-subtitle">
-                  {isGroupChat
-                    ? `Group ID: ${currentContact.group_id}`
-                    : `${currentContact.signal_id} · Direct Message`}
+
+                {/* Mode switcher — real backend-persisted state */}
+                <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                  {(['auto', 'manual', 'paused'] as const).map(m => (
+                    <button
+                      key={m}
+                      className={`btn-secondary ${activeMode === m ? 'active' : ''}`}
+                      style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem', opacity: activeMode === m ? 1 : 0.6 }}
+                      onClick={() => handleModeChange(m)}
+                      disabled={settingMode || activeConvId === null}
+                      title={
+                        m === 'auto' ? 'AI replies automatically' :
+                        m === 'manual' ? 'Admin replies; AI is suppressed' :
+                        'No auto-reply; messages recorded only'
+                      }
+                    >
+                      {m === 'auto' ? '🤖 Auto' : m === 'manual' ? '✋ Manual' : '⏸ Pause'}
+                    </button>
+                  ))}
                 </div>
               </div>
 
+              {/* Messages */}
               <div className="chat-messages">
-                {loadingMessages && (
-                  <div className="chat-status">Loading messages...</div>
-                )}
+                {loadingMessages && <div className="chat-status">Loading messages...</div>}
                 {!loadingMessages && messages.map(msg => {
                   const isUser = msg.role === 'user';
+                  const isFailed = msg.delivery_status === 'failed';
 
                   return (
-                    <article key={msg.id} className={`message ${isUser ? 'user' : 'bot'}`}>
+                    <article key={msg.id} className={`message ${isUser ? 'user' : 'bot'} ${isFailed ? 'message-failed' : ''}`}>
                       {isUser && isGroupChat && msg.sender_name && (
                         <div className="message-sender">{msg.sender_name}</div>
                       )}
                       <div className="message-content">{msg.content}</div>
                       <div className="message-time">
-                        {formatTime(msg.timestamp)} {isUser ? '' : '🤖'}
+                        {formatTime(msg.timestamp)}
+                        {!isUser && msg.delivery_status && (
+                          <span
+                            title={msg.delivery_error || msg.delivery_status}
+                            style={{ marginLeft: '0.3rem', color: isFailed ? '#e53e3e' : undefined }}
+                          >
+                            {deliveryIcon(msg.delivery_status)}
+                          </span>
+                        )}
+                        {isUser ? '' : ' 🤖'}
                       </div>
+                      {isFailed && msg.delivery_error && (
+                        <div style={{ color: '#e53e3e', fontSize: '0.7rem', marginTop: '0.2rem' }}>
+                          Failed: {msg.delivery_error}
+                        </div>
+                      )}
                     </article>
                   );
                 })}
+                <div ref={messagesEndRef} />
 
+                {/* Pagination */}
                 <div className="chat-pagination">
                   <span>Total: {totalMessages}</span>
                   <div className="chat-pagination-controls">
                     <button className="btn-secondary" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1 || loadingMessages}>Prev</button>
                     <span className="chat-pagination-label">Page {page}</span>
                     <button className="btn-secondary" onClick={() => setPage(p => p + 1)} disabled={loadingMessages || page * pageSize >= totalMessages}>Next</button>
-                    <button className="btn-secondary" onClick={() => {
-                      if (!currentContact) return;
-                      setError(null);
-                      setLoadingMessages(true);
-                      const signalId = currentContact.group_id
-                        ? currentContact.group_id
-                        : currentContact.signal_id;
-                      void api.getChatMessages(signalId, currentContact.group_id || undefined, page, pageSize)
-                        .then(data => {
-                          setMessages(data.items);
-                          setTotalMessages(data.total);
-                        })
-                        .catch(e => setError(e instanceof Error ? e.message : 'Failed to load messages'))
-                        .finally(() => setLoadingMessages(false));
-                    }} disabled={loadingMessages}>Retry</button>
                   </div>
                 </div>
               </div>
 
+              {/* Composer */}
               <div className="chat-composer">
                 <div className="chat-composer-row">
-                  <input
-                    type="text"
-                    placeholder="Takeover mode: Send message manually..."
+                  <textarea
+                    placeholder={
+                      activeMode === 'auto'
+                        ? 'AI is active. Type to send manually anyway...'
+                        : activeMode === 'manual'
+                        ? 'Manual mode: send your reply...'
+                        : 'Paused mode: send message...'
+                    }
                     value={draft}
                     onChange={e => setDraft(e.target.value)}
                     onKeyDown={e => {
@@ -318,6 +402,7 @@ export default function ChatLogsPage() {
                     }}
                     className="chat-composer-input"
                     disabled={sending || loadingMessages}
+                    rows={2}
                   />
                   <button
                     className="btn-primary chat-send-button"
@@ -327,14 +412,20 @@ export default function ChatLogsPage() {
                     {sending ? 'Sending...' : 'Send'}
                   </button>
                 </div>
-                <div className="chat-composer-hint">
-                  Manual takeover is active. New messages are stored in conversation history.
+                <div className="chat-composer-hint" style={{ color: activeMode === 'manual' ? '#2d9748' : undefined }}>
+                  {activeMode === 'manual'
+                    ? '✋ Manual mode active — AI is suppressed'
+                    : activeMode === 'paused'
+                    ? '⏸ Paused — no auto-reply'
+                    : '🤖 AI auto-reply is active'}
+                  {' · '}
+                  <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>Shift+Enter for newline</span>
                 </div>
               </div>
             </>
           ) : (
             <div className="chat-empty-state">
-              Select a conversation to view logs
+              Select a conversation to view messages
             </div>
           )}
         </div>

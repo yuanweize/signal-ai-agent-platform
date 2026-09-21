@@ -43,9 +43,15 @@ class ApiClient {
       headers['Content-Type'] = 'application/json';
     }
 
+    // Only retry GET requests by default.
+    // POST/PUT/DELETE are non-idempotent and must not be auto-retried
+    // (risk of duplicate sends, double-charge, etc.).
+    // retryCount is ignored for mutating methods unless caller explicitly overrides.
+    const effectiveRetries = (method === 'GET') ? retryCount : 0;
+
     let lastError: unknown = null;
 
-    for (let attempt = 0; attempt <= retryCount; attempt += 1) {
+    for (let attempt = 0; attempt <= effectiveRetries; attempt += 1) {
       try {
         const response = await fetch(`${API_BASE}${endpoint}`, {
           method,
@@ -66,8 +72,9 @@ class ApiClient {
         if (!response.ok) {
           const error = await response.json().catch(() => ({ detail: 'Request failed' }));
           const message = error.detail || `HTTP ${response.status}`;
-          const retriable = response.status >= 500 || response.status === 429;
-          if (retriable && attempt < retryCount) {
+          // Only retry 5xx/429 on GET; never on mutations
+          const retriable = method === 'GET' && (response.status >= 500 || response.status === 429);
+          if (retriable && attempt < effectiveRetries) {
             await new Promise(resolve => setTimeout(resolve, (attempt + 1) * 300));
             continue;
           }
@@ -77,7 +84,7 @@ class ApiClient {
         return response.json();
       } catch (error) {
         lastError = error;
-        const retriable = method === 'GET' && attempt < retryCount;
+        const retriable = method === 'GET' && attempt < effectiveRetries;
         if (!retriable) break;
         await new Promise(resolve => setTimeout(resolve, (attempt + 1) * 300));
       }
@@ -250,6 +257,17 @@ class ApiClient {
       method: 'POST',
       body: payload,
     });
+  }
+
+  async getConversationMode(conversationId: number) {
+    return this.request<{ id: number; mode: string }>(`/chats/${conversationId}/mode`);
+  }
+
+  async setConversationMode(conversationId: number, mode: 'auto' | 'manual' | 'paused') {
+    return this.request<{ id: number; mode: string; previous_mode: string }>(
+      `/chats/${conversationId}/mode`,
+      { method: 'PUT', body: { mode } }
+    );
   }
   // Account & Devices
   async getProfile() {
@@ -534,9 +552,11 @@ export interface CampaignSummaryResponse {
 }
 
 export interface ChatConversation {
+  id: number;
   signal_id: string;
   display_name?: string;
   group_id?: string;
+  mode: 'auto' | 'manual' | 'paused';
   last_message: string;
   last_message_at?: string;
   message_count: number;
@@ -548,12 +568,18 @@ export interface ChatMessage {
   content: string;
   timestamp: string;
   sender_name?: string;
+  sender_id?: string;
+  signal_timestamp_ms?: number | null;
+  delivery_status?: string | null;
+  delivery_error?: string | null;
 }
 
 export interface ChatMessagesResponse {
   signal_id: string;
   display_name?: string;
   group_id?: string;
+  conversation_id?: number | null;
+  mode: 'auto' | 'manual' | 'paused';
   items: ChatMessage[];
   total: number;
   page: number;

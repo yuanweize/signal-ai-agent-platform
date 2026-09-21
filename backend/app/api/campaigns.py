@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select
@@ -45,6 +46,19 @@ def _is_in_quiet_hours(current_hour: int, start_hour: int, end_hour: int) -> boo
     return current_hour >= start_hour or current_hour < end_hour
 
 
+def _get_current_hour_in_tz(tz_name: str) -> int:
+    """Get current hour in the specified timezone.
+
+    P1-1 fix: campaign quiet hours now use the configured timezone, not
+    container local time. Falls back to UTC if timezone is invalid.
+    """
+    try:
+        tz = ZoneInfo(tz_name)
+    except (ZoneInfoNotFoundError, Exception):
+        tz = timezone.utc
+    return datetime.now(tz=tz).hour
+
+
 @router.post("/broadcast", response_model=CampaignBroadcastResponse)
 async def run_broadcast(
     payload: CampaignBroadcastRequest,
@@ -69,8 +83,10 @@ async def run_broadcast(
     if not target_group_ids:
         raise HTTPException(status_code=400, detail="No active target groups available")
 
-    now = datetime.now()
-    current_hour = now.hour
+    now = datetime.now(tz=timezone.utc)
+    # P1-1 fix: use configured timezone for quiet hours, not container local time
+    campaign_tz = settings_data.get("ad_campaign_timezone", "UTC")
+    current_hour = _get_current_hour_in_tz(campaign_tz)
     quiet_start = settings_data["ad_quiet_hour_start"]
     quiet_end = settings_data["ad_quiet_hour_end"]
     in_quiet_hours = _is_in_quiet_hours(current_hour, quiet_start, quiet_end)
