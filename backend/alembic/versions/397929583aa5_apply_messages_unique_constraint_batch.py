@@ -23,10 +23,18 @@ def upgrade() -> None:
     # SQLite requires batch mode for adding constraints to existing tables.
     # This rebuilds the messages table with the unique constraint applied.
     # NULL values in signal_event_id are excluded from uniqueness by SQLite semantics.
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    cols = [c["name"] for c in inspector.get_columns("messages")]
+    uq_names = [uq.get("name") for uq in inspector.get_unique_constraints("messages")]
+
     with op.batch_alter_table('messages', schema=None) as batch_op:
-        batch_op.create_unique_constraint('uq_messages_signal_event_id', ['signal_event_id'])
+        if "uq_messages_signal_event_id" not in uq_names:
+            batch_op.create_unique_constraint('uq_messages_signal_event_id', ['signal_event_id'])
         # Drop legacy column no longer used in new schema
-        batch_op.drop_column('intent_confidence')
+        if "intent_confidence" in cols:
+            batch_op.drop_column('intent_confidence')
+
 
 
 def downgrade() -> None:
