@@ -27,14 +27,14 @@ def upgrade() -> None:
     msg_indexes = [idx["name"] for idx in inspector.get_indexes("messages")]
 
     # Add mode with server_default='auto' so existing rows get a valid value
-    if "mode" not in conv_cols:
-        op.add_column('conversations', sa.Column(
-            'mode', sa.String(length=20), nullable=False, server_default='auto'
-        ))
-
-    op.alter_column('conversations', 'user_id',
-               existing_type=sa.INTEGER(),
-               nullable=True)
+    with op.batch_alter_table('conversations', schema=None) as batch_op:
+        if "mode" not in conv_cols:
+            batch_op.add_column(sa.Column(
+                'mode', sa.String(length=20), nullable=False, server_default='auto'
+            ))
+        batch_op.alter_column('user_id',
+                   existing_type=sa.INTEGER(),
+                   nullable=True)
 
     if "description" not in group_cols:
         op.add_column('groups', sa.Column('description', sa.Text(), nullable=True))
@@ -85,8 +85,9 @@ def downgrade() -> None:
     op.drop_column('messages', 'signal_timestamp_ms')
     op.drop_column('messages', 'sender_name')
     op.drop_column('groups', 'description')
-    op.alter_column('conversations', 'user_id',
-               existing_type=sa.INTEGER(),
-               nullable=False)
-    op.drop_column('conversations', 'mode')
+    with op.batch_alter_table('conversations', schema=None) as batch_op:
+        batch_op.alter_column('user_id',
+                   existing_type=sa.INTEGER(),
+                   nullable=False)
+        batch_op.drop_column('mode')
 
