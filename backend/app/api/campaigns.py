@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -55,7 +55,7 @@ def _get_current_hour_in_tz(tz_name: str) -> int:
     try:
         tz = ZoneInfo(tz_name)
     except (ZoneInfoNotFoundError, Exception):
-        tz = timezone.utc
+        tz = UTC
     return datetime.now(tz=tz).hour
 
 
@@ -73,7 +73,9 @@ async def run_broadcast(
     targets_result = await session.execute(
         select(Group.group_id).where(Group.is_active == True)  # noqa: E712
     )
-    active_group_ids = [_normalize_group_id(group_id) for group_id in targets_result.scalars().all()]
+    active_group_ids = [
+        _normalize_group_id(group_id) for group_id in targets_result.scalars().all()
+    ]
     if payload.target_group_ids:
         requested = {_normalize_group_id(group_id) for group_id in payload.target_group_ids}
         target_group_ids = [group_id for group_id in active_group_ids if group_id in requested]
@@ -83,7 +85,7 @@ async def run_broadcast(
     if not target_group_ids:
         raise HTTPException(status_code=400, detail="No active target groups available")
 
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     # P1-1 fix: use configured timezone for quiet hours, not container local time
     campaign_tz = settings_data.get("ad_campaign_timezone", "UTC")
     current_hour = _get_current_hour_in_tz(campaign_tz)
@@ -289,9 +291,7 @@ async def get_campaign_summary(
         select(func.count(CampaignDeliveryLog.id)).where(CampaignDeliveryLog.status == "failed")
     )
     recent_result = await session.execute(
-        select(CampaignDeliveryLog)
-        .order_by(CampaignDeliveryLog.created_at.desc())
-        .limit(20)
+        select(CampaignDeliveryLog).order_by(CampaignDeliveryLog.created_at.desc()).limit(20)
     )
     recent_rows = recent_result.scalars().all()
 
@@ -307,7 +307,9 @@ async def get_campaign_summary(
                 "status": row.status,
                 "reason": row.reason,
                 "created_at": row.created_at.isoformat(),
-                "details": json.loads(row.details) if row.details and row.details.startswith("{") else row.details,
+                "details": json.loads(row.details)
+                if row.details and row.details.startswith("{")
+                else row.details,
             }
             for row in recent_rows
         ],

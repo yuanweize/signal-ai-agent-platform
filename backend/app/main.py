@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.router import api_router
 from app.config import settings
 from app.database import async_session, close_db, init_db
 from app.services.data_retention import cleanup_expired_data
@@ -71,8 +72,8 @@ async def lifespan(app: FastAPI):
         )
 
     # Wire up Signal message pipeline
-    from app.services.message_handler import message_handler
     from app.services.ai_engine import ai_engine
+    from app.services.message_handler import message_handler
 
     signal_client.on_message = message_handler.handle
 
@@ -128,7 +129,6 @@ async def metrics_middleware(request: Request, call_next):
     runtime_metrics.observe_latency("api.request", duration)
     return response
 
-import os
 
 # ---- CORS ----
 # In production, restrict origins to configured ALLOWED_ORIGINS env var.
@@ -152,11 +152,36 @@ app.add_middleware(
 # ---- Health Check ----
 @app.get("/health", tags=["System"])
 async def health_check():
-    """Health check with module status for frontend dashboard."""
+    """Health check with real subsystem status.
+
+    /health returns actual DB and configuration state.
+    A DB failure will reflect in the response but HTTP 200 is still returned
+    so load balancers remain happy. Use the `status` field for alerting.
+    """
     bot_name = settings.bot_name
-    runtime_features = settings.features_summary
+    db_ok = False
+    migration_ok = False
+    runtime_features: dict = {}
+    bootstrap_complete = False
+
     try:
         async with async_session() as session:
+            # DB liveness: simple count query
+            from sqlalchemy import text
+
+            await session.execute(text("SELECT 1"))
+            db_ok = True
+
+            # Migration state check
+            try:
+                result = await session.execute(
+                    text("SELECT version_num FROM alembic_version LIMIT 1")
+                )
+                row = result.scalar_one_or_none()
+                migration_ok = row is not None
+            except Exception:
+                migration_ok = False
+
             runtime = await get_runtime_settings(session)
             bootstrap_status = await get_bootstrap_status(session)
             bot_name = runtime.get("bot_name", bot_name)
@@ -164,19 +189,36 @@ async def health_check():
             ai_enabled = bool(runtime.get("is_ai_enabled")) and (
                 bool(runtime.get("has_ai_api_key")) or is_ai_api_key_optional(ai_base_url)
             )
+            bootstrap_complete = not bootstrap_status.bootstrap_required
             runtime_features = {
-                "signal": signal_client.is_connected,
-                "ai": ai_enabled,
+                "signal_configured": bool(
+                    runtime.get("signal_api_url") and runtime.get("signal_phone_number")
+                ),
+                "signal_listener": signal_client.is_connected,
+                "ai_configured": ai_enabled,
                 "market": bool(runtime.get("is_market_enabled")),
                 "admin_2fa": bootstrap_status.requires_2fa,
+                "bootstrap_complete": bootstrap_complete,
             }
     except Exception:
-        pass
+        db_ok = False
+        runtime_features = {
+            "signal_configured": False,
+            "signal_listener": False,
+            "ai_configured": False,
+            "market": False,
+            "admin_2fa": False,
+            "bootstrap_complete": False,
+        }
+
+    overall_status = "ok" if db_ok else "degraded"
 
     return {
-        "status": "ok",
+        "status": overall_status,
         "version": APP_VERSION,
         "bot_name": bot_name,
+        "db": db_ok,
+        "migration_applied": migration_ok,
         "features": runtime_features,
     }
 
@@ -194,5 +236,4 @@ async def root():
 
 
 # ---- API Routes ----
-from app.api.router import api_router
 app.include_router(api_router, prefix="/api")

@@ -22,8 +22,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 
-class ConversationMode(str, Enum):
-    auto = "auto"      # AI replies automatically
+class ConversationMode(str, Enum):  # noqa: UP042 — StrEnum not available in 3.10
+    auto = "auto"  # AI replies automatically
     manual = "manual"  # Admin replies; AI is suppressed
     paused = "paused"  # No auto-reply; messages are recorded only
 
@@ -113,9 +113,7 @@ class Message(Base):
 
     # Deduplication key: "{sender_id}:{signal_timestamp_ms}" for inbound user messages.
     # NULL for outbound bot/admin messages (no Signal timestamp yet at write time).
-    signal_event_id: Mapped[str | None] = mapped_column(
-        String(256), nullable=True, index=True
-    )
+    signal_event_id: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
 
     # Outbound delivery status: null (inbound) | pending | sent | failed
     delivery_status: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)

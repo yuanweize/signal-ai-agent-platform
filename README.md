@@ -5,47 +5,48 @@
 [![License](https://img.shields.io/github/license/yuanweize/signal-market-bot)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](backend/pyproject.toml)
 
-Production-ready Signal marketing assistant with FastAPI backend and React admin console.
+Signal-based sales bot with FastAPI backend and React admin console.
 
 Language: **English** | [中文](README.zh-CN.md)
 
-<div align="center">
-  <img src="assets/admin_overview.png" width="850" alt="Signal Market Bot Admin Overview">
-  <p><em>Signal Market Bot Admin Console — Campaign broadcasts, product catalog, user sessions, and operational telemetry</em></p>
-</div>
+## What Actually Works
 
-## Why this project
-
-Signal Market Bot helps operators run Signal-based sales workflows with secure admin controls, runtime AI configuration, campaign management, and audit visibility—without depending on `.env` for day-to-day operations.
-
-## Table of Contents
-
-- [Highlights](#highlights)
-- [Quick Start (Prebuilt Images)](#quick-start-prebuilt-images)
-- [Local Source Build Mode](#local-source-build-mode)
-- [First-Run Security Bootstrap](#first-run-security-bootstrap)
-- [Runtime Configuration Model](#runtime-configuration-model)
-- [Release and Image Versioning](#release-and-image-versioning)
-- [Documentation Tooling Recommendations](#documentation-tooling-recommendations)
-- [Project Structure](#project-structure)
-
-## Highlights
-
-- Signal gateway integration with WebSocket primary + HTTP polling fallback
-- Runtime-configurable AI engine (OpenAI-compatible providers)
-- First-run secure bootstrap (password + TOTP + JWT signing secret)
-- Product catalog, chat takeover, campaign broadcast, and user management
-- Audit trail, retention cleanup, and operational metrics
-- Docker-first deployment with CI and GHCR publish workflows
+| Feature | Status |
+|---------|--------|
+| First-run security bootstrap (password + TOTP + JWT) | ✅ Working |
+| Signal gateway: WebSocket receive + HTTP polling fallback | ✅ Working |
+| Signal send (DM and group) | ✅ Working |
+| AI auto-reply (OpenAI-compatible, runtime configurable) | ✅ Working |
+| Manual takeover (persisted mode: auto/manual/paused) | ✅ Working |
+| Block user (enforced in inbound pipeline) | ✅ Working |
+| Message deduplication (reconnect-safe) | ✅ Working |
+| Outbound delivery state (pending→sent/failed) | ✅ Working |
+| Group conversations (correct per-message attribution) | ✅ Working |
+| AI context (sender names in group, no current-message duplication) | ✅ Working |
+| Product catalog + AI injection | ✅ Working |
+| Campaign broadcast (with quiet hours, blacklist, dry-run) | ✅ Working |
+| Audit logs | ✅ Working |
+| Runtime settings (hot-reload, no .env required) | ✅ Working |
+| Dashboard stats | ✅ Working |
+| User management (block/unblock, notes, language) | ✅ Working |
+| Group sync from Signal gateway | ✅ Working |
+| Devices list and unlink | ✅ Working (BLOCKED_EXTERNAL: requires real Signal account) |
+| Data retention cleanup | ✅ Working |
+| Docker deployment | ✅ Working |
+| DB migrations (Alembic) | ✅ Working |
+| Orders / Payments | ⚠️ DB models only — no API, no UI, not a supported feature |
+| Campaign scheduling/automation | ⚠️ Broadcast on-demand only — no background scheduler |
+| Attachment display | ⚠️ Metadata recorded, no file storage/preview |
+| Read receipts / Typing indicators | ✅ Sent to gateway (BLOCKED_EXTERNAL: requires real Signal) |
 
 ## Architecture
 
-- Backend: FastAPI + SQLAlchemy + Alembic + runtime config in database
-- Frontend: React + Vite + TypeScript
-- Storage: SQLite by default (`data/bot.db`)
-- Runtime config: managed from admin UI (no `.env` file required)
+- **Backend**: FastAPI + SQLAlchemy (async) + Alembic + runtime config in DB
+- **Frontend**: React + Vite + TypeScript + Tailwind + DaisyUI
+- **Storage**: SQLite (default: `data/bot.db`)
+- **Runtime config**: managed from admin UI — no `.env` required for features
 
-## Quick Start (Prebuilt Images)
+## Quick Start
 
 ```bash
 git clone https://github.com/yuanweize/signal-market-bot.git
@@ -55,133 +56,97 @@ docker compose up -d
 docker compose exec backend alembic upgrade head
 ```
 
-By default, `docker-compose.yml` uses prebuilt GHCR images:
-
-- `ghcr.io/yuanweize/signal-market-bot-backend:<tag>`
-- `ghcr.io/yuanweize/signal-market-bot-frontend:<tag>`
-
-Set a version tag if needed:
-
-```bash
-APP_VERSION=0.2.0 docker compose pull
-APP_VERSION=0.2.0 docker compose up -d
-```
-
-Service endpoints:
-
-- Admin: http://localhost:3000
+Services:
+- Admin UI: http://localhost:3000
 - API: http://localhost:8000
-- OpenAPI: http://localhost:8000/docs
+- OpenAPI docs: http://localhost:8000/docs
 
-## Local Source Build Mode
+## First-Run Bootstrap
 
-Use this when you changed backend/frontend code locally:
+On first access to `/login`:
+1. Set admin username and password
+2. Configure TOTP secret (or auto-generate)
+3. Login with username + password + TOTP code
 
-```bash
-./scripts/redeploy.sh
-```
+Bootstrap is one-time and cannot be repeated after completion.
 
-Equivalent command:
+## Runtime Configuration
 
-```bash
-docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build frontend backend
-```
+No `.env` required for application features. Configure via admin UI:
 
-## First-Run Security Bootstrap
+- **Signal Gateway**: `Settings → Signal Gateway` — API URL, phone number, auth token
+- **AI Engine**: `Settings → AI Engine` — base URL, model, API key, system prompt
+- **Campaign**: quiet hours, min interval, group blacklist
 
-On first access to `/login`, you will see one-time bootstrap initialization.
+Secrets (AI key, Signal token, JWT signing secret) are encrypted at rest.
 
-1. Set admin password
-2. Provide or auto-generate a TOTP secret
-3. Login with username/password/TOTP
+## Signal Gateway Requirements
 
-After bootstrap is completed, login works in normal mode and setup is disabled.
+This project requires [signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api) running separately.
 
-## Runtime Configuration Model
+- Tested against signal-cli-rest-api v0.x (see swagger.json)
+- WebSocket endpoint: `ws://{host}/v1/receive/{number}`
+- Send endpoint: `POST {host}/v2/send`
+- Bearer token auth supported
 
-This project is runtime-driven and does not require `.env` for application features.
-
-- Signal settings are managed in `Settings -> Signal Gateway`
-- AI settings are managed in `Settings -> AI Engine`
-
-<div align="center">
-  <img src="assets/ai_engine_setting.png" width="850" alt="Signal Market Bot AI Engine Configuration">
-  <p><em>Runtime AI Engine Configuration — Multi-provider endpoints, model temperature tuning, system prompt templates, and hot-reloading</em></p>
-</div>
-- Secrets (AI key / Signal token / JWT signing secret) are stored encrypted in DB-backed config
-- Changes apply immediately (including Signal listener reconfiguration)
-
-## Internationalization
-
-- Documentation is bilingual: English + Chinese
-- Bot default language is configurable in admin settings (`bot_default_language`)
-- UI and API text are English-first for global operator teams
-- Chinese docs are maintained for local onboarding and operations
-
-## Development Checks
-
-Backend checks:
+## Development
 
 ```bash
-python3 -m compileall backend/app
-```
+# Backend
+cd backend
+python -m venv venv && source venv/bin/activate
+pip install -e ".[dev]"
+pytest tests/ -v
 
-Frontend build:
-
-```bash
+# Frontend
 cd frontend
 npm ci
 npm run build
+npx tsc --noEmit
+
+# Migrations
+cd backend
+alembic upgrade head
+alembic current
 ```
 
-## Release and Image Versioning
+## CORS Configuration
 
-Version source of truth:
-
-- `backend/pyproject.toml` -> `[project].version`
-- helper script: `python3 scripts/get_version.py`
-
-GitHub workflows:
-
-- `.github/workflows/ci.yml`
-- `.github/workflows/docker-publish.yml`
-
-Published images:
-
-- `ghcr.io/<owner>/signal-market-bot-backend`
-- `ghcr.io/<owner>/signal-market-bot-frontend`
-
-## Documentation Tooling Recommendations
-
-Recommended tooling for GitHub-grade README quality:
-
-- `markdownlint-cli2`: heading hierarchy, spacing, list style consistency
-- `prettier --parser markdown`: stable formatting and diff cleanliness
-- `lychee`: dead link detection (badges, docs links, external references)
-- `vale`: writing quality and terminology consistency (English docs)
-- GitHub Actions gate: run markdown/link checks on PRs before merge
-
-Suggested CI commands:
+Set `ALLOWED_ORIGINS` environment variable for production:
 
 ```bash
-npx markdownlint-cli2 "**/*.md"
-npx prettier -c "**/*.md"
-npx lychee README.md README.zh-CN.md
+ALLOWED_ORIGINS=https://your-admin-domain.example.com docker compose up -d
 ```
+
+Default (development only): `http://localhost:3000`
+
+## Known External Limitations
+
+The following features require a real Signal account and cannot be verified without one:
+
+- Actual message delivery confirmation (gateway only returns HTTP 201)
+- Device list / profile (gateway-dependent)
+- Read receipts, typing indicators (sent but not confirmed)
+- Group member lists (from Signal network)
+
+All Signal API contract calls have deterministic mock tests (`tests/test_signal_gateway_contract.py`).
 
 ## Project Structure
 
-```text
-backend/                  FastAPI services and domain logic
-frontend/                 React admin dashboard
-scripts/redeploy.sh       local deploy helper
-scripts/get_version.py    canonical version reader
-.github/workflows/        CI and container publish
+```
+backend/          FastAPI services, models, migrations, tests
+frontend/         React admin dashboard
+docs/             Audit report, architecture, migration guide, API contract
+scripts/          Deployment helpers
+.github/workflows/ CI (pytest + ruff + alembic + tsc + build)
 ```
 
 ## Additional Docs
 
-- Deployment routine: [SKILL_DEPLOYMENT.md](SKILL_DEPLOYMENT.md)
+- [Audit Report](docs/AUDIT_REPORT.md)
+- [Signal API Contract](docs/SIGNAL_API_CONTRACT.md)
+- [Migration Guide](docs/MIGRATION.md)
+- [Deployment](SKILL_DEPLOYMENT.md)
 
 ## License
 

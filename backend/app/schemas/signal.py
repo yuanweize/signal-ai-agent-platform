@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-
 # ============================================================
 # Incoming Message Schemas (from signal-cli-rest-api)
 # ============================================================

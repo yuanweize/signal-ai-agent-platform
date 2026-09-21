@@ -53,6 +53,10 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+ignore = [
+    "E501",   # Line too long — pre-existing in legacy code, tracked as P3
+    "UP042",  # StrEnum not available in Python 3.10; compat with str+Enum kept
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

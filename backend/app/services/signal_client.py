@@ -15,7 +15,7 @@ import json
 import logging
 import re
 import time
-from typing import Callable, Awaitable
+from collections.abc import Awaitable, Callable
 
 import httpx
 import websockets
@@ -38,6 +38,7 @@ def _sanitize_log(text: str, max_len: int = 120) -> str:
     if len(cleaned) > max_len:
         return cleaned[:max_len] + "…"
     return cleaned
+
 
 # Type for the callback that handles incoming messages
 MessageCallback = Callable[[SignalIncomingMessage], Awaitable[None]]
@@ -135,15 +136,10 @@ class SignalClient:
             )
 
             if response.status_code == 201:
-                logger.info(
-                    f"✉️  Message sent to {recipients} "
-                    f"({len(text)} chars)"
-                )
+                logger.info(f"✉️  Message sent to {recipients} ({len(text)} chars)")
                 return True
             else:
-                logger.error(
-                    f"❌ Send failed: HTTP {response.status_code} — {response.text}"
-                )
+                logger.error(f"❌ Send failed: HTTP {response.status_code} — {response.text}")
                 return False
 
         except httpx.HTTPError as e:
@@ -482,9 +478,7 @@ class SignalClient:
             if ok:
                 logger.info(f"👋 Left group {_sanitize_log(group_id, 32)}")
             else:
-                logger.warning(
-                    f"Quit group returned HTTP {response.status_code}"
-                )
+                logger.warning(f"Quit group returned HTTP {response.status_code}")
             return ok
         except httpx.HTTPError as e:
             logger.error(f"Quit group failed: {e}")
@@ -528,7 +522,7 @@ class SignalClient:
                 payload["name"] = name
             if description is not None:
                 payload["description"] = description
-            
+
             client = self._get_http_client()
             response = await client.put(
                 f"/v1/groups/{phone}/{group_id}",
@@ -614,7 +608,7 @@ class SignalClient:
                 payload["name"] = name
             if about is not None:
                 payload["about"] = about
-                
+
             client = self._get_http_client()
             response = await client.put(f"/v1/profiles/{phone}", json=payload)
             return response.status_code in {200, 201, 204}
@@ -772,7 +766,11 @@ class SignalClient:
                 response = await client.get("/v1/about")
             latency_ms = int((time.perf_counter() - started) * 1000)
             ok = response.status_code in {200, 204}
-            message = "Signal gateway reachable" if ok else f"Signal gateway responded with HTTP {response.status_code}"
+            message = (
+                "Signal gateway reachable"
+                if ok
+                else f"Signal gateway responded with HTTP {response.status_code}"
+            )
             return {
                 "ok": ok,
                 "message": message,
@@ -853,9 +851,7 @@ class SignalClient:
             ) as e:
                 if not self._running:
                     break
-                logger.warning(
-                    f"⚠️  WebSocket connection failed: {e.__class__.__name__}: {e}"
-                )
+                logger.warning(f"⚠️  WebSocket connection failed: {e.__class__.__name__}: {e}")
                 logger.info("📡 Falling back to HTTP polling...")
 
                 try:
@@ -975,9 +971,7 @@ class SignalClient:
                         runtime_metrics.inc("signal.pull.401")
                     if response.status_code >= 500:
                         runtime_metrics.inc("signal.pull.5xx")
-                    logger.warning(
-                        f"⚠️  Poll response: HTTP {response.status_code}"
-                    )
+                    logger.warning(f"⚠️  Poll response: HTTP {response.status_code}")
                     empty_polls += 1
 
             except httpx.HTTPError as e:
@@ -1035,7 +1029,9 @@ class SignalClient:
 
         source = _sanitize_log(msg.envelope.sender_name, 40)
         text_preview = _sanitize_log((msg.envelope.text or ""), 60)
-        context = f"in group {msg.envelope.group_id[:16]}" if msg.envelope.is_group_message else "DM"
+        context = (
+            f"in group {msg.envelope.group_id[:16]}" if msg.envelope.is_group_message else "DM"
+        )
         logger.info(f"📨 [{context}] {source}: {text_preview}")
 
         # Dispatch to handler
@@ -1043,9 +1039,7 @@ class SignalClient:
             try:
                 await self._on_message(msg)
             except Exception as e:
-                logger.error(
-                    f"❌ Message handler error: {e}", exc_info=True
-                )
+                logger.error(f"❌ Message handler error: {e}", exc_info=True)
         else:
             logger.warning("⚠️  No message handler registered!")
 

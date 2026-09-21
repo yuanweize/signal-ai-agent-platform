@@ -5,11 +5,11 @@ Usage:
     from app.models import User, Product, Order, ...
 """
 
-from app.models.config import BotConfig
+from app.models.audit import AuditLog
 from app.models.campaign import CampaignDeliveryLog
+from app.models.config import BotConfig
 from app.models.conversation import Conversation, Message
 from app.models.group import Group
-from app.models.audit import AuditLog
 from app.models.order import Order
 from app.models.payment import Payment
 from app.models.product import Product

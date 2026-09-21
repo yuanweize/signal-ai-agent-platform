@@ -43,9 +43,7 @@ class Payment(Base):
     currency: Mapped[str] = mapped_column(String(10), nullable=False)
 
     # Status: pending → processing → completed → refunded / failed
-    status: Mapped[str] = mapped_column(
-        String(20), default="pending", nullable=False, index=True
-    )
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False, index=True)
 
     # Payment address (for crypto — wallet address; for others — masked reference)
     payment_address: Mapped[str | None] = mapped_column(String(255), nullable=True)

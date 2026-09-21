@@ -6,7 +6,8 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
-from sqlalchemy import select, func as sa_func
+from sqlalchemy import func as sa_func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AdminUser, get_current_admin
@@ -79,9 +80,7 @@ async def list_chats(
                 )
             )
         else:
-            user_result = await session.execute(
-                select(User).where(User.id == conv.user_id)
-            )
+            user_result = await session.execute(select(User).where(User.id == conv.user_id))
             user = user_result.scalar_one_or_none()
 
             items.append(
@@ -122,11 +121,11 @@ async def get_chat_messages(
             .where(Conversation.signal_id == signal_id)
             .where(Conversation.group_id == None)  # noqa: E711
         )
-    
+
     query = query.order_by(Conversation.updated_at.desc()).limit(1)
     conv_result = await session.execute(query)
     conversation = conv_result.scalar_one_or_none()
-    
+
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -142,8 +141,7 @@ async def get_chat_messages(
 
     # Messages
     count_result = await session.execute(
-        select(sa_func.count(Message.id))
-        .where(Message.conversation_id == conversation.id)
+        select(sa_func.count(Message.id)).where(Message.conversation_id == conversation.id)
     )
     total_messages = count_result.scalar() or 0
 
@@ -176,7 +174,9 @@ async def get_chat_messages(
                 role=m.role,
                 content=m.content,
                 timestamp=m.timestamp,
-                sender_name=sender_map.get(m.sender_id, m.sender_id) if m.role == "user" and m.sender_id else None,
+                sender_name=sender_map.get(m.sender_id, m.sender_id)
+                if m.role == "user" and m.sender_id
+                else None,
                 sender_id=m.sender_id,
                 signal_timestamp_ms=m.signal_timestamp_ms,
                 delivery_status=m.delivery_status,
@@ -287,8 +287,6 @@ async def send_chat_message(
     return ChatSendResponse(success=True)
 
 
-from pydantic import BaseModel
-
 class ReactionRequest(BaseModel):
     emoji: str
     target_author: str
@@ -364,6 +362,7 @@ async def delete_message(
 
 # ---- Conversation Mode (Manual Takeover) ----
 
+
 class ConversationModeRequest(BaseModel):
     mode: str  # "auto" | "manual" | "paused"
 
@@ -375,9 +374,7 @@ async def get_conversation_mode(
     _admin: AdminUser = Depends(get_current_admin),
 ):
     """Get the current mode of a conversation (auto/manual/paused)."""
-    result = await session.execute(
-        select(Conversation).where(Conversation.id == conversation_id)
-    )
+    result = await session.execute(select(Conversation).where(Conversation.id == conversation_id))
     conv = result.scalar_one_or_none()
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -402,12 +399,10 @@ async def set_conversation_mode(
     if payload.mode not in valid_modes:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid mode '{payload.mode}'. Must be one of: {sorted(valid_modes)}"
+            detail=f"Invalid mode '{payload.mode}'. Must be one of: {sorted(valid_modes)}",
         )
 
-    result = await session.execute(
-        select(Conversation).where(Conversation.id == conversation_id)
-    )
+    result = await session.execute(select(Conversation).where(Conversation.id == conversation_id))
     conv = result.scalar_one_or_none()
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")

@@ -44,9 +44,7 @@ class Group(Base):
     total_messages: Mapped[int] = mapped_column(default=0, nullable=False)
 
     # Timestamps
-    joined_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), nullable=False
-    )
+    joined_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
     last_activity: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
     )

@@ -5,12 +5,10 @@ Includes local DB sync: after create/update operations succeed on the gateway,
 the local Group record is immediately upserted so the UI is consistent.
 """
 
-from typing import Optional
 from datetime import datetime
 
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, HTTPException, Query
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,8 +26,8 @@ class CreateGroupRequest(BaseModel):
 
 
 class UpdateGroupRequest(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
+    name: str | None = None
+    description: str | None = None
 
 
 class GroupMembersRequest(BaseModel):
@@ -56,9 +54,7 @@ async def list_groups(
     admin: AdminUser = Depends(get_current_admin),
 ):
     """List all known groups from the local database."""
-    result = await session.execute(
-        select(Group).order_by(Group.last_activity.desc())
-    )
+    result = await session.execute(select(Group).order_by(Group.last_activity.desc()))
     groups = result.scalars().all()
 
     return [
@@ -93,9 +89,9 @@ async def create_group(
     # P1-8 fix: immediately upsert local Group record after gateway success
     gateway_group_id = result.get("id") or result.get("group_id")
     if gateway_group_id:
-        existing = (await session.execute(
-            select(Group).where(Group.group_id == gateway_group_id)
-        )).scalar_one_or_none()
+        existing = (
+            await session.execute(select(Group).where(Group.group_id == gateway_group_id))
+        ).scalar_one_or_none()
 
         if existing is None:
             group = Group(
@@ -134,9 +130,9 @@ async def sync_groups_from_gateway(
         name = gg.get("name") or f"Group {gid[:8]}..."
         description = gg.get("description")
 
-        existing = (await session.execute(
-            select(Group).where(Group.group_id == gid)
-        )).scalar_one_or_none()
+        existing = (
+            await session.execute(select(Group).where(Group.group_id == gid))
+        ).scalar_one_or_none()
 
         if existing is None:
             group = Group(
@@ -165,14 +161,16 @@ async def update_group(
     admin: AdminUser = Depends(get_current_admin),
 ):
     """Update group metadata on gateway and sync to local DB."""
-    success = await signal_client.update_group(group_id, name=request.name, description=request.description)
+    success = await signal_client.update_group(
+        group_id, name=request.name, description=request.description
+    )
     if not success:
         raise HTTPException(status_code=502, detail="Failed to update group")
 
     # Sync local DB
-    existing = (await session.execute(
-        select(Group).where(Group.group_id == group_id)
-    )).scalar_one_or_none()
+    existing = (
+        await session.execute(select(Group).where(Group.group_id == group_id))
+    ).scalar_one_or_none()
     if existing:
         if request.name is not None:
             existing.name = request.name
@@ -186,17 +184,17 @@ async def update_group(
 @router.put("/{group_id}/settings")
 async def update_group_settings(
     group_id: str,
-    is_active: Optional[bool] = None,
-    system_prompt_override: Optional[str] = None,
-    language_override: Optional[str] = None,
-    notes: Optional[str] = None,
+    is_active: bool | None = None,
+    system_prompt_override: str | None = None,
+    language_override: str | None = None,
+    notes: str | None = None,
     session: AsyncSession = Depends(get_session),
     admin: AdminUser = Depends(get_current_admin),
 ):
     """Update app-specific group settings (not synced to gateway)."""
-    existing = (await session.execute(
-        select(Group).where(Group.group_id == group_id)
-    )).scalar_one_or_none()
+    existing = (
+        await session.execute(select(Group).where(Group.group_id == group_id))
+    ).scalar_one_or_none()
 
     if existing is None:
         raise HTTPException(status_code=404, detail="Group not found in local DB")
@@ -277,9 +275,9 @@ async def quit_group(
     if not success:
         raise HTTPException(status_code=502, detail="Failed to quit group")
 
-    existing = (await session.execute(
-        select(Group).where(Group.group_id == group_id)
-    )).scalar_one_or_none()
+    existing = (
+        await session.execute(select(Group).where(Group.group_id == group_id))
+    ).scalar_one_or_none()
     if existing:
         existing.is_active = False
         await session.commit()

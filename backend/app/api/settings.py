@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
@@ -28,8 +28,8 @@ from app.schemas.settings import (
     SignalProbeRequest,
     SignalProbeResponse,
 )
-from app.services.audit_log import list_audit_logs, write_audit_log
 from app.services.ai_engine import probe_ai_compatibility, verify_ai_model_availability
+from app.services.audit_log import list_audit_logs, write_audit_log
 from app.services.data_retention import cleanup_expired_data, purge_all_chat_and_audit_data
 from app.services.runtime_config import (
     cache_ai_probe_models,
@@ -121,10 +121,16 @@ async def update_settings(
     if not target_base_url:
         target_base_url = current.get("ai_api_base_url", "")
     target_ai_enabled = (
-        payload.is_ai_enabled if payload.is_ai_enabled is not None else bool(current.get("is_ai_enabled"))
+        payload.is_ai_enabled
+        if payload.is_ai_enabled is not None
+        else bool(current.get("is_ai_enabled"))
     )
 
-    if target_ai_enabled and not is_ai_api_key_optional(target_base_url) and not (payload.ai_api_key or "").strip():
+    if (
+        target_ai_enabled
+        and not is_ai_api_key_optional(target_base_url)
+        and not (payload.ai_api_key or "").strip()
+    ):
         if not current.get("has_ai_api_key"):
             raise HTTPException(
                 status_code=400,
@@ -183,7 +189,9 @@ async def test_signal_connection(
     runtime = await get_runtime_settings(session)
     stored_url = (runtime.get("signal_api_url") or "").strip()
     signal_api_url = (payload.signal_api_url or stored_url).strip()
-    signal_phone_number = (payload.signal_phone_number or runtime.get("signal_phone_number") or "").strip()
+    signal_phone_number = (
+        payload.signal_phone_number or runtime.get("signal_phone_number") or ""
+    ).strip()
 
     # SECURITY: Prevent SSRF / token leakage.
     # If the user provides a custom URL that differs from the stored config,
@@ -284,7 +292,7 @@ async def probe_ai_settings(
         listed_total=listed_total,
         models_count=len(response_models),
         verified_total=int(result.get("verified_total") or 0),
-        probed_at=datetime.now(timezone.utc).isoformat(),
+        probed_at=datetime.now(UTC).isoformat(),
         cached_at=latest_runtime.get("ai_models_cached_at"),
         message=result.get("message", "Probe completed"),
         preview=result.get("preview") or None,
@@ -309,7 +317,9 @@ async def verify_ai_model(
         api_key = runtime.get("ai_api_key") or ""
 
     if not base_url:
-        raise HTTPException(status_code=400, detail="AI base URL is required for model verification")
+        raise HTTPException(
+            status_code=400, detail="AI base URL is required for model verification"
+        )
     if not model:
         raise HTTPException(status_code=400, detail="AI model is required for model verification")
     if not api_key and not is_ai_api_key_optional(base_url):

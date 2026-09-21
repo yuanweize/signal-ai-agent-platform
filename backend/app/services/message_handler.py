@@ -37,11 +37,11 @@ from app.config import settings
 from app.database import async_session
 from app.models.conversation import Conversation, ConversationMode, Message
 from app.models.group import Group
-from app.models.user import User
 from app.models.product import Product
+from app.models.user import User
 from app.schemas.signal import ParsedMessage, SignalIncomingMessage
-from app.services.signal_client import signal_client
 from app.services.metrics import runtime_metrics
+from app.services.signal_client import signal_client
 
 logger = logging.getLogger("signal.handler")
 
@@ -93,12 +93,16 @@ class MessageHandler:
                 try:
                     user = await self._upsert_user(session, parsed)
                     if user.is_blocked:
-                        logger.info(f"🚫 Blocked user {parsed.sender_id} sent attachment — suppressing")
+                        logger.info(
+                            f"🚫 Blocked user {parsed.sender_id} sent attachment — suppressing"
+                        )
                         return
                     conversation = await self._get_or_create_conversation(session, user, parsed)
                     # Record the attachment event even if we can't process the content
                     await self._store_inbound_message(
-                        session, conversation, parsed,
+                        session,
+                        conversation,
+                        parsed,
                         content="[attachment]",
                         signal_event_id=signal_event_id,
                     )
@@ -113,9 +117,9 @@ class MessageHandler:
 
             await signal_client.send_reply(
                 text="📎 Děkujeme za soubor. Přílohy zatím nepodporujeme. "
-                     "Napište prosím textovou zprávu.\n"
-                     "(Thank you for the file. Attachments are not yet supported. "
-                     "Please send a text message.)",
+                "Napište prosím textovou zprávu.\n"
+                "(Thank you for the file. Attachments are not yet supported. "
+                "Please send a text message.)",
                 recipient=parsed.reply_recipient,
             )
             return
@@ -139,7 +143,9 @@ class MessageHandler:
                     # Still record the inbound message for audit purposes
                     conversation = await self._get_or_create_conversation(session, user, parsed)
                     await self._store_inbound_message(
-                        session, conversation, parsed,
+                        session,
+                        conversation,
+                        parsed,
                         signal_event_id=signal_event_id,
                     )
                     await session.commit()
@@ -164,7 +170,9 @@ class MessageHandler:
                 # Step 5: Store the inbound message (idempotent via signal_event_id)
                 try:
                     await self._store_inbound_message(
-                        session, conversation, parsed,
+                        session,
+                        conversation,
+                        parsed,
                         signal_event_id=signal_event_id,
                     )
                     conversation.message_count += 1
@@ -203,15 +211,11 @@ class MessageHandler:
                     return
 
                 # Step 7: Generate reply (mode == "auto")
-                asyncio.create_task(
-                    signal_client.show_typing(parsed.reply_recipient)
-                )
+                asyncio.create_task(signal_client.show_typing(parsed.reply_recipient))
 
                 reply_text = await self._generate_reply(session, conversation, parsed)
 
-                asyncio.create_task(
-                    signal_client.hide_typing(parsed.reply_recipient)
-                )
+                asyncio.create_task(signal_client.hide_typing(parsed.reply_recipient))
 
                 if reply_text:
                     await self._send_outbound_reply(
@@ -304,13 +308,9 @@ class MessageHandler:
 
         await session.commit()
 
-    async def _upsert_user(
-        self, session: AsyncSession, parsed: ParsedMessage
-    ) -> User:
+    async def _upsert_user(self, session: AsyncSession, parsed: ParsedMessage) -> User:
         """Find existing user or create new one on first contact."""
-        result = await session.execute(
-            select(User).where(User.signal_id == parsed.sender_id)
-        )
+        result = await session.execute(select(User).where(User.signal_id == parsed.sender_id))
         user = result.scalar_one_or_none()
 
         if user is None:
@@ -321,9 +321,7 @@ class MessageHandler:
             )
             session.add(user)
             await session.flush()
-            logger.info(
-                f"👤 New user created: {parsed.sender_name} ({parsed.sender_id})"
-            )
+            logger.info(f"👤 New user created: {parsed.sender_name} ({parsed.sender_id})")
         else:
             user.last_seen = datetime.now()
             if parsed.sender_name and parsed.sender_name != user.display_name:
@@ -331,13 +329,9 @@ class MessageHandler:
 
         return user
 
-    async def _upsert_group(
-        self, session: AsyncSession, parsed: ParsedMessage
-    ) -> Group:
+    async def _upsert_group(self, session: AsyncSession, parsed: ParsedMessage) -> Group:
         """Find existing group or register it on first encounter."""
-        result = await session.execute(
-            select(Group).where(Group.group_id == parsed.group_id)
-        )
+        result = await session.execute(select(Group).where(Group.group_id == parsed.group_id))
         group = result.scalar_one_or_none()
 
         if group is None:
@@ -374,9 +368,7 @@ class MessageHandler:
         else:
             # DM conversations are identified by the user record
             query = (
-                query
-                .where(Conversation.user_id == user.id)
-                .where(Conversation.group_id == None)  # noqa: E711
+                query.where(Conversation.user_id == user.id).where(Conversation.group_id == None)  # noqa: E711
             )
 
         query = query.order_by(Conversation.updated_at.desc()).limit(1)
@@ -396,8 +388,7 @@ class MessageHandler:
             session.add(conversation)
             await session.flush()
             logger.debug(
-                f"💬 New conversation #{conversation.id} "
-                f"({'group' if parsed.is_group else 'DM'})"
+                f"💬 New conversation #{conversation.id} ({'group' if parsed.is_group else 'DM'})"
             )
 
         return conversation
@@ -440,7 +431,17 @@ class MessageHandler:
 
         # Fallback: basic command handling when AI is disabled
         text_lower = parsed.text.lower().strip()
-        keywords = ["menu", "produkty", "ceník", "nabídka", "products", "help", "pomoc", "/menu", "/start"]
+        keywords = [
+            "menu",
+            "produkty",
+            "ceník",
+            "nabídka",
+            "products",
+            "help",
+            "pomoc",
+            "/menu",
+            "/start",
+        ]
 
         if any(text_lower == k for k in keywords) or any(k in text_lower.split() for k in keywords):
             return await self._generate_fallback_menu(session)

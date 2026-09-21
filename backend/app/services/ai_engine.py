@@ -362,9 +362,7 @@ class AIEngine:
             return False
 
         if not settings.ai_api_key and not is_ai_api_key_optional(settings.ai_api_base_url):
-            logger.info(
-                "🧠 AI engine DISABLED (missing API key for current provider)"
-            )
+            logger.info("🧠 AI engine DISABLED (missing API key for current provider)")
             self._enabled = False
             return False
 
@@ -530,7 +528,11 @@ class AIEngine:
         if self._runtime_effective_base_url in base_candidates:
             base_candidates = [
                 self._runtime_effective_base_url,
-                *[candidate for candidate in base_candidates if candidate != self._runtime_effective_base_url],
+                *[
+                    candidate
+                    for candidate in base_candidates
+                    if candidate != self._runtime_effective_base_url
+                ],
             ]
 
         model_candidates = build_model_candidates(
@@ -635,13 +637,14 @@ class AIEngine:
 
         # 3. Conversation summary (long-term memory compression)
         if conversation.summary:
-            messages.append({
-                "role": "system",
-                "content": (
-                    f"Shrnutí předchozí konverzace s tímto uživatelem:\n"
-                    f"{conversation.summary}"
-                ),
-            })
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        f"Shrnutí předchozí konverzace s tímto uživatelem:\n{conversation.summary}"
+                    ),
+                }
+            )
 
         # 4. Load recent messages from DB (short-term context)
         # Exclude the current message (already committed) to prevent duplication.
@@ -674,9 +677,7 @@ class AIEngine:
         Get the system prompt — check for per-group override first.
         """
         if group_id:
-            result = await session.execute(
-                select(Group).where(Group.group_id == group_id)
-            )
+            result = await session.execute(select(Group).where(Group.group_id == group_id))
             group = result.scalar_one_or_none()
             if group and group.system_prompt_override:
                 return group.system_prompt_override
@@ -714,9 +715,7 @@ class AIEngine:
                 lines.append(f"\n📦 {current_category}:")
 
             stock_info = f"skladem {p.stock} ks" if p.stock < 50 else "skladem"
-            lines.append(
-                f"  • {p.name} — {p.price:.0f} {p.currency} ({stock_info})"
-            )
+            lines.append(f"  • {p.name} — {p.price:.0f} {p.currency} ({stock_info})")
             if p.description:
                 lines.append(f"    {p.description}")
 
@@ -753,9 +752,7 @@ class AIEngine:
 
         # Exclude the current message to prevent P0-1 duplication
         if exclude_signal_timestamp_ms is not None:
-            query = query.where(
-                Message.signal_timestamp_ms != exclude_signal_timestamp_ms
-            )
+            query = query.where(Message.signal_timestamp_ms != exclude_signal_timestamp_ms)
 
         query = query.order_by(Message.timestamp.desc()).limit(max_messages)
         result = await session.execute(query)
