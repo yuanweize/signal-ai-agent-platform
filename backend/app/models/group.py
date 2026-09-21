@@ -58,7 +58,9 @@ class Group(Base):
     )
 
     # Relationships
-    members = relationship("GroupMember", back_populates="group", cascade="all, delete-orphan", lazy="selectin")
+    members = relationship(
+        "GroupMember", back_populates="group", cascade="all, delete-orphan", lazy="selectin"
+    )
 
     # Alias for API compatibility — last_activity serves as updated_at
     @property
@@ -83,8 +85,12 @@ class GroupMember(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 
-    group_id: Mapped[int] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"), nullable=False, index=True)
-    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    group_id: Mapped[int] = mapped_column(
+        ForeignKey("groups.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     # External Signal identifier (phone or UUID)
     external_identifier: Mapped[str] = mapped_column(String(128), nullable=False, index=True)

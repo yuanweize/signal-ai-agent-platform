@@ -10,8 +10,9 @@ Verifies:
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 from sqlalchemy import select
 
 from app.models.conversation import Conversation, ConversationMode, Message
@@ -46,6 +47,7 @@ async def _make_conversation(session, *, user_id=None, group_id=None) -> Convers
 
 async def _add_message(session, conv_id, role, content, sender_name=None, ts_ms=None):
     from datetime import datetime
+
     msg = Message(
         conversation_id=conv_id,
         role=role,
@@ -73,16 +75,22 @@ class TestCurrentMessageNotDuplicated:
 
         with patch.object(ai_engine, "_get_system_prompt", AsyncMock(return_value="sys")):
             with patch.object(ai_engine, "_build_catalog_context", AsyncMock(return_value=None)):
-                with patch.object(ai_engine, "_refresh_runtime_client", AsyncMock(return_value={
-                    "is_ai_enabled": True,
-                    "ai_api_key": "key",
-                    "ai_api_base_url": "http://localhost/v1",
-                    "ai_model": "gpt-4",
-                    "ai_temperature": 0.7,
-                    "ai_max_tokens": 1000,
-                    "ai_context_messages": 20,
-                    "is_market_enabled": False,
-                })):
+                with patch.object(
+                    ai_engine,
+                    "_refresh_runtime_client",
+                    AsyncMock(
+                        return_value={
+                            "is_ai_enabled": True,
+                            "ai_api_key": "key",
+                            "ai_api_base_url": "http://localhost/v1",
+                            "ai_model": "gpt-4",
+                            "ai_temperature": 0.7,
+                            "ai_max_tokens": 1000,
+                            "ai_context_messages": 20,
+                            "is_market_enabled": False,
+                        }
+                    ),
+                ):
                     messages = await ai_engine._build_messages(
                         session,
                         conv,
@@ -95,7 +103,9 @@ class TestCurrentMessageNotDuplicated:
 
         # Count occurrences of "current message"
         count = sum(1 for m in messages if m.get("content") == "current message")
-        assert count == 1, f"Expected 'current message' exactly once, got {count}. Messages: {messages}"
+        assert count == 1, (
+            f"Expected 'current message' exactly once, got {count}. Messages: {messages}"
+        )
 
 
 class TestGroupSenderIdentity:
@@ -105,12 +115,10 @@ class TestGroupSenderIdentity:
         conv = await _make_conversation(session, user_id=None, group_id="grp-001")
 
         await _add_message(
-            session, conv.id, "user", "Alice's message",
-            sender_name="Alice", ts_ms=1700000000000
+            session, conv.id, "user", "Alice's message", sender_name="Alice", ts_ms=1700000000000
         )
         await _add_message(
-            session, conv.id, "user", "Bob's message",
-            sender_name="Bob", ts_ms=1700000001000
+            session, conv.id, "user", "Bob's message", sender_name="Bob", ts_ms=1700000001000
         )
         await session.commit()
 
@@ -144,8 +152,9 @@ class TestOutboundStatusMachine:
     """P0-2: outbound messages go pending → sent or pending → failed."""
 
     async def test_sent_status_on_success(self, session):
+        from unittest.mock import AsyncMock, patch
+
         from app.services.message_handler import MessageHandler
-        from unittest.mock import patch, AsyncMock
 
         user = User(signal_id="+420111000050", display_name="SendTest")
         session.add(user)
@@ -176,8 +185,9 @@ class TestOutboundStatusMachine:
         assert msg.delivery_status == "sent"
 
     async def test_failed_status_on_gateway_error(self, session):
+        from unittest.mock import AsyncMock, patch
+
         from app.services.message_handler import MessageHandler
-        from unittest.mock import patch, AsyncMock
 
         user = User(signal_id="+420111000051", display_name="FailTest")
         session.add(user)

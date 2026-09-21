@@ -48,10 +48,17 @@ class User(Base):
     notes: Mapped[str | None] = mapped_column(String(1000), nullable=True)
 
     # Relationships
-    identities = relationship("UserIdentity", back_populates="user", cascade="all, delete-orphan", lazy="selectin")
+    identities = relationship(
+        "UserIdentity", back_populates="user", cascade="all, delete-orphan", lazy="selectin"
+    )
     group_memberships = relationship("GroupMember", back_populates="user", lazy="selectin")
     orders = relationship("Order", back_populates="user", lazy="selectin")
-    conversations = relationship("Conversation", foreign_keys="[Conversation.user_id]", back_populates="user", lazy="selectin")
+    conversations = relationship(
+        "Conversation",
+        foreign_keys="[Conversation.user_id]",
+        back_populates="user",
+        lazy="selectin",
+    )
     payments = relationship("Payment", back_populates="user", lazy="selectin")
 
     def __repr__(self) -> str:
@@ -67,7 +74,9 @@ class UserIdentity(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
 
     # 'phone', 'uuid', 'alias', etc.
     identity_type: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -83,4 +92,6 @@ class UserIdentity(Base):
     user = relationship("User", back_populates="identities")
 
     def __repr__(self) -> str:
-        return f"<UserIdentity(user_id={self.user_id}, {self.identity_type}='{self.identity_value}')>"
+        return (
+            f"<UserIdentity(user_id={self.user_id}, {self.identity_type}='{self.identity_value}')>"
+        )

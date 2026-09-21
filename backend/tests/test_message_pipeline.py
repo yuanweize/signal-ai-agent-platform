@@ -11,8 +11,9 @@ Tests the full pipeline through MessageHandler against an in-memory DB:
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from sqlalchemy import select
 
 from app.models.conversation import Conversation, ConversationMode, Message
@@ -34,16 +35,18 @@ def _make_incoming(
     if group_id:
         data_message["groupInfo"] = {"groupId": group_id, "type": "DELIVER"}
 
-    return SignalIncomingMessage.model_validate({
-        "envelope": {
-            "sourceNumber": sender_number,
-            "sourceName": sender_name,
-            "sourceDevice": 1,
-            "timestamp": timestamp,
-            "dataMessage": data_message,
-        },
-        "account": "+420000000000",
-    })
+    return SignalIncomingMessage.model_validate(
+        {
+            "envelope": {
+                "sourceNumber": sender_number,
+                "sourceName": sender_name,
+                "sourceDevice": 1,
+                "timestamp": timestamp,
+                "dataMessage": data_message,
+            },
+            "account": "+420000000000",
+        }
+    )
 
 
 @pytest.fixture
@@ -59,7 +62,6 @@ def mock_signal_client():
 @pytest.fixture
 def mock_async_session(session):
     """Patch async_session in message_handler to use test session."""
-    from unittest.mock import AsyncMock
     import contextlib
 
     @contextlib.asynccontextmanager
@@ -75,6 +77,7 @@ class TestDMPipeline:
         self, mock_async_session, mock_signal_client, session
     ):
         from app.services.message_handler import MessageHandler
+
         handler = MessageHandler()
 
         incoming = _make_incoming("+420111000001", "hello", timestamp=1700000001000)
@@ -89,6 +92,7 @@ class TestDMPipeline:
         self, mock_async_session, mock_signal_client, session
     ):
         from app.services.message_handler import MessageHandler
+
         handler = MessageHandler()
 
         for ts in [1700000002000, 1700000003000]:
@@ -101,18 +105,15 @@ class TestDMPipeline:
         convs = result.scalars().all()
         assert len(convs) == 1
 
-    async def test_inbound_message_stored(
-        self, mock_async_session, mock_signal_client, session
-    ):
+    async def test_inbound_message_stored(self, mock_async_session, mock_signal_client, session):
         from app.services.message_handler import MessageHandler
+
         handler = MessageHandler()
 
         incoming = _make_incoming("+420111000003", "test message", timestamp=1700000004000)
         await handler.handle(incoming)
 
-        result = await session.execute(
-            select(Message).where(Message.sender_id == "+420111000003")
-        )
+        result = await session.execute(select(Message).where(Message.sender_id == "+420111000003"))
         msgs = result.scalars().all()
         assert len(msgs) == 1
         assert msgs[0].content == "test message"
@@ -121,11 +122,9 @@ class TestDMPipeline:
 
 
 class TestBlockPolicy:
-    async def test_blocked_user_no_ai_reply(
-        self, mock_async_session, mock_signal_client, session
-    ):
-        from app.services.message_handler import MessageHandler
+    async def test_blocked_user_no_ai_reply(self, mock_async_session, mock_signal_client, session):
         from app.models.user import User
+        from app.services.message_handler import MessageHandler
 
         # Create blocked user
         user = User(signal_id="+420111000010", display_name="Blocked", is_blocked=True)
@@ -146,8 +145,8 @@ class TestBlockPolicy:
     async def test_blocked_user_message_still_recorded(
         self, mock_async_session, mock_signal_client, session
     ):
-        from app.services.message_handler import MessageHandler
         from app.models.user import User
+        from app.services.message_handler import MessageHandler
 
         user = User(signal_id="+420111000011", display_name="Blocked2", is_blocked=True)
         session.add(user)
@@ -157,9 +156,7 @@ class TestBlockPolicy:
         incoming = _make_incoming("+420111000011", "blocked msg", timestamp=1700000011000)
         await handler.handle(incoming)
 
-        result = await session.execute(
-            select(Message).where(Message.sender_id == "+420111000011")
-        )
+        result = await session.execute(select(Message).where(Message.sender_id == "+420111000011"))
         msgs = result.scalars().all()
         assert len(msgs) == 1
         assert msgs[0].content == "blocked msg"
@@ -170,6 +167,7 @@ class TestDeduplication:
         self, mock_async_session, mock_signal_client, session
     ):
         from app.services.message_handler import MessageHandler
+
         handler = MessageHandler()
 
         # Same timestamp = same signal_event_id
@@ -177,9 +175,7 @@ class TestDeduplication:
         await handler.handle(incoming)
         await handler.handle(incoming)  # replay
 
-        result = await session.execute(
-            select(Message).where(Message.sender_id == "+420111000020")
-        )
+        result = await session.execute(select(Message).where(Message.sender_id == "+420111000020"))
         msgs = result.scalars().all()
         # Must be exactly 1, not 2
         assert len(msgs) == 1
@@ -190,17 +186,24 @@ class TestGroupAttribution:
         self, mock_async_session, mock_signal_client, session
     ):
         from app.services.message_handler import MessageHandler
+
         handler = MessageHandler()
 
         # Alice sends to group
         alice_msg = _make_incoming(
-            "+420111000030", "alice msg", sender_name="Alice",
-            group_id="grp-test-001", timestamp=1700000030000
+            "+420111000030",
+            "alice msg",
+            sender_name="Alice",
+            group_id="grp-test-001",
+            timestamp=1700000030000,
         )
         # Bob sends to same group
         bob_msg = _make_incoming(
-            "+420111000031", "bob msg", sender_name="Bob",
-            group_id="grp-test-001", timestamp=1700000031000
+            "+420111000031",
+            "bob msg",
+            sender_name="Bob",
+            group_id="grp-test-001",
+            timestamp=1700000031000,
         )
 
         await handler.handle(alice_msg)
@@ -235,8 +238,8 @@ class TestManualTakeover:
     async def test_ai_suppressed_in_manual_mode(
         self, mock_async_session, mock_signal_client, session
     ):
-        from app.services.message_handler import MessageHandler
         from app.models.user import User
+        from app.services.message_handler import MessageHandler
 
         # Create user + conversation in manual mode
         user = User(signal_id="+420111000040", display_name="ManualUser")

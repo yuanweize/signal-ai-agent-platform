@@ -13,7 +13,17 @@ Key design decisions for Round 2:
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -60,10 +70,14 @@ class Conversation(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 
     # Type: "dm" or "group"
-    type: Mapped[str] = mapped_column(String(20), default=ConversationType.dm.value, nullable=False, index=True)
+    type: Mapped[str] = mapped_column(
+        String(20), default=ConversationType.dm.value, nullable=False, index=True
+    )
 
     # Direct message user (NULL for group conversations)
-    dm_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    dm_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True
+    )
 
     # Legacy user_id column retained for backward compatibility (mirrors dm_user_id for DM, NULL for groups)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
@@ -104,11 +118,18 @@ class Conversation(Base):
         "Message", back_populates="conversation", order_by="Message.timestamp", lazy="selectin"
     )
     read_states = relationship(
-        "ConversationReadState", back_populates="conversation", cascade="all, delete-orphan", lazy="selectin"
+        "ConversationReadState",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
     def __repr__(self) -> str:
-        ctx = f"group={self.group_id}" if self.type == ConversationType.group.value or self.group_id else f"dm_user={self.dm_user_id}"
+        ctx = (
+            f"group={self.group_id}"
+            if self.type == ConversationType.group.value or self.group_id
+            else f"dm_user={self.dm_user_id}"
+        )
         return f"<Conversation(id={self.id}, type={self.type}, mode={self.mode}, {ctx})>"
 
 
@@ -117,9 +138,7 @@ class Message(Base):
 
     __tablename__ = "messages"
 
-    __table_args__ = (
-        UniqueConstraint("signal_event_id", name="uq_messages_signal_event_id"),
-    )
+    __table_args__ = (UniqueConstraint("signal_event_id", name="uq_messages_signal_event_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 
@@ -132,16 +151,22 @@ class Message(Base):
     role: Mapped[str] = mapped_column(String(20), nullable=False)
 
     # Direction: "inbound" | "outbound"
-    direction: Mapped[str] = mapped_column(String(20), default=MessageDirection.inbound.value, nullable=False, index=True)
+    direction: Mapped[str] = mapped_column(
+        String(20), default=MessageDirection.inbound.value, nullable=False, index=True
+    )
 
     # Actor: "customer" | "bot" | "admin" | "system"
-    actor: Mapped[str] = mapped_column(String(20), default=MessageActor.customer.value, nullable=False, index=True)
+    actor: Mapped[str] = mapped_column(
+        String(20), default=MessageActor.customer.value, nullable=False, index=True
+    )
 
     # Sender Signal ID (phone number or UUID)
     sender_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
 
     # Sender resolved User ID
-    sender_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    sender_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True
+    )
 
     # Snapshot of display name at send time
     sender_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -181,8 +206,12 @@ class Message(Base):
     # Relationships
     conversation = relationship("Conversation", back_populates="messages")
     sender_user = relationship("User", foreign_keys=[sender_user_id], lazy="selectin")
-    attachments = relationship("MessageAttachment", back_populates="message", cascade="all, delete-orphan", lazy="selectin")
-    reactions = relationship("MessageReaction", back_populates="message", cascade="all, delete-orphan", lazy="selectin")
+    attachments = relationship(
+        "MessageAttachment", back_populates="message", cascade="all, delete-orphan", lazy="selectin"
+    )
+    reactions = relationship(
+        "MessageReaction", back_populates="message", cascade="all, delete-orphan", lazy="selectin"
+    )
 
     def __repr__(self) -> str:
         preview = self.content[:50] + "..." if len(self.content) > 50 else self.content
@@ -195,7 +224,9 @@ class MessageAttachment(Base):
     __tablename__ = "message_attachments"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    message_id: Mapped[int] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"), nullable=False, index=True)
+    message_id: Mapped[int] = mapped_column(
+        ForeignKey("messages.id", ondelete="CASCADE"), nullable=False, index=True
+    )
 
     external_attachment_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -219,11 +250,15 @@ class MessageReaction(Base):
     __tablename__ = "message_reactions"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    message_id: Mapped[int] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"), nullable=False, index=True)
+    message_id: Mapped[int] = mapped_column(
+        ForeignKey("messages.id", ondelete="CASCADE"), nullable=False, index=True
+    )
 
     emoji: Mapped[str] = mapped_column(String(32), nullable=False)
     reactor_identity: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
-    reactor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reactor_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     target_author: Mapped[str | None] = mapped_column(String(128), nullable=True)
     target_timestamp: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -247,20 +282,28 @@ class ConversationReadState(Base):
 
     __tablename__ = "conversation_read_states"
     __table_args__ = (
-        UniqueConstraint("conversation_id", "admin_identity", name="ix_conv_read_states_conv_admin"),
+        UniqueConstraint(
+            "conversation_id", "admin_identity", name="ix_conv_read_states_conv_admin"
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    conversation_id: Mapped[int] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False)
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
+    )
     admin_identity: Mapped[str] = mapped_column(String(128), default="admin", nullable=False)
 
-    last_read_message_id: Mapped[int | None] = mapped_column(ForeignKey("messages.id", ondelete="SET NULL"), nullable=True)
+    last_read_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="SET NULL"), nullable=True
+    )
     last_read_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )
 
     conversation = relationship("Conversation", back_populates="read_states")
-    last_read_message = relationship("Message", foreign_keys=[last_read_message_id], lazy="selectin")
+    last_read_message = relationship(
+        "Message", foreign_keys=[last_read_message_id], lazy="selectin"
+    )
 
     def __repr__(self) -> str:
         return f"<ConversationReadState(conv_id={self.conversation_id}, admin='{self.admin_identity}', last_read_msg_id={self.last_read_message_id})>"

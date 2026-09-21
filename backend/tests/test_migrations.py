@@ -54,7 +54,12 @@ class TestFreshDBMigration:
             assert ver == "c8927140f12a", f"Expected revision c8927140f12a, got {ver}"
 
             # Check all 16 tables exist
-            tables = {row[0] for row in cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            tables = {
+                row[0]
+                for row in cur.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
             expected_tables = {
                 "alembic_version",
                 "users",
@@ -84,7 +89,9 @@ class TestFreshDBMigration:
             assert "signal_event_id" in msg_cols
             assert "delivery_status" in msg_cols
 
-            conv_cols = {row[1] for row in cur.execute("PRAGMA table_info(conversations)").fetchall()}
+            conv_cols = {
+                row[1] for row in cur.execute("PRAGMA table_info(conversations)").fetchall()
+            }
             assert "type" in conv_cols
             assert "dm_user_id" in conv_cols
             assert "mode" in conv_cols
@@ -257,15 +264,33 @@ class TestLegacy112aa6eMigration:
             """)
 
             # 2. Insert representative data
-            cur.execute("INSERT INTO users (id, signal_id, display_name) VALUES (42, '+420777888999', 'Alice Martin');")
-            cur.execute("INSERT INTO groups (id, group_id, name) VALUES (10, 'grp-production-01', 'Production Market');")
-            cur.execute("INSERT INTO conversations (id, user_id, signal_id, group_id) VALUES (101, 42, '+420777888999', NULL);")
-            cur.execute("INSERT INTO conversations (id, user_id, signal_id, group_id) VALUES (102, 42, 'group.grp-production-01', 'grp-production-01');")
-            cur.execute("INSERT INTO messages (id, conversation_id, role, content, intent_confidence) VALUES (501, 101, 'user', 'I want to buy coffee', 0.98);")
-            cur.execute("INSERT INTO messages (id, conversation_id, role, content) VALUES (502, 101, 'assistant', 'Coffee is in stock!');")
-            cur.execute("INSERT INTO products (id, name, price, stock) VALUES (1, 'Organic Coffee', 150.0, 20);")
-            cur.execute("INSERT INTO bot_config (id, key, value) VALUES (1, 'system_prompt', 'Helpful Assistant');")
-            cur.execute("INSERT INTO audit_logs (id, actor, action) VALUES (1, 'admin', 'system_init');")
+            cur.execute(
+                "INSERT INTO users (id, signal_id, display_name) VALUES (42, '+420777888999', 'Alice Martin');"
+            )
+            cur.execute(
+                "INSERT INTO groups (id, group_id, name) VALUES (10, 'grp-production-01', 'Production Market');"
+            )
+            cur.execute(
+                "INSERT INTO conversations (id, user_id, signal_id, group_id) VALUES (101, 42, '+420777888999', NULL);"
+            )
+            cur.execute(
+                "INSERT INTO conversations (id, user_id, signal_id, group_id) VALUES (102, 42, 'group.grp-production-01', 'grp-production-01');"
+            )
+            cur.execute(
+                "INSERT INTO messages (id, conversation_id, role, content, intent_confidence) VALUES (501, 101, 'user', 'I want to buy coffee', 0.98);"
+            )
+            cur.execute(
+                "INSERT INTO messages (id, conversation_id, role, content) VALUES (502, 101, 'assistant', 'Coffee is in stock!');"
+            )
+            cur.execute(
+                "INSERT INTO products (id, name, price, stock) VALUES (1, 'Organic Coffee', 150.0, 20);"
+            )
+            cur.execute(
+                "INSERT INTO bot_config (id, key, value) VALUES (1, 'system_prompt', 'Helpful Assistant');"
+            )
+            cur.execute(
+                "INSERT INTO audit_logs (id, actor, action) VALUES (1, 'admin', 'system_init');"
+            )
 
             con.commit()
             con.close()
@@ -282,27 +307,51 @@ class TestLegacy112aa6eMigration:
             assert ver == "c8927140f12a"
 
             # Check rows and IDs preserved
-            assert cur2.execute("SELECT id, signal_id, phone_number FROM users WHERE id=42").fetchone() == (42, "+420777888999", "+420777888999")
-            assert cur2.execute("SELECT id, group_id, name FROM groups WHERE id=10").fetchone() == (10, "grp-production-01", "Production Market")
-            assert cur2.execute("SELECT id, price, stock FROM products WHERE id=1").fetchone() == (1, 150.0, 20)
-            assert cur2.execute("SELECT id, key, value FROM bot_config WHERE id=1").fetchone() == (1, "system_prompt", "Helpful Assistant")
+            assert cur2.execute(
+                "SELECT id, signal_id, phone_number FROM users WHERE id=42"
+            ).fetchone() == (42, "+420777888999", "+420777888999")
+            assert cur2.execute("SELECT id, group_id, name FROM groups WHERE id=10").fetchone() == (
+                10,
+                "grp-production-01",
+                "Production Market",
+            )
+            assert cur2.execute("SELECT id, price, stock FROM products WHERE id=1").fetchone() == (
+                1,
+                150.0,
+                20,
+            )
+            assert cur2.execute("SELECT id, key, value FROM bot_config WHERE id=1").fetchone() == (
+                1,
+                "system_prompt",
+                "Helpful Assistant",
+            )
 
             # Check conversations backfilled
-            dm_conv = cur2.execute("SELECT id, type, dm_user_id, mode FROM conversations WHERE id=101").fetchone()
+            dm_conv = cur2.execute(
+                "SELECT id, type, dm_user_id, mode FROM conversations WHERE id=101"
+            ).fetchone()
             assert dm_conv == (101, "dm", 42, "auto")
 
-            grp_conv = cur2.execute("SELECT id, type, group_id, mode FROM conversations WHERE id=102").fetchone()
+            grp_conv = cur2.execute(
+                "SELECT id, type, group_id, mode FROM conversations WHERE id=102"
+            ).fetchone()
             assert grp_conv == (102, "group", "grp-production-01", "auto")
 
             # Check messages backfilled
-            m1 = cur2.execute("SELECT id, content, direction, actor FROM messages WHERE id=501").fetchone()
+            m1 = cur2.execute(
+                "SELECT id, content, direction, actor FROM messages WHERE id=501"
+            ).fetchone()
             assert m1 == (501, "I want to buy coffee", "inbound", "customer")
 
-            m2 = cur2.execute("SELECT id, content, direction, actor FROM messages WHERE id=502").fetchone()
+            m2 = cur2.execute(
+                "SELECT id, content, direction, actor FROM messages WHERE id=502"
+            ).fetchone()
             assert m2 == (502, "Coffee is in stock!", "outbound", "bot")
 
             # Check user identities backfilled
-            ident = cur2.execute("SELECT user_id, identity_type, identity_value FROM user_identities WHERE user_id=42").fetchone()
+            ident = cur2.execute(
+                "SELECT user_id, identity_type, identity_value FROM user_identities WHERE user_id=42"
+            ).fetchone()
             assert ident == (42, "phone", "+420777888999")
 
             con2.close()

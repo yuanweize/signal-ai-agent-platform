@@ -7,11 +7,11 @@ Uses an in-memory SQLite database so tests never touch the real bot.db.
 from __future__ import annotations
 
 import asyncio
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.database import Base
-
 
 # ---- In-memory async DB engine ----
 
@@ -31,6 +31,7 @@ async def engine():
     """Create all tables once per session in in-memory DB."""
     # Import all models so Base.metadata is populated
     import app.models  # noqa: F401
+
     eng = create_async_engine(TEST_DB_URL, echo=False)
     async with eng.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

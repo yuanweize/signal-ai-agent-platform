@@ -5,8 +5,7 @@ Verifies that SignalEnvelope correctly resolves sender_id and group_id
 from the various field combinations present in the gateway response.
 """
 
-import pytest
-from app.schemas.signal import SignalEnvelope, SignalIncomingMessage, ParsedMessage
+from app.schemas.signal import ParsedMessage, SignalEnvelope
 
 
 def _make_envelope(**kwargs) -> SignalEnvelope:

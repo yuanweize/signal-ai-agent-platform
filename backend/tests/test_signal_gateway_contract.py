@@ -10,9 +10,8 @@ Uses httpx.MockTransport so no real Signal gateway is needed.
 from __future__ import annotations
 
 import json
-import pytest
+
 import httpx
-from unittest.mock import patch, AsyncMock
 
 from app.services.signal_client import SignalClient
 
@@ -153,7 +152,7 @@ class TestReactions:
         assert req.method == "POST"
         assert req.url.path == f"/v1/reactions/{_phone()}"
         body = json.loads(req.content)
-        assert "reaction" in body           # NOT "emoji"
+        assert "reaction" in body  # NOT "emoji"
         assert body["reaction"] == "👍"
         assert body["recipient"] == "+420111000000"
         assert body["target_author"] == "+420222000000"
