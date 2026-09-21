@@ -1,6 +1,6 @@
 [project]
 name = "signal-market-bot"
-version = "0.2.1"
+version = "0.3.0"
 description = "AI-powered Signal group market bot with admin dashboard"
 readme = "README.md"
 license = {text = "MIT"}
