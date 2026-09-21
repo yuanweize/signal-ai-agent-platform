@@ -23,11 +23,6 @@
 </div>
 
 <div align="center">
-  <img src="docs/screenshots/inbox-desktop.png" width="900" alt="Signal Market Bot Customer Inbox" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
-  <p><em>Modern Dual-Pane Support Inbox — Real-time conversations, AI/Human takeover switcher, optimistic dispatch, and delivery state tracking</em></p>
-</div>
-
-<div align="center">
   <img src="assets/ai_engine_setting.png" width="900" alt="Signal Market Bot AI Engine Configuration" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
   <p><em>Runtime AI Engine Configuration — Universal OpenAI-compatible endpoint integration, temperature tuning, dynamic prompt injection, and hot reloading</em></p>
 </div>

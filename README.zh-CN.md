@@ -23,11 +23,6 @@
 </div>
 
 <div align="center">
-  <img src="docs/screenshots/inbox-desktop.png" width="900" alt="Signal Market Bot 现代化客服收件箱" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
-  <p><em>现代化双栏客服收件箱 Inbox — 实时消息流、AI/人工无缝接管切换、乐观发送与消息投递状态追踪</em></p>
-</div>
-
-<div align="center">
   <img src="assets/ai_engine_setting.png" width="900" alt="Signal Market Bot AI 引擎配置面板" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
   <p><em>运行时 AI 引擎中台 — 多大模型提供商通用适配、温度采样调节、动态 Prompt 上下文注入与全热重载</em></p>
 </div>
