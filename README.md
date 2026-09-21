@@ -2,49 +2,44 @@
 
 [![CI](https://img.shields.io/github/actions/workflow/status/yuanweize/signal-market-bot/ci.yml?branch=main&label=CI)](https://github.com/yuanweize/signal-market-bot/actions)
 [![Docker Publish](https://img.shields.io/github/actions/workflow/status/yuanweize/signal-market-bot/docker-publish.yml?branch=main&label=Docker%20Publish)](https://github.com/yuanweize/signal-market-bot/actions)
-[![License](https://img.shields.io/github/license/yuanweize/signal-market-bot)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](backend/pyproject.toml)
 
-Signal-based sales bot with FastAPI backend and React admin console.
+Signal-based sales and customer support bot with FastAPI backend and React admin console.
 
 Language: **English** | [中文](README.zh-CN.md)
 
-## What Actually Works
+## What Actually Works (Round 2 Verified)
 
-| Feature | Status |
-|---------|--------|
-| First-run security bootstrap (password + TOTP + JWT) | ✅ Working |
-| Signal gateway: WebSocket receive + HTTP polling fallback | ✅ Working |
-| Signal send (DM and group) | ✅ Working |
-| AI auto-reply (OpenAI-compatible, runtime configurable) | ✅ Working |
-| Manual takeover (persisted mode: auto/manual/paused) | ✅ Working |
-| Block user (enforced in inbound pipeline) | ✅ Working |
-| Message deduplication (reconnect-safe) | ✅ Working |
-| Outbound delivery state (pending→sent/failed) | ✅ Working |
-| Group conversations (correct per-message attribution) | ✅ Working |
-| AI context (sender names in group, no current-message duplication) | ✅ Working |
-| Product catalog + AI injection | ✅ Working |
-| Campaign broadcast (with quiet hours, blacklist, dry-run) | ✅ Working |
-| Audit logs | ✅ Working |
-| Runtime settings (hot-reload, no .env required) | ✅ Working |
-| Dashboard stats | ✅ Working |
-| User management (block/unblock, notes, language) | ✅ Working |
-| Group sync from Signal gateway | ✅ Working |
-| Devices list and unlink | ✅ Working (BLOCKED_EXTERNAL: requires real Signal account) |
-| Data retention cleanup | ✅ Working |
-| Docker deployment | ✅ Working |
-| DB migrations (Alembic) | ✅ Working |
-| Orders / Payments | ⚠️ DB models only — no API, no UI, not a supported feature |
-| Campaign scheduling/automation | ⚠️ Broadcast on-demand only — no background scheduler |
-| Attachment display | ⚠️ Metadata recorded, no file storage/preview |
-| Read receipts / Typing indicators | ✅ Sent to gateway (BLOCKED_EXTERNAL: requires real Signal) |
+| Feature | Status | Implementation Details |
+|---|---|---|
+| First-run security bootstrap | ✅ Working | Password hashing + TOTP + JWT token authentication |
+| Signal gateway ingestion | ✅ Working | Bounded queue (`maxsize=1000`), 4 workers, conversation partition locks |
+| Signal send (DM & Group) | ✅ Working | Unified `OutboundMessageService`: `pending -> sent / failed` + explicit retry |
+| Full-featured Admin Inbox | ✅ Working | Dual-pane `/inbox`, latest-first load, upward cursor pagination, real-time 3s poll |
+| Manual takeover & race prevention | ✅ Working | Pre-send mode verification discards stale AI outbound if admin takes over |
+| User Identity Unification | ✅ Working | `user_identities` table maps phones and UUIDs to a single canonical `User` |
+| Group Membership & Roster Sync | ✅ Working | `group_members` domain tracks membership and admin roles; groups have no single owner |
+| Inbound Reactions & Attachments | ✅ Working | Reaction-only and attachment-only Signal events persisted and rendered |
+| Server-side Unread State | ✅ Working | `conversation_read_states` tracks `last_read_message_id`, persists on browser reload |
+| Modular Settings & Masked Secrets | ✅ Working | 7-tab interface; API tokens and keys masked at rest and in the UI |
+| Fault-tolerant Devices & Profile | ✅ Working | Independent fetch boundaries prevent gateway errors from crashing the page |
+| Scientific DB Migrations | ✅ Working | Continuous chain (`112aa6e29383 -> c8927140f12a`), fresh & legacy DB automated tests |
+| Automated Test Suites | ✅ Working | 54 backend pytest suites + 14 frontend Vitest suites |
+| Orders / Payments | ⚠️ Model Only | Skeleton models in DB; no API/UI, not an active feature |
+| Campaign Scheduling | ⚠️ Broadcast Only | On-demand broadcast supported; autonomous scheduler not implemented |
+
+---
 
 ## Architecture
 
 - **Backend**: FastAPI + SQLAlchemy (async) + Alembic + runtime config in DB
-- **Frontend**: React + Vite + TypeScript + Tailwind + DaisyUI
-- **Storage**: SQLite (default: `data/bot.db`)
-- **Runtime config**: managed from admin UI — no `.env` required for features
+- **Event Pipeline**: `asyncio.Queue` bounded ingestion, concurrent partition locks
+- **Frontend**: React + Vite + TypeScript + Tailwind + DaisyUI + Vitest
+- **Storage**: SQLite with WAL mode (default: `data/bot.db`)
+- **Runtime config**: Managed from admin UI — no `.env` required for core features
+
+---
 
 ## Quick Start
 
@@ -59,94 +54,49 @@ docker compose exec backend alembic upgrade head
 Services:
 - Admin UI: http://localhost:3000
 - API: http://localhost:8000
+- Health live check: http://localhost:8000/health/live
+- Health ready check: http://localhost:8000/health/ready
 - OpenAPI docs: http://localhost:8000/docs
 
-## First-Run Bootstrap
+---
 
-On first access to `/login`:
-1. Set admin username and password
-2. Configure TOTP secret (or auto-generate)
-3. Login with username + password + TOTP code
-
-Bootstrap is one-time and cannot be repeated after completion.
-
-## Runtime Configuration
-
-No `.env` required for application features. Configure via admin UI:
-
-- **Signal Gateway**: `Settings → Signal Gateway` — API URL, phone number, auth token
-- **AI Engine**: `Settings → AI Engine` — base URL, model, API key, system prompt
-- **Campaign**: quiet hours, min interval, group blacklist
-
-Secrets (AI key, Signal token, JWT signing secret) are encrypted at rest.
-
-## Signal Gateway Requirements
-
-This project requires [signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api) running separately.
-
-- Tested against signal-cli-rest-api v0.x (see swagger.json)
-- WebSocket endpoint: `ws://{host}/v1/receive/{number}`
-- Send endpoint: `POST {host}/v2/send`
-- Bearer token auth supported
-
-## Development
+## Development & Testing
 
 ```bash
-# Backend
+# Backend Testing & Linting
 cd backend
-python -m venv venv && source venv/bin/activate
+python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 pytest tests/ -v
+ruff check app tests
+ruff format --check app tests
 
-# Frontend
-cd frontend
+# Database Migration Tests
+pytest tests/test_migrations.py -v
+
+# Frontend Testing & Linting
+cd ../frontend
 npm ci
-npm run build
+npm run lint
 npx tsc --noEmit
-
-# Migrations
-cd backend
-alembic upgrade head
-alembic current
+npm test
+npm run build
 ```
 
-## CORS Configuration
+---
 
-Set `ALLOWED_ORIGINS` environment variable for production:
+## Documentation
 
-```bash
-ALLOWED_ORIGINS=https://your-admin-domain.example.com docker compose up -d
-```
+- [Current Architecture](docs/ARCHITECTURE_CURRENT.md)
+- [Target Architecture Roadmap](docs/ARCHITECTURE_TARGET.md)
+- [Feature Reality Matrix](docs/FEATURE_REALITY_MATRIX.md)
+- [Test Matrix](docs/TEST_MATRIX.md)
+- [UI/UX Audit](docs/UI_UX_AUDIT.md)
+- [Database Migration Guide](docs/MIGRATION.md)
+- [Signal API Gateway Contract](docs/SIGNAL_API_CONTRACT.md)
+- [Real Signal Validation Checklist](docs/REAL_SIGNAL_VALIDATION.md)
 
-Default (development only): `http://localhost:3000`
-
-## Known External Limitations
-
-The following features require a real Signal account and cannot be verified without one:
-
-- Actual message delivery confirmation (gateway only returns HTTP 201)
-- Device list / profile (gateway-dependent)
-- Read receipts, typing indicators (sent but not confirmed)
-- Group member lists (from Signal network)
-
-All Signal API contract calls have deterministic mock tests (`tests/test_signal_gateway_contract.py`).
-
-## Project Structure
-
-```
-backend/          FastAPI services, models, migrations, tests
-frontend/         React admin dashboard
-docs/             Audit report, architecture, migration guide, API contract
-scripts/          Deployment helpers
-.github/workflows/ CI (pytest + ruff + alembic + tsc + build)
-```
-
-## Additional Docs
-
-- [Audit Report](docs/AUDIT_REPORT.md)
-- [Signal API Contract](docs/SIGNAL_API_CONTRACT.md)
-- [Migration Guide](docs/MIGRATION.md)
-- [Deployment](SKILL_DEPLOYMENT.md)
+---
 
 ## License
 
