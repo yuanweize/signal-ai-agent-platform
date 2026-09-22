@@ -9,7 +9,7 @@ and campaign broadcasts.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -94,7 +94,7 @@ class OutboundMessageService:
         conv = await session.get(Conversation, conversation_id)
         if conv:
             conv.message_count = (conv.message_count or 0) + 1
-            conv.last_message_at = datetime.utcnow()
+            conv.last_message_at = datetime.now(UTC).replace(tzinfo=None)
 
         # 2. Attempt delivery through Signal Gateway
         success = False
@@ -115,7 +115,7 @@ class OutboundMessageService:
         if success:
             msg.delivery_status = MessageDeliveryStatus.sent.value
             msg.delivery_error = None
-            msg.occurred_at = datetime.utcnow()
+            msg.occurred_at = datetime.now(UTC).replace(tzinfo=None)
             logger.info(f"✅ Outbound message {msg.id} sent successfully to {recipient}")
         else:
             msg.delivery_status = MessageDeliveryStatus.failed.value
@@ -174,7 +174,7 @@ class OutboundMessageService:
         if success:
             msg.delivery_status = MessageDeliveryStatus.sent.value
             msg.delivery_error = None
-            msg.occurred_at = datetime.utcnow()
+            msg.occurred_at = datetime.now(UTC).replace(tzinfo=None)
         else:
             msg.delivery_status = MessageDeliveryStatus.failed.value
             msg.delivery_error = (err_msg or "Unknown delivery error")[:500]

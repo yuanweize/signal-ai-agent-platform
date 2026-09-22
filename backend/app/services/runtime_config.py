@@ -10,6 +10,7 @@ import base64
 import hashlib
 import ipaddress
 import json
+import os
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 
@@ -44,6 +45,16 @@ KEY_SIGNAL_API_TOKEN_ENC = "signal_api_token_enc"
 KEY_SIGNAL_PHONE_NUMBER = "signal_phone_number"
 KEY_BOT_DEFAULT_LANGUAGE = "bot_default_language"
 
+KEY_EMBEDDING_BASE_URL = "embedding_base_url"
+KEY_EMBEDDING_API_KEY = "embedding_api_key"  # legacy plain key
+KEY_EMBEDDING_API_KEY_ENC = "embedding_api_key_enc"
+KEY_EMBEDDING_MODEL = "embedding_model"
+KEY_VECTOR_STORE_PROVIDER = "vector_store_provider"
+KEY_QDRANT_URL = "qdrant_url"
+KEY_QDRANT_API_KEY = "qdrant_api_key"  # legacy plain key
+KEY_QDRANT_API_KEY_ENC = "qdrant_api_key_enc"
+KEY_RAG_ENABLED = "rag_enabled"
+
 DEFAULT_AI_PROMPT = "You are a helpful sales assistant. Reply naturally and professionally."
 DEFAULT_AI_ENABLED = False
 DEFAULT_MARKET_ENABLED = True
@@ -54,6 +65,12 @@ DEFAULT_AI_MAX_TOKENS = 1000
 DEFAULT_AI_CONTEXT_MESSAGES = 20
 DEFAULT_RETENTION_DAYS = 30
 DEFAULT_BOT_NAME = "Signal Market Bot"
+
+DEFAULT_EMBEDDING_BASE_URL = ""
+DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
+DEFAULT_VECTOR_STORE_PROVIDER = "qdrant"
+DEFAULT_QDRANT_URL = "http://localhost:6333"
+DEFAULT_RAG_ENABLED = True
 
 DEFAULT_AD_AUTOMATION_ENABLED = True
 DEFAULT_AD_MIN_INTERVAL_MINUTES = 180
@@ -318,6 +335,52 @@ async def get_runtime_settings(session: AsyncSession) -> dict:
         signal_api_token = signal_api_token_plain
         signal_api_token_source = "runtime"
 
+    embedding_api_key_enc = values.get(KEY_EMBEDDING_API_KEY_ENC, "")
+    embedding_api_key_plain = values.get(KEY_EMBEDDING_API_KEY, "")
+    embedding_api_key = ""
+    embedding_api_key_source = "none"
+    if embedding_api_key_enc:
+        try:
+            embedding_api_key = decrypt_value(embedding_api_key_enc)
+            embedding_api_key_source = "runtime"
+        except Exception:
+            embedding_api_key = ""
+            embedding_api_key_source = "invalid"
+    elif embedding_api_key_plain:
+        embedding_api_key = embedding_api_key_plain
+        embedding_api_key_source = "runtime"
+    elif ai_api_key and not values.get(KEY_EMBEDDING_BASE_URL):
+        embedding_api_key = ai_api_key
+        embedding_api_key_source = "fallback_ai_key"
+
+    embedding_base_url = (values.get(KEY_EMBEDDING_BASE_URL) or "").strip()
+    embedding_model = (values.get(KEY_EMBEDDING_MODEL) or DEFAULT_EMBEDDING_MODEL).strip()
+
+    qdrant_api_key_enc = values.get(KEY_QDRANT_API_KEY_ENC, "")
+    qdrant_api_key_plain = values.get(KEY_QDRANT_API_KEY, "")
+    qdrant_api_key = ""
+    qdrant_api_key_source = "none"
+    if qdrant_api_key_enc:
+        try:
+            qdrant_api_key = decrypt_value(qdrant_api_key_enc)
+            qdrant_api_key_source = "runtime"
+        except Exception:
+            qdrant_api_key = ""
+            qdrant_api_key_source = "invalid"
+    elif qdrant_api_key_plain:
+        qdrant_api_key = qdrant_api_key_plain
+        qdrant_api_key_source = "runtime"
+
+    qdrant_url = (
+        values.get(KEY_QDRANT_URL) or os.getenv("QDRANT_URL") or DEFAULT_QDRANT_URL
+    ).strip()
+    vector_store_provider = (
+        values.get(KEY_VECTOR_STORE_PROVIDER)
+        or os.getenv("AI_VECTOR_STORE_BACKEND")
+        or DEFAULT_VECTOR_STORE_PROVIDER
+    ).strip()
+    rag_enabled = _to_bool(values.get(KEY_RAG_ENABLED), DEFAULT_RAG_ENABLED)
+
     return {
         "ai_prompt": ai_prompt,
         "is_ai_enabled": is_ai_enabled,
@@ -336,6 +399,19 @@ async def get_runtime_settings(session: AsyncSession) -> dict:
         "ai_models_cached_invalid": ai_models_invalid,
         "ai_models_listed_total": ai_models_listed_total,
         "ai_models_cached_at": ai_models_cached_at,
+        "embedding_base_url": embedding_base_url,
+        "embedding_api_key": embedding_api_key,
+        "embedding_api_key_masked": mask_secret(embedding_api_key),
+        "has_embedding_api_key": bool(embedding_api_key),
+        "embedding_api_key_source": embedding_api_key_source,
+        "embedding_model": embedding_model,
+        "vector_store_provider": vector_store_provider,
+        "qdrant_url": qdrant_url,
+        "qdrant_api_key": qdrant_api_key,
+        "qdrant_api_key_masked": mask_secret(qdrant_api_key),
+        "has_qdrant_api_key": bool(qdrant_api_key),
+        "qdrant_api_key_source": qdrant_api_key_source,
+        "rag_enabled": rag_enabled,
         "retention_days": retention_days,
         "ad_automation_enabled": ad_automation_enabled,
         "ad_min_interval_minutes": ad_min_interval_minutes,
@@ -365,6 +441,13 @@ async def get_runtime_settings_snapshot(session: AsyncSession) -> dict:
         "ai_temperature": current["ai_temperature"],
         "ai_max_tokens": current["ai_max_tokens"],
         "ai_context_messages": current["ai_context_messages"],
+        "embedding_base_url": current["embedding_base_url"],
+        "embedding_model": current["embedding_model"],
+        "has_embedding_api_key": current["has_embedding_api_key"],
+        "vector_store_provider": current["vector_store_provider"],
+        "qdrant_url": current["qdrant_url"],
+        "has_qdrant_api_key": current["has_qdrant_api_key"],
+        "rag_enabled": current["rag_enabled"],
         "retention_days": current["retention_days"],
         "has_ai_api_key": current["has_ai_api_key"],
         "ai_api_key_source": current["ai_api_key_source"],
@@ -394,6 +477,13 @@ async def upsert_runtime_settings(
     ai_temperature: float | None = None,
     ai_max_tokens: int | None = None,
     ai_context_messages: int | None = None,
+    embedding_base_url: str | None = None,
+    embedding_api_key: str | None = None,
+    embedding_model: str | None = None,
+    vector_store_provider: str | None = None,
+    qdrant_url: str | None = None,
+    qdrant_api_key: str | None = None,
+    rag_enabled: bool | None = None,
     retention_days: int | None = None,
     ad_automation_enabled: bool | None = None,
     ad_min_interval_minutes: int | None = None,
@@ -427,6 +517,20 @@ async def upsert_runtime_settings(
         updates[KEY_AI_MAX_TOKENS] = str(max(1, min(32000, ai_max_tokens)))
     if ai_context_messages is not None:
         updates[KEY_AI_CONTEXT_MESSAGES] = str(max(1, min(200, ai_context_messages)))
+    if embedding_base_url is not None:
+        updates[KEY_EMBEDDING_BASE_URL] = embedding_base_url.strip()
+    if embedding_api_key is not None:
+        updates[KEY_EMBEDDING_API_KEY_ENC] = encrypt_value(embedding_api_key.strip())
+    if embedding_model is not None:
+        updates[KEY_EMBEDDING_MODEL] = embedding_model.strip()
+    if vector_store_provider is not None:
+        updates[KEY_VECTOR_STORE_PROVIDER] = vector_store_provider.strip()
+    if qdrant_url is not None:
+        updates[KEY_QDRANT_URL] = qdrant_url.strip()
+    if qdrant_api_key is not None:
+        updates[KEY_QDRANT_API_KEY_ENC] = encrypt_value(qdrant_api_key.strip())
+    if rag_enabled is not None:
+        updates[KEY_RAG_ENABLED] = "true" if rag_enabled else "false"
     if retention_days is not None:
         updates[KEY_RETENTION_DAYS] = str(max(1, retention_days))
     if ad_automation_enabled is not None:
@@ -481,6 +585,22 @@ async def upsert_runtime_settings(
         signal_plain_row = signal_plain_result.scalar_one_or_none()
         if signal_plain_row:
             signal_plain_row.value = ""
+
+    if embedding_api_key is not None and KEY_EMBEDDING_API_KEY in config_map:
+        emb_plain_result = await session.execute(
+            select(BotConfig).where(BotConfig.key == KEY_EMBEDDING_API_KEY)
+        )
+        emb_plain_row = emb_plain_result.scalar_one_or_none()
+        if emb_plain_row:
+            emb_plain_row.value = ""
+
+    if qdrant_api_key is not None and KEY_QDRANT_API_KEY in config_map:
+        qdrant_plain_result = await session.execute(
+            select(BotConfig).where(BotConfig.key == KEY_QDRANT_API_KEY)
+        )
+        qdrant_plain_row = qdrant_plain_result.scalar_one_or_none()
+        if qdrant_plain_row:
+            qdrant_plain_row.value = ""
 
     await session.commit()
     return await get_runtime_settings(session)
@@ -565,6 +685,13 @@ def summarize_runtime_settings(data: dict) -> str:
             "ai_temperature": data.get("ai_temperature"),
             "ai_max_tokens": data.get("ai_max_tokens"),
             "ai_context_messages": data.get("ai_context_messages"),
+            "embedding_base_url": data.get("embedding_base_url"),
+            "embedding_model": data.get("embedding_model"),
+            "has_embedding_api_key": data.get("has_embedding_api_key"),
+            "vector_store_provider": data.get("vector_store_provider"),
+            "qdrant_url": data.get("qdrant_url"),
+            "has_qdrant_api_key": data.get("has_qdrant_api_key"),
+            "rag_enabled": data.get("rag_enabled"),
             "retention_days": data.get("retention_days"),
             "has_ai_api_key": data.get("has_ai_api_key"),
             "ai_api_key_source": data.get("ai_api_key_source"),

@@ -80,6 +80,15 @@ def _to_response(data: dict) -> RuntimeSettingsResponse:
         ai_models_cached_invalid=data.get("ai_models_cached_invalid", []),
         ai_models_listed_total=data.get("ai_models_listed_total", 0),
         ai_models_cached_at=data.get("ai_models_cached_at"),
+        embedding_base_url=data.get("embedding_base_url", ""),
+        embedding_model=data.get("embedding_model", "text-embedding-3-small"),
+        has_embedding_api_key=data.get("has_embedding_api_key", False),
+        embedding_api_key_masked=data.get("embedding_api_key_masked", ""),
+        vector_store_provider=data.get("vector_store_provider", "qdrant"),
+        qdrant_url=data.get("qdrant_url", "http://localhost:6333"),
+        has_qdrant_api_key=data.get("has_qdrant_api_key", False),
+        qdrant_api_key_masked=data.get("qdrant_api_key_masked", ""),
+        rag_enabled=data.get("rag_enabled", True),
         retention_days=data["retention_days"],
         ad_automation_enabled=data["ad_automation_enabled"],
         ad_min_interval_minutes=data["ad_min_interval_minutes"],
@@ -119,19 +128,10 @@ async def update_settings(
 
     target_base_url = (payload.ai_api_base_url or "").strip()
     if not target_base_url:
-        target_base_url = current.get("ai_api_base_url", "")
-    target_ai_enabled = (
-        payload.is_ai_enabled
-        if payload.is_ai_enabled is not None
-        else bool(current.get("is_ai_enabled"))
-    )
+        target_base_url = (current.get("ai_api_base_url") or "").strip()
 
-    if (
-        target_ai_enabled
-        and not is_ai_api_key_optional(target_base_url)
-        and not (payload.ai_api_key or "").strip()
-    ):
-        if not current.get("has_ai_api_key"):
+    if payload.ai_api_key is not None and not payload.ai_api_key.strip():
+        if not is_ai_api_key_optional(target_base_url):
             raise HTTPException(
                 status_code=400,
                 detail="Please provide an API key.",
@@ -152,6 +152,13 @@ async def update_settings(
         ai_temperature=payload.ai_temperature,
         ai_max_tokens=payload.ai_max_tokens,
         ai_context_messages=payload.ai_context_messages,
+        embedding_base_url=payload.embedding_base_url,
+        embedding_api_key=payload.embedding_api_key,
+        embedding_model=payload.embedding_model,
+        vector_store_provider=payload.vector_store_provider,
+        qdrant_url=payload.qdrant_url,
+        qdrant_api_key=payload.qdrant_api_key,
+        rag_enabled=payload.rag_enabled,
         retention_days=payload.retention_days,
         ad_automation_enabled=payload.ad_automation_enabled,
         ad_min_interval_minutes=payload.ad_min_interval_minutes,

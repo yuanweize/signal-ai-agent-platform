@@ -24,6 +24,15 @@ class RuntimeSettingsResponse(BaseModel):
     ai_models_cached_invalid: list[str] = []
     ai_models_listed_total: int = 0
     ai_models_cached_at: str | None = None
+    embedding_base_url: str = ""
+    embedding_model: str = "text-embedding-3-small"
+    has_embedding_api_key: bool = False
+    embedding_api_key_masked: str = ""
+    vector_store_provider: str = "qdrant"
+    qdrant_url: str = "http://localhost:6333"
+    has_qdrant_api_key: bool = False
+    qdrant_api_key_masked: str = ""
+    rag_enabled: bool = True
     retention_days: int
     ad_automation_enabled: bool
     ad_min_interval_minutes: int
@@ -47,6 +56,13 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     ai_temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     ai_max_tokens: int | None = Field(default=None, ge=1, le=32000)
     ai_context_messages: int | None = Field(default=None, ge=1, le=200)
+    embedding_base_url: str | None = Field(default=None, max_length=500)
+    embedding_api_key: str | None = None
+    embedding_model: str | None = Field(default=None, max_length=120)
+    vector_store_provider: str | None = Field(default=None, max_length=50)
+    qdrant_url: str | None = Field(default=None, max_length=500)
+    qdrant_api_key: str | None = None
+    rag_enabled: bool | None = None
     retention_days: int | None = Field(default=None, ge=1, le=3650)
     ad_automation_enabled: bool | None = None
     ad_min_interval_minutes: int | None = Field(default=None, ge=1, le=1440)
