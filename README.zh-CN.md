@@ -78,13 +78,12 @@
 - 🏛️ [系统架构与数据流转](docs/ARCHITECTURE.md)
 - 🤖 [AI 平台子系统与运行时工厂](docs/AI_PLATFORM.md)
 - 🔒 [安全规范与隐私隔离不变量](docs/SECURITY_PRIVACY.md)
-- 📊 [功能现状与真实性矩阵](docs/CAPABILITIES.md)
 - 🧪 [自动化测试矩阵与验证报告](docs/TESTING.md)
 - 🗺️ [产品演进路线图](docs/ROADMAP.md)
 - 🔄 [数据库迁移指南 (Alembic)](docs/MIGRATION.md)
 - 🔌 [Signal 网关 API 契约与 Webhooks](docs/SIGNAL_API_CONTRACT.md)
 - 📱 [Signal 真实环境验证指南](docs/REAL_SIGNAL_VALIDATION.md)
-- 🔍 [v0.4 真实性审计报告](docs/V04_REALITY_AUDIT.md)
+- 🔍 [v0.4 真实性审计报告](docs/releases/v0.4.0-audit.md)
 
 ---
 
@@ -184,15 +183,15 @@ npm run dev
 
 | 分层 | 关键技术选型 |
 |---|---|
-| **后端框架** | [FastAPI](https://fastapi.tiangolo.com/) 0.115+ (异步 Python 3.11+) |
+| **后端框架** | [FastAPI](https://fastapi.tiangolo.com/) 0.115+ (异步 Python 3.12) |
 | **智能体编排** | [LangGraph](https://github.com/langchain-ai/langgraph) + StateGraph + 渐进式技能系统 |
 | **向量数据库** | [Qdrant](https://qdrant.tech/) 官方 `qdrant-client` 1.10+ (`query_points`) |
 | **工具协议** | 官方 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) Python SDK 2.x |
-| **ORM 与数据持久化** | [SQLAlchemy](https://www.sqlalchemy.org/) 2.0 (AsyncIO) + [aiosqlite](https://github.com/omnilib/aiosqlite) + [Alembic](https://alembic.sqlalchemy.org/) 线性迁移 |
+| **ORM 与数据持久化** | [SQLAlchemy](https://www.sqlalchemy.org/) 2.0 (AsyncIO) + [aiosqlite](https://github.com/omnilib/aiosqlite) (SQLite 正式生产验证，PostgreSQL 路线图中) + [Alembic](https://alembic.sqlalchemy.org/) 线性迁移 |
 | **前端技术栈** | [React](https://react.dev/) 18 + [Vite](https://vitejs.dev/) + [TypeScript](https://www.typescriptlang.org/) + [React Router](https://reactrouter.com/) 7.18+ |
 | **UI 样式体系** | [Tailwind CSS](https://tailwindcss.com/) + [DaisyUI](https://daisyui.com/) |
-| **安全与认证** | Scrypt KDF 密码哈希 + [PyOTP](https://github.com/pyauth/pyotp) (TOTP 2FA) + [python-jose](https://github.com/mpdavis/python-jose) (JWT) |
-| **测试与质量网关** | [pytest](https://docs.pytest.org/) (75 项后端测试) + [Vitest](https://vitest.dev/) (18 项前端测试) + 32 项确定性契约测试 |
+| **安全与认证** | Scrypt KDF 密码哈希 + Fernet 数据库密钥加密 + [PyOTP](https://github.com/pyauth/pyotp) (TOTP 2FA) + [python-jose](https://github.com/mpdavis/python-jose) (JWT) |
+| **测试与质量网关** | [pytest](https://docs.pytest.org/) (91 项后端测试) + [Vitest](https://vitest.dev/) (18 项前端测试) + 32 项确定性契约测试 |
 | **容器化交付** | Docker 多阶段构建 + Docker Compose + GitHub Container Registry (GHCR) |
 
 ---

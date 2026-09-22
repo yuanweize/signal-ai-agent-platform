@@ -78,13 +78,12 @@ With **AI Platform v0.4**, the system introduces an agentic architecture powered
 - 🏛️ [System Architecture & Data Flows](docs/ARCHITECTURE.md)
 - 🤖 [AI Platform Subsystems & Runtime Factory](docs/AI_PLATFORM.md)
 - 🔒 [Security & Privacy Invariants](docs/SECURITY_PRIVACY.md)
-- 📊 [Capabilities & Reality Matrix](docs/CAPABILITIES.md)
 - 🧪 [Testing Architecture & Verification Matrix](docs/TESTING.md)
 - 🗺️ [Product Roadmap](docs/ROADMAP.md)
 - 🔄 [Database Migration Guide (Alembic)](docs/MIGRATION.md)
 - 🔌 [Signal Gateway API Contract & Webhooks](docs/SIGNAL_API_CONTRACT.md)
 - 📱 [Real Signal Environment Validation Guide](docs/REAL_SIGNAL_VALIDATION.md)
-- 🔍 [v0.4 Reality Audit Report](docs/V04_REALITY_AUDIT.md)
+- 🔍 [v0.4 Reality Audit Report](docs/releases/v0.4.0-audit.md)
 
 ---
 
@@ -184,15 +183,15 @@ npm run dev
 
 | Layer | Technologies |
 |---|---|
-| **Backend Framework** | [FastAPI](https://fastapi.tiangolo.com/) 0.115+ (Asynchronous Python 3.11+) |
+| **Backend Framework** | [FastAPI](https://fastapi.tiangolo.com/) 0.115+ (Asynchronous Python 3.12) |
 | **Agent Orchestration**| [LangGraph](https://github.com/langchain-ai/langgraph) + StateGraph + Progressive Skills |
 | **Vector Store** | [Qdrant](https://qdrant.tech/) via official `qdrant-client` 1.10+ (`query_points`) |
 | **Tool Protocol** | Official [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) Python SDK 2.x |
-| **ORM & Database** | [SQLAlchemy](https://www.sqlalchemy.org/) 2.0 (AsyncIO) + [aiosqlite](https://github.com/omnilib/aiosqlite) + [Alembic](https://alembic.sqlalchemy.org/) linear migrations |
+| **ORM & Database** | [SQLAlchemy](https://www.sqlalchemy.org/) 2.0 (AsyncIO) + [aiosqlite](https://github.com/omnilib/aiosqlite) (SQLite production-tested, PostgreSQL on roadmap) + [Alembic](https://alembic.sqlalchemy.org/) linear migrations |
 | **Frontend Stack** | [React](https://react.dev/) 18 + [Vite](https://vitejs.dev/) + [TypeScript](https://www.typescriptlang.org/) + [React Router](https://reactrouter.com/) 7.18+ |
 | **Styling System** | [Tailwind CSS](https://tailwindcss.com/) + [DaisyUI](https://daisyui.com/) |
-| **Security & Auth** | Scrypt KDF + [PyOTP](https://github.com/pyauth/pyotp) (TOTP 2FA) + [python-jose](https://github.com/mpdavis/python-jose) (JWT) |
-| **Quality Gates** | [pytest](https://docs.pytest.org/) (75 passing tests) + [Vitest](https://vitest.dev/) (18 passing tests) + Deterministic AI eval (32 cases) |
+| **Security & Auth** | Scrypt KDF + Fernet DB secret encryption + [PyOTP](https://github.com/pyauth/pyotp) (TOTP 2FA) + [python-jose](https://github.com/mpdavis/python-jose) (JWT) |
+| **Quality Gates** | [pytest](https://docs.pytest.org/) (91 passing tests) + [Vitest](https://vitest.dev/) (18 passing tests) + Deterministic AI eval (32 cases) |
 | **Deployment** | Docker multi-stage builds + Docker Compose + GitHub Container Registry (GHCR) |
 
 ---

@@ -73,5 +73,5 @@ All external tools and MCP integrations are subject to deterministic permission 
 
 - Individual user memories can be deleted on demand via `NativeMemoryProvider.delete()`.
 - Missing records return explicit 404/False status rather than silent positive acknowledgments.
-- Sensitive credentials (API keys, bot secrets) are encrypted at rest using AES-GCM database encryption.
+- Sensitive credentials (API keys, bot secrets) are encrypted at rest using Fernet symmetric encryption with credential masking.
 - Traces and logs do not dump unmasked credentials or private payment tokens.

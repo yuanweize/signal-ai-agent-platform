@@ -36,6 +36,8 @@ def test_documentation_links_and_integrity():
         "AUDIT_REPORT.md",
         "ROUND2_REAUDIT.md",
         "HANDOFF_STATUS.md",
+        "CAPABILITIES.md",
+        "docs/V04_REALITY_AUDIT.md",
     ]
 
     link_pattern = re.compile(r"\[.*?\]\((?!http|mailto|#)(.*?)\)")
@@ -72,14 +74,15 @@ def test_readme_test_counts_accuracy():
     readme_en = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     readme_zh = (REPO_ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
 
-    assert "75 passing tests" in readme_en or "75" in readme_en
+    assert "91 passing tests" in readme_en or "91" in readme_en
     assert "18 passing tests" in readme_en or "18" in readme_en
     assert "32" in readme_en
 
-    assert "75" in readme_zh
+    assert "91" in readme_zh
     assert "18" in readme_zh
     assert "32" in readme_zh
 
-    # Ensure stale old test counts (54/14) are not present in test specs
+    # Ensure stale old test counts (54/14/75) are not present in test specs
     assert "54+ suites" not in readme_en
     assert "14+ component suites" not in readme_en
+    assert "75 passing tests" not in readme_en

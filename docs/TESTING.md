@@ -2,7 +2,7 @@
 
 ## Overview
 
-The test suite verifies application correctness, data integrity, and privacy invariants across both backend (Python 3.14 / pytest) and frontend (React 18 / Vitest) layers.
+The test suite verifies application correctness, data integrity, and privacy invariants across both backend (Python 3.12 / pytest) and frontend (React 18 / Vitest) layers.
 
 ---
 
@@ -14,8 +14,24 @@ Command:
 cd backend
 .venv/bin/pytest -v
 ```
-- **Total Test Cases**: 73 passing tests.
+- **Total Test Cases**: 91 passing tests.
 - **Coverage Highlights**:
+  - `tests/test_v04_final_production_hardening.py` (15 tests):
+    - `test_real_app_startup_routes_ai_through_agent_runtime_factory`: Asserts real app lifespan routes all AI traffic via AgentRuntime.
+    - `test_non_test_runtime_rejects_fake_vector_store`: Asserts runtime rejects Fake providers in non-test mode.
+    - `test_runtime_settings_include_embedding_and_qdrant_configuration`: Verifies dynamic DB settings for embeddings and Qdrant.
+    - `test_ai_disabled_does_not_call_external_llm`: Asserts zero external LLM calls when AI toggle is off.
+    - `test_agent_uses_recent_conversation_history`: Verifies multi-turn history loading and chronological ordering.
+    - `test_current_inbound_not_duplicated`: Asserts current turn message is not duplicated in prompt.
+    - `test_group_history_preserves_sender_attribution`: Verifies `Alice: ` and `AI: ` prefix attribution in group history.
+    - `test_context_window_respects_limit`: Asserts budget truncation for long message history.
+    - `test_active_prompt_is_used_by_llm_and_recorded_in_airun`: Verifies dynamic prompt selection and provenance recording.
+    - `test_skill_toggle_survives_registry_restart`: Asserts skill enable/disable persistence across restarts.
+    - `test_mcp_env_secrets_not_stored_plaintext_and_auto_reconnects`: Asserts MCP env secrets encryption and auto-reconnect.
+    - `test_learning_pair_uses_reply_target_and_rejects_failed_send`: Verifies human reply pairing with explicit reply_to_id.
+    - `test_private_learning_candidate_not_promoted_global_without_explicit_scope`: Asserts privacy safety confirmation gate.
+    - `test_user_purge_removes_private_vectors_and_memory`: Verifies comprehensive cascading wipe of user data and vector points.
+    - `test_prompt_injection_adversarial_negative_suite`: Asserts adversarial prompt injection and approval bypass defenses.
   - `tests/test_production_wiring_and_hardening.py` (8 tests):
     - `test_production_runtime_does_not_use_fake_providers`: Asserts runtime factory builds real OpenAI/Qdrant adapters and blocks Fake providers in production mode.
     - `test_auto_mode_uses_agent_runtime`: Verifies auto reply dispatches via `AgentRuntime.run()` and logs `AIRun`.
