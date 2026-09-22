@@ -14,8 +14,11 @@ Entities:
 - ToolInvocation: Audit trail of tool/action executions
 """
 
+from __future__ import annotations
+
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
 from sqlalchemy import (
     Boolean,
