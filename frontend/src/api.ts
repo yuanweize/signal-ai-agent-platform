@@ -8,6 +8,7 @@
 const API_BASE = '/api';
 
 export * from './types/inbox';
+export * from './types/ai';
 import type {
   ConversationDTO,
   ConversationDetailDTO,
@@ -15,6 +16,17 @@ import type {
   ConversationMessagesResponse,
   MessageDTO,
 } from './types/inbox';
+import type {
+  AISuggestionDTO,
+  AIRunExplainabilityDTO,
+  AIOverviewMetricsDTO,
+  KnowledgeSourceDTO,
+  MemoryItemDTO,
+  SkillDTO,
+  MCPServerDTO,
+  LearningCandidateDTO,
+  EvaluationSummaryDTO,
+} from './types/ai';
 
 interface ApiOptions {
   method?: string;
@@ -390,7 +402,7 @@ class ApiClient {
     });
   }
 
-  async updateConversationMode(id: number, mode: 'auto' | 'manual' | 'paused') {
+  async updateConversationMode(id: number, mode: 'auto' | 'copilot' | 'manual' | 'paused') {
     return this.request<ConversationDTO>(`/conversations/${id}/mode`, {
       method: 'PATCH',
       body: { mode },
@@ -416,6 +428,153 @@ class ApiClient {
 
   async getGroupMembers(groupId: string) {
     return this.request<GroupMemberDTO[]>(`/groups/${encodeURIComponent(groupId)}/members`);
+  }
+
+  // --- AI Platform & Copilot APIs ---
+
+  async getPendingSuggestion(conversationId: number) {
+    return this.request<AISuggestionDTO | null>(`/conversations/${conversationId}/suggestion`);
+  }
+
+  async generateSuggestion(conversationId: number) {
+    return this.request<AISuggestionDTO>(`/conversations/${conversationId}/suggestion/generate`, {
+      method: 'POST',
+    });
+  }
+
+  async acceptSuggestion(conversationId: number, suggestionId?: number) {
+    const qs = suggestionId ? `?suggestion_id=${suggestionId}` : '';
+    return this.request<MessageDTO>(`/conversations/${conversationId}/suggestion/accept${qs}`, {
+      method: 'POST',
+    });
+  }
+
+  async editSuggestion(conversationId: number, editedText: string, suggestionId?: number) {
+    return this.request<MessageDTO>(`/conversations/${conversationId}/suggestion/edit`, {
+      method: 'POST',
+      body: { edited_text: editedText, suggestion_id: suggestionId },
+    });
+  }
+
+  async rejectSuggestion(conversationId: number, reason?: string, suggestionId?: number) {
+    return this.request<{ ok: boolean; status: string; suggestion_id: number }>(
+      `/conversations/${conversationId}/suggestion/reject`,
+      {
+        method: 'POST',
+        body: { reason: reason || 'manual_dismissal', suggestion_id: suggestionId },
+      }
+    );
+  }
+
+  async getAIRunExplainability(conversationId: number, aiRunId: number) {
+    return this.request<AIRunExplainabilityDTO>(`/conversations/${conversationId}/ai-run/${aiRunId}`);
+  }
+
+  // --- AI Studio Management Console APIs ---
+
+  async getAIOverview() {
+    return this.request<AIOverviewMetricsDTO>('/ai-studio/overview');
+  }
+
+  async getKnowledgeSources() {
+    return this.request<KnowledgeSourceDTO[]>('/ai-studio/knowledge/sources');
+  }
+
+  async createKnowledgeSource(data: { title: string; source_type: string; language?: string }) {
+    return this.request<KnowledgeSourceDTO>('/ai-studio/knowledge/sources', {
+      method: 'POST',
+      body: data,
+    });
+  }
+
+  async ingestKnowledgeDoc(
+    sourceId: number,
+    data: {
+      title: string;
+      content: string;
+      scope_type?: string;
+      scope_id?: string;
+      is_faq?: boolean;
+      faq_question?: string;
+    }
+  ) {
+    return this.request<{ ok: boolean; document_id: number; chunks_count: number }>(
+      `/ai-studio/knowledge/sources/${sourceId}/documents`,
+      {
+        method: 'POST',
+        body: data,
+      }
+    );
+  }
+
+  async getMemories(scopeType?: string, scopeId?: string) {
+    const q = new URLSearchParams();
+    if (scopeType) q.append('scope_type', scopeType);
+    if (scopeId) q.append('scope_id', scopeId);
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return this.request<MemoryItemDTO[]>(`/ai-studio/memory/items${qs}`);
+  }
+
+  async deleteMemory(memoryId: number) {
+    return this.request<{ ok: boolean }>(`/ai-studio/memory/items/${memoryId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getSkills() {
+    return this.request<SkillDTO[]>('/ai-studio/skills');
+  }
+
+  async toggleSkill(skillName: string, isEnabled: boolean) {
+    return this.request<{ ok: boolean; skill_name: string; is_enabled: boolean }>(
+      `/ai-studio/skills/${encodeURIComponent(skillName)}/toggle`,
+      {
+        method: 'POST',
+        body: { is_enabled: isEnabled },
+      }
+    );
+  }
+
+  async getMCPServers() {
+    return this.request<MCPServerDTO[]>('/ai-studio/mcp/servers');
+  }
+
+  async testMCPServer(serverId: number) {
+    return this.request<{ ok: boolean; status: string; latency_ms?: number }>(
+      `/ai-studio/mcp/servers/${serverId}/test`,
+      { method: 'POST' }
+    );
+  }
+
+  async getLearningCandidates(status?: string) {
+    const qs = status ? `?status=${status}` : '';
+    return this.request<LearningCandidateDTO[]>(`/ai-studio/learning/candidates${qs}`);
+  }
+
+  async promoteLearningCandidate(
+    candidateId: number,
+    action: 'knowledge' | 'training',
+    faqQ?: string,
+    faqA?: string
+  ) {
+    return this.request<{ ok: boolean; status: string }>(
+      `/ai-studio/learning/candidates/${candidateId}/promote`,
+      {
+        method: 'POST',
+        body: { action, faq_question: faqQ, faq_answer: faqA },
+      }
+    );
+  }
+
+  async exportTrainingJSONL() {
+    return this.request<{ jsonl: string; count: number }>('/ai-studio/learning/export-jsonl');
+  }
+
+  async runEvaluation(limit?: number) {
+    const qs = limit ? `?limit=${limit}` : '';
+    return this.request<EvaluationSummaryDTO>(`/ai-studio/evaluation/run${qs}`, {
+      method: 'POST',
+    });
   }
 }
 

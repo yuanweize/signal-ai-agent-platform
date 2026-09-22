@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, Hand, PauseCircle, Check, CheckCheck, Clock, AlertCircle } from 'lucide-react';
+import { Bot, Hand, PauseCircle, Check, CheckCheck, Clock, AlertCircle, Sparkles } from 'lucide-react';
 
 export interface BadgeProps {
   children: React.ReactNode;
@@ -40,12 +40,20 @@ export const Badge: React.FC<BadgeProps> = ({
   );
 };
 
-export const ModeBadge: React.FC<{ mode: 'auto' | 'manual' | 'paused' }> = ({ mode }) => {
+export const ModeBadge: React.FC<{ mode: 'auto' | 'copilot' | 'manual' | 'paused' | string }> = ({ mode }) => {
   if (mode === 'auto') {
     return (
-      <Badge variant="primary" size="xs" className="gap-1">
+      <Badge variant="success" size="xs" className="gap-1">
         <Bot className="w-3 h-3" />
         <span>Auto</span>
+      </Badge>
+    );
+  }
+  if (mode === 'copilot') {
+    return (
+      <Badge variant="primary" size="xs" className="gap-1">
+        <Sparkles className="w-3 h-3" />
+        <span>Copilot</span>
       </Badge>
     );
   }

@@ -6,7 +6,6 @@ import {
   User,
   Users,
   BellDot,
-  Bot,
   ShieldCheck,
   Send,
   Info,
@@ -23,10 +22,15 @@ import {
   ConversationDTO,
   ConversationDetailDTO,
   MessageDTO,
+  AISuggestionDTO,
+  AIRunExplainabilityDTO,
 } from './api';
 import { ConversationMode } from './types/inbox';
 import { ModeBadge, DeliveryBadge } from './components/ui/Badge';
 import { Button } from './components/ui/Button';
+import { ProvenanceBadge } from './components/ProvenanceBadge';
+import { ExplainabilityDrawer } from './components/ExplainabilityDrawer';
+import { CopilotDraftCard } from './components/CopilotDraftCard';
 
 export default function InboxPage() {
   // Conversations list state
@@ -35,7 +39,7 @@ export default function InboxPage() {
   const [loadingList, setLoadingList] = useState(true);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | 'dm' | 'group'>('all');
-  const [modeFilter, setModeFilter] = useState<'all' | 'auto' | 'manual' | 'paused'>('all');
+  const [modeFilter, setModeFilter] = useState<'all' | 'auto' | 'copilot' | 'manual' | 'paused'>('all');
   const [unreadOnly, setUnreadOnly] = useState(false);
 
   // Active conversation state
@@ -45,6 +49,15 @@ export default function InboxPage() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [hasMoreBefore, setHasMoreBefore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
+
+  // Copilot state
+  const [pendingSuggestion, setPendingSuggestion] = useState<AISuggestionDTO | null>(null);
+  const [suggestionLoading, setSuggestionLoading] = useState(false);
+
+  // Explainability drawer state
+  const [selectedAIRun, setSelectedAIRun] = useState<AIRunExplainabilityDTO | null>(null);
+  const [explainLoading, setExplainLoading] = useState(false);
+  const [showExplainDrawer, setShowExplainDrawer] = useState(false);
 
   // Composer state
   const [inputText, setInputText] = useState('');
@@ -112,6 +125,11 @@ export default function InboxPage() {
             );
           });
         }
+
+        // Check Copilot suggestion
+        api.getPendingSuggestion(convId)
+          .then(sug => setPendingSuggestion(sug))
+          .catch(() => setPendingSuggestion(null));
       } catch (err) {
         if (!quiet) setErrorMsg(err instanceof Error ? err.message : 'Failed to load messages');
       } finally {
@@ -121,6 +139,67 @@ export default function InboxPage() {
     []
   );
 
+  // Copilot actions
+  const handleAcceptSuggestion = async () => {
+    if (!activeConvId || !pendingSuggestion) return;
+    setSuggestionLoading(true);
+    try {
+      const sentMsg = await api.acceptSuggestion(activeConvId, pendingSuggestion.id);
+      setMessages(prev => [...prev, sentMsg]);
+      setPendingSuggestion(null);
+      fetchConversations(true);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to accept AI draft');
+    } finally {
+      setSuggestionLoading(false);
+    }
+  };
+
+  const handleEditSuggestionInComposer = (text: string) => {
+    setInputText(text);
+  };
+
+  const handleRejectSuggestion = async () => {
+    if (!activeConvId || !pendingSuggestion) return;
+    setSuggestionLoading(true);
+    try {
+      await api.rejectSuggestion(activeConvId, 'operator_dismissed', pendingSuggestion.id);
+      setPendingSuggestion(null);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to dismiss AI draft');
+    } finally {
+      setSuggestionLoading(false);
+    }
+  };
+
+  const handleRegenerateSuggestion = async () => {
+    if (!activeConvId) return;
+    setSuggestionLoading(true);
+    try {
+      const newSug = await api.generateSuggestion(activeConvId);
+      setPendingSuggestion(newSug);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to generate AI draft');
+    } finally {
+      setSuggestionLoading(false);
+    }
+  };
+
+  const handleOpenExplainability = async (aiRunId: number) => {
+    if (!activeConvId) return;
+    setShowExplainDrawer(true);
+    setExplainLoading(true);
+    try {
+      const detail = await api.getAIRunExplainability(activeConvId, aiRunId);
+      setSelectedAIRun(detail);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to load AI trace');
+      setShowExplainDrawer(false);
+    } finally {
+      setExplainLoading(false);
+    }
+  };
+
   // On conversation select
   useEffect(() => {
     if (activeConvId !== null) {
@@ -128,6 +207,7 @@ export default function InboxPage() {
     } else {
       setActiveConv(null);
       setMessages([]);
+      setPendingSuggestion(null);
     }
   }, [activeConvId, fetchActiveMessages]);
 
@@ -495,6 +575,7 @@ export default function InboxPage() {
                       onChange={e => handleModeChange(e.target.value as ConversationMode)}
                     >
                       <option value="auto" className="bg-[#1a1a2e] text-white">Auto (AI)</option>
+                      <option value="copilot" className="bg-[#1a1a2e] text-white">Copilot (Human + AI)</option>
                       <option value="manual" className="bg-[#1a1a2e] text-white">Manual (Human)</option>
                       <option value="paused" className="bg-[#1a1a2e] text-white">Paused (Mute)</option>
                     </select>
@@ -573,28 +654,17 @@ export default function InboxPage() {
                         key={msg.id}
                         className={`flex flex-col ${isOutbound ? 'items-end' : 'items-start'}`}
                       >
-                        <div className="text-xs text-[var(--text-secondary)] mb-1 flex items-center gap-2 px-1">
-                          <span className="font-semibold inline-flex items-center gap-1.5">
-                            {isOutbound ? (
-                              isAdmin ? (
-                                <>
-                                  <ShieldCheck className="w-3.5 h-3.5 text-[var(--danger)]" />
-                                  <span>Admin</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Bot className="w-3.5 h-3.5 text-[var(--accent)]" />
-                                  <span>AI Bot</span>
-                                </>
-                              )
-                            ) : (
-                              <>
-                                <User className="w-3.5 h-3.5 text-[var(--text-muted)]" />
-                                <span>{msg.sender_name || 'Customer'}</span>
-                              </>
-                            )}
-                          </span>
-                          <time className="text-[10px] text-[var(--text-muted)]">
+                        <div className="text-xs text-[var(--text-secondary)] mb-1 flex items-center justify-between gap-2 px-1 w-full max-w-lg">
+                          <ProvenanceBadge
+                            origin={msg.origin}
+                            actor={msg.actor}
+                            model={msg.model}
+                            promptVersion={msg.prompt_version}
+                            adminIdentity={msg.admin_identity}
+                            aiRunId={msg.ai_run_id}
+                            onExplain={() => msg.ai_run_id && handleOpenExplainability(msg.ai_run_id)}
+                          />
+                          <time className="text-[10px] text-[var(--text-muted)] shrink-0">
                             {new Date(msg.timestamp).toLocaleTimeString([], {
                               hour: '2-digit',
                               minute: '2-digit',
@@ -677,6 +747,18 @@ export default function InboxPage() {
 
               {/* Composer */}
               <div className="inbox-composer">
+                {/* Copilot Draft Suggestion Card */}
+                {pendingSuggestion && (
+                  <CopilotDraftCard
+                    suggestion={pendingSuggestion}
+                    loading={suggestionLoading}
+                    onAccept={handleAcceptSuggestion}
+                    onEdit={handleEditSuggestionInComposer}
+                    onReject={handleRejectSuggestion}
+                    onRegenerate={handleRegenerateSuggestion}
+                  />
+                )}
+
                 <form onSubmit={handleSendMessage} className="space-y-2">
                   <div className="relative">
                     <textarea
@@ -808,7 +890,16 @@ export default function InboxPage() {
             </Button>
           </aside>
         )}
+
+        {/* AI Explainability / Why Drawer */}
+        <ExplainabilityDrawer
+          run={selectedAIRun}
+          isOpen={showExplainDrawer}
+          onClose={() => setShowExplainDrawer(false)}
+          loading={explainLoading}
+        />
       </div>
     </SidebarLayout>
   );
 }
+

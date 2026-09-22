@@ -11,6 +11,7 @@ import {
   Smartphone,
   Bot,
   LogOut,
+  Sparkles,
 } from 'lucide-react';
 import { api } from './api';
 
@@ -74,6 +75,10 @@ export default function SidebarLayout({ children, title }: SidebarLayoutProps) {
           <NavLink to="/inbox" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <Inbox className="w-4 h-4 mr-2.5 opacity-80" />
             <span>Inbox</span>
+          </NavLink>
+          <NavLink to="/ai-studio" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+            <Sparkles className="w-4 h-4 mr-2.5 text-[var(--accent)]" />
+            <span className="font-semibold text-[var(--accent-light)]">AI Studio</span>
           </NavLink>
           <NavLink to="/groups" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <Users className="w-4 h-4 mr-2.5 opacity-80" />

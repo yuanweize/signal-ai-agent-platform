@@ -9,6 +9,7 @@ import CampaignsPage from './CampaignsPage';
 import UsersPage from './UsersPage';
 import GroupsPage from './GroupsPage';
 import DevicesPage from './DevicesPage';
+import AIStudioPage from './AIStudioPage';
 
 /**
  * Auth guard — redirects to /login if no JWT token present.
@@ -90,6 +91,14 @@ function App() {
           element={
             <ProtectedRoute>
               <DevicesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/ai-studio"
+          element={
+            <ProtectedRoute>
+              <AIStudioPage />
             </ProtectedRoute>
           }
         />
