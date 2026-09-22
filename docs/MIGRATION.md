@@ -2,83 +2,111 @@
 
 ## Overview
 
-The project uses Alembic for schema migrations with SQLite (async via aiosqlite).  
-`Base.metadata.create_all()` still runs at startup for **new installations** only.  
-Existing deployments must run migrations manually.
+The project uses [Alembic](https://alembic.sqlalchemy.org/) for async SQLite/PostgreSQL schema migrations via `aiosqlite`.
+All database changes follow a strict linear migration chain from `<base>` to current `head`.
 
-## Migration History
+> [!IMPORTANT]
+> Fresh installations run `alembic upgrade head` directly against an empty database. Do **not** use `alembic stamp head` or manual schema creation.
 
-| Revision | Description |
-|----------|-------------|
-| `a0c4522143d4` | Add `conversations.mode`, `groups.description`, `messages.sender_name`, `signal_timestamp_ms`, `signal_event_id`, `delivery_status`, `delivery_error` |
-| `397929583aa5` | Apply `UNIQUE(signal_event_id)` constraint on messages via batch mode; drop legacy `intent_confidence` |
+---
+
+## Migration Revision Chain
+
+The verified linear revision chain:
+
+```mermaid
+graph TD
+    B["<base>"] --> R1["112aa6e29383 (Initial Schema)"]
+    R1 --> R2["a0c4522143d4 (Conversation Modes & Message Dedup)"]
+    R2 --> R3["397929583aa5 (Signal Event ID Unique Constraint)"]
+    R3 --> R4["c8927140f12a (Identity & Group Roster Persistence)"]
+    R4 --> R5["e1f2a3b4c5d6 (AI Platform v0.4 Core Tables - HEAD)"]
+```
+
+### Detailed Revisions
+
+| Revision | Down Revision | Description |
+|---|---|---|
+| `112aa6e29383` | `<base>` | Initial schema baseline (`users`, `conversations`, `messages`, `groups`, `products`, `bot_config`, `audit_logs`, `campaign_delivery_logs`). |
+| `a0c4522143d4` | `112aa6e29383` | Added `conversations.mode`, `groups.description`, `messages.sender_name`, `signal_timestamp_ms`, `signal_event_id`, `delivery_status`, `delivery_error`. |
+| `397929583aa5` | `a0c4522143d4` | Applied `UNIQUE(signal_event_id)` batch constraint; dropped legacy `intent_confidence`. |
+| `c8927140f12a` | `397929583aa5` | Round 2 identity expansion (`canonical_user_id`, UUID/phone mapping, `group_members` roster table, `message.origin`). |
+| `e1f2a3b4c5d6` | `c8927140f12a` | **AI Platform v0.4**: Added tables for `ai_runs`, `ai_suggestions`, `knowledge_sources`, `knowledge_documents`, `knowledge_chunks`, `durable_memories`, `skills`, `feedback_events`, `learning_candidates`. |
+
+---
 
 ## Applying Migrations
 
-### Docker (production)
+### 1. Fresh Install
+
+On a new empty database:
+
+```bash
+cd backend
+alembic upgrade head
+```
+
+Or via Docker Compose:
 
 ```bash
 docker compose exec backend alembic upgrade head
 ```
 
-### Local development
+### 2. Upgrading Existing Database (v0.3 → v0.4)
+
+Before upgrading any production database, always create a timestamped backup:
 
 ```bash
-cd backend
-DATABASE_URL="sqlite+aiosqlite:////path/to/data/bot.db" alembic upgrade head
-```
-
-### Check current version
-
-```bash
-alembic current
-```
-
-## Migrating an Existing Database
-
-If you have a pre-migration database (before this audit), the migration will:
-
-1. **Preserve** all existing `users`, `conversations`, `messages`, `groups`, `products`, `bot_config`, `audit_logs`, `campaign_delivery_logs`
-2. **Add** new nullable columns with safe defaults (`mode = 'auto'`, `sender_name = NULL`, etc.)
-3. **Not drop** any existing data
-4. **Remove** only `intent_confidence` (was never populated by the application)
-
-### Before migrating a production database
-
-```bash
-# Backup first
+# 1. Backup production database
 cp data/bot.db data/bot.db.backup.$(date +%Y%m%d_%H%M%S)
 
-# Run migration
+# 2. Run upgrade to head
+cd backend
 alembic upgrade head
 
-# Verify
+# 3. Verify current revision is at head
 alembic current
 ```
 
-## Fresh Install
-
-Fresh installs run through `create_all()` at startup, then you should stamp at head:
-
-```bash
-alembic stamp head
+Expected output of `alembic current`:
+```text
+e1f2a3b4c5d6 (head)
 ```
 
-Or just run `alembic upgrade head` (no-op if already at head).
+### 3. Verifying Migration Chain
 
-## Rollback
+Check migration history:
+
+```bash
+alembic history --verbose
+```
+
+Inspect heads:
+
+```bash
+alembic heads
+```
+
+---
+
+## Rollback Policy
+
+To downgrade one step:
 
 ```bash
 alembic downgrade -1
 ```
 
-To rollback to a specific revision:
+To downgrade back to the v0.3 head:
 
 ```bash
-alembic downgrade a0c4522143d4
+alembic downgrade c8927140f12a
 ```
 
-## Known Limitations
+---
 
-- SQLite does not support all ALTER TABLE operations. Migrations use `batch_alter_table` for constraint changes.
-- The `UNIQUE(signal_event_id)` constraint only enforces uniqueness on non-NULL values (SQLite semantics). This is correct behavior — legacy messages have NULL `signal_event_id`.
+## Architectural Rules & Guarantees
+
+1. **SQLite Batch Mode**: All column alterations, index additions, and constraint drops MUST use `batch_alter_table` to guarantee SQLite compatibility.
+2. **Zero Data Loss**: Existing columns and rows are strictly preserved during upgrade. Nullable columns and safe defaults are provided for backward compatibility.
+3. **Never Stamp Head on Fresh DB**: Running `Base.metadata.create_all()` followed by `stamp head` is deprecated. Always use `alembic upgrade head` so the migration log matches schema state.

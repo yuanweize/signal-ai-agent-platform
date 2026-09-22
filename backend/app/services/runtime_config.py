@@ -10,6 +10,8 @@ import base64
 import hashlib
 import ipaddress
 import json
+import logging
+import os
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 
@@ -44,6 +46,16 @@ KEY_SIGNAL_API_TOKEN_ENC = "signal_api_token_enc"
 KEY_SIGNAL_PHONE_NUMBER = "signal_phone_number"
 KEY_BOT_DEFAULT_LANGUAGE = "bot_default_language"
 
+KEY_EMBEDDING_BASE_URL = "embedding_base_url"
+KEY_EMBEDDING_API_KEY = "embedding_api_key"  # legacy plain key
+KEY_EMBEDDING_API_KEY_ENC = "embedding_api_key_enc"
+KEY_EMBEDDING_MODEL = "embedding_model"
+KEY_VECTOR_STORE_PROVIDER = "vector_store_provider"
+KEY_QDRANT_URL = "qdrant_url"
+KEY_QDRANT_API_KEY = "qdrant_api_key"  # legacy plain key
+KEY_QDRANT_API_KEY_ENC = "qdrant_api_key_enc"
+KEY_RAG_ENABLED = "rag_enabled"
+
 DEFAULT_AI_PROMPT = "You are a helpful sales assistant. Reply naturally and professionally."
 DEFAULT_AI_ENABLED = False
 DEFAULT_MARKET_ENABLED = True
@@ -54,6 +66,12 @@ DEFAULT_AI_MAX_TOKENS = 1000
 DEFAULT_AI_CONTEXT_MESSAGES = 20
 DEFAULT_RETENTION_DAYS = 30
 DEFAULT_BOT_NAME = "Signal Market Bot"
+
+DEFAULT_EMBEDDING_BASE_URL = ""
+DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
+DEFAULT_VECTOR_STORE_PROVIDER = "qdrant"
+DEFAULT_QDRANT_URL = "http://localhost:6333"
+DEFAULT_RAG_ENABLED = True
 
 DEFAULT_AD_AUTOMATION_ENABLED = True
 DEFAULT_AD_MIN_INTERVAL_MINUTES = 180
@@ -190,23 +208,132 @@ def mask_secret(secret: str) -> str:
     return f"{secret[:4]}{'*' * max(6, len(secret) - 8)}{secret[-4:]}"
 
 
-def _get_fernet() -> Fernet:
-    seed = settings.config_encryption_key or settings.jwt_secret_key or "runtime-config-fallback"
+logger = logging.getLogger("services.runtime_config")
+
+_MASTER_KEY_CACHE: str | None = None
+
+
+def _get_master_key_filepath() -> str:
+    data_dir = os.environ.get("DATA_DIR", "./data")
+    return os.path.join(data_dir, ".master_key")
+
+
+def _get_or_create_persistent_master_key() -> str:
+    global _MASTER_KEY_CACHE
+    if _MASTER_KEY_CACHE:
+        return _MASTER_KEY_CACHE
+
+    path = _get_master_key_filepath()
+    if os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                key = f.read().strip()
+                if key:
+                    _MASTER_KEY_CACHE = key
+                    return key
+        except Exception as e:
+            logger.warning(f"Could not read master key file at {path}: {e}")
+
+    # Generate new random 32-byte urlsafe base64 key
+    new_key = Fernet.generate_key().decode("utf-8")
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        # Create with file permissions 0600 (owner read/write only)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(new_key)
+        logger.info(f"Generated new persistent encryption master key at {path} (mode 0600)")
+    except Exception as e:
+        logger.warning(f"Could not persist master key file at {path}: {e}")
+
+    _MASTER_KEY_CACHE = new_key
+    return new_key
+
+
+def _get_fernet_for_seed(seed: str) -> Fernet:
     digest = hashlib.sha256(seed.encode("utf-8")).digest()
     key = base64.urlsafe_b64encode(digest)
     return Fernet(key)
 
 
+def _get_active_fernet() -> Fernet:
+    seed = (getattr(settings, "config_encryption_key", "") or "").strip() or os.environ.get(
+        "CONFIG_ENCRYPTION_KEY", ""
+    ).strip()
+    if not seed:
+        seed = _get_or_create_persistent_master_key()
+    return _get_fernet_for_seed(seed)
+
+
+def _get_legacy_fallback_fernet() -> Fernet:
+    return _get_fernet_for_seed("runtime-config-fallback")
+
+
+def _get_fernet() -> Fernet:
+    return _get_active_fernet()
+
+
 def encrypt_value(value: str) -> str:
     if not value:
         return ""
-    return _get_fernet().encrypt(value.encode("utf-8")).decode("utf-8")
+    return _get_active_fernet().encrypt(value.encode("utf-8")).decode("utf-8")
 
 
 def decrypt_value(value: str) -> str:
     if not value:
         return ""
-    return _get_fernet().decrypt(value.encode("utf-8")).decode("utf-8")
+    active_fernet = _get_active_fernet()
+    try:
+        return active_fernet.decrypt(value.encode("utf-8")).decode("utf-8")
+    except Exception:
+        # Fallback migration check for ciphertexts encrypted under legacy fallback key
+        try:
+            legacy_fernet = _get_legacy_fallback_fernet()
+            decrypted = legacy_fernet.decrypt(value.encode("utf-8")).decode("utf-8")
+            logger.info("Decrypted secret using legacy fallback key for seamless migration")
+            return decrypted
+        except Exception:
+            raise
+
+
+async def migrate_legacy_encrypted_settings(session: AsyncSession) -> int:
+    """Migrate any legacy-fallback encrypted configuration values to active master key."""
+    encrypted_keys = [
+        KEY_AI_API_KEY_ENC,
+        KEY_SIGNAL_API_TOKEN_ENC,
+        KEY_EMBEDDING_API_KEY_ENC,
+        KEY_QDRANT_API_KEY_ENC,
+    ]
+    stmt = select(BotConfig).where(BotConfig.key.in_(encrypted_keys))
+    rows = (await session.execute(stmt)).scalars().all()
+    migrated_count = 0
+
+    active_fernet = _get_active_fernet()
+    legacy_fernet = _get_legacy_fallback_fernet()
+
+    for config in rows:
+        if not config.value:
+            continue
+        try:
+            # Check if already decryptable by active fernet
+            active_fernet.decrypt(config.value.encode("utf-8"))
+        except Exception:
+            # Try legacy fernet
+            try:
+                plaintext = legacy_fernet.decrypt(config.value.encode("utf-8")).decode("utf-8")
+                # Re-encrypt with active fernet
+                config.value = encrypt_value(plaintext)
+                migrated_count += 1
+                logger.info(f"Re-encrypted configuration key '{config.key}' with active master key")
+            except Exception as e:
+                logger.warning(f"Could not migrate legacy key '{config.key}': {e}")
+
+    if migrated_count > 0:
+        await session.commit()
+        logger.info(
+            f"Successfully migrated {migrated_count} legacy encrypted settings to active master key"
+        )
+    return migrated_count
 
 
 async def get_config_map(session: AsyncSession) -> dict[str, str]:
@@ -318,6 +445,52 @@ async def get_runtime_settings(session: AsyncSession) -> dict:
         signal_api_token = signal_api_token_plain
         signal_api_token_source = "runtime"
 
+    embedding_api_key_enc = values.get(KEY_EMBEDDING_API_KEY_ENC, "")
+    embedding_api_key_plain = values.get(KEY_EMBEDDING_API_KEY, "")
+    embedding_api_key = ""
+    embedding_api_key_source = "none"
+    if embedding_api_key_enc:
+        try:
+            embedding_api_key = decrypt_value(embedding_api_key_enc)
+            embedding_api_key_source = "runtime"
+        except Exception:
+            embedding_api_key = ""
+            embedding_api_key_source = "invalid"
+    elif embedding_api_key_plain:
+        embedding_api_key = embedding_api_key_plain
+        embedding_api_key_source = "runtime"
+    elif ai_api_key and not values.get(KEY_EMBEDDING_BASE_URL):
+        embedding_api_key = ai_api_key
+        embedding_api_key_source = "fallback_ai_key"
+
+    embedding_base_url = (values.get(KEY_EMBEDDING_BASE_URL) or "").strip()
+    embedding_model = (values.get(KEY_EMBEDDING_MODEL) or DEFAULT_EMBEDDING_MODEL).strip()
+
+    qdrant_api_key_enc = values.get(KEY_QDRANT_API_KEY_ENC, "")
+    qdrant_api_key_plain = values.get(KEY_QDRANT_API_KEY, "")
+    qdrant_api_key = ""
+    qdrant_api_key_source = "none"
+    if qdrant_api_key_enc:
+        try:
+            qdrant_api_key = decrypt_value(qdrant_api_key_enc)
+            qdrant_api_key_source = "runtime"
+        except Exception:
+            qdrant_api_key = ""
+            qdrant_api_key_source = "invalid"
+    elif qdrant_api_key_plain:
+        qdrant_api_key = qdrant_api_key_plain
+        qdrant_api_key_source = "runtime"
+
+    qdrant_url = (
+        values.get(KEY_QDRANT_URL) or os.getenv("QDRANT_URL") or DEFAULT_QDRANT_URL
+    ).strip()
+    vector_store_provider = (
+        values.get(KEY_VECTOR_STORE_PROVIDER)
+        or os.getenv("AI_VECTOR_STORE_BACKEND")
+        or DEFAULT_VECTOR_STORE_PROVIDER
+    ).strip()
+    rag_enabled = _to_bool(values.get(KEY_RAG_ENABLED), DEFAULT_RAG_ENABLED)
+
     return {
         "ai_prompt": ai_prompt,
         "is_ai_enabled": is_ai_enabled,
@@ -336,6 +509,19 @@ async def get_runtime_settings(session: AsyncSession) -> dict:
         "ai_models_cached_invalid": ai_models_invalid,
         "ai_models_listed_total": ai_models_listed_total,
         "ai_models_cached_at": ai_models_cached_at,
+        "embedding_base_url": embedding_base_url,
+        "embedding_api_key": embedding_api_key,
+        "embedding_api_key_masked": mask_secret(embedding_api_key),
+        "has_embedding_api_key": bool(embedding_api_key),
+        "embedding_api_key_source": embedding_api_key_source,
+        "embedding_model": embedding_model,
+        "vector_store_provider": vector_store_provider,
+        "qdrant_url": qdrant_url,
+        "qdrant_api_key": qdrant_api_key,
+        "qdrant_api_key_masked": mask_secret(qdrant_api_key),
+        "has_qdrant_api_key": bool(qdrant_api_key),
+        "qdrant_api_key_source": qdrant_api_key_source,
+        "rag_enabled": rag_enabled,
         "retention_days": retention_days,
         "ad_automation_enabled": ad_automation_enabled,
         "ad_min_interval_minutes": ad_min_interval_minutes,
@@ -365,6 +551,13 @@ async def get_runtime_settings_snapshot(session: AsyncSession) -> dict:
         "ai_temperature": current["ai_temperature"],
         "ai_max_tokens": current["ai_max_tokens"],
         "ai_context_messages": current["ai_context_messages"],
+        "embedding_base_url": current["embedding_base_url"],
+        "embedding_model": current["embedding_model"],
+        "has_embedding_api_key": current["has_embedding_api_key"],
+        "vector_store_provider": current["vector_store_provider"],
+        "qdrant_url": current["qdrant_url"],
+        "has_qdrant_api_key": current["has_qdrant_api_key"],
+        "rag_enabled": current["rag_enabled"],
         "retention_days": current["retention_days"],
         "has_ai_api_key": current["has_ai_api_key"],
         "ai_api_key_source": current["ai_api_key_source"],
@@ -394,6 +587,13 @@ async def upsert_runtime_settings(
     ai_temperature: float | None = None,
     ai_max_tokens: int | None = None,
     ai_context_messages: int | None = None,
+    embedding_base_url: str | None = None,
+    embedding_api_key: str | None = None,
+    embedding_model: str | None = None,
+    vector_store_provider: str | None = None,
+    qdrant_url: str | None = None,
+    qdrant_api_key: str | None = None,
+    rag_enabled: bool | None = None,
     retention_days: int | None = None,
     ad_automation_enabled: bool | None = None,
     ad_min_interval_minutes: int | None = None,
@@ -427,6 +627,20 @@ async def upsert_runtime_settings(
         updates[KEY_AI_MAX_TOKENS] = str(max(1, min(32000, ai_max_tokens)))
     if ai_context_messages is not None:
         updates[KEY_AI_CONTEXT_MESSAGES] = str(max(1, min(200, ai_context_messages)))
+    if embedding_base_url is not None:
+        updates[KEY_EMBEDDING_BASE_URL] = embedding_base_url.strip()
+    if embedding_api_key is not None:
+        updates[KEY_EMBEDDING_API_KEY_ENC] = encrypt_value(embedding_api_key.strip())
+    if embedding_model is not None:
+        updates[KEY_EMBEDDING_MODEL] = embedding_model.strip()
+    if vector_store_provider is not None:
+        updates[KEY_VECTOR_STORE_PROVIDER] = vector_store_provider.strip()
+    if qdrant_url is not None:
+        updates[KEY_QDRANT_URL] = qdrant_url.strip()
+    if qdrant_api_key is not None:
+        updates[KEY_QDRANT_API_KEY_ENC] = encrypt_value(qdrant_api_key.strip())
+    if rag_enabled is not None:
+        updates[KEY_RAG_ENABLED] = "true" if rag_enabled else "false"
     if retention_days is not None:
         updates[KEY_RETENTION_DAYS] = str(max(1, retention_days))
     if ad_automation_enabled is not None:
@@ -481,6 +695,22 @@ async def upsert_runtime_settings(
         signal_plain_row = signal_plain_result.scalar_one_or_none()
         if signal_plain_row:
             signal_plain_row.value = ""
+
+    if embedding_api_key is not None and KEY_EMBEDDING_API_KEY in config_map:
+        emb_plain_result = await session.execute(
+            select(BotConfig).where(BotConfig.key == KEY_EMBEDDING_API_KEY)
+        )
+        emb_plain_row = emb_plain_result.scalar_one_or_none()
+        if emb_plain_row:
+            emb_plain_row.value = ""
+
+    if qdrant_api_key is not None and KEY_QDRANT_API_KEY in config_map:
+        qdrant_plain_result = await session.execute(
+            select(BotConfig).where(BotConfig.key == KEY_QDRANT_API_KEY)
+        )
+        qdrant_plain_row = qdrant_plain_result.scalar_one_or_none()
+        if qdrant_plain_row:
+            qdrant_plain_row.value = ""
 
     await session.commit()
     return await get_runtime_settings(session)
@@ -565,6 +795,13 @@ def summarize_runtime_settings(data: dict) -> str:
             "ai_temperature": data.get("ai_temperature"),
             "ai_max_tokens": data.get("ai_max_tokens"),
             "ai_context_messages": data.get("ai_context_messages"),
+            "embedding_base_url": data.get("embedding_base_url"),
+            "embedding_model": data.get("embedding_model"),
+            "has_embedding_api_key": data.get("has_embedding_api_key"),
+            "vector_store_provider": data.get("vector_store_provider"),
+            "qdrant_url": data.get("qdrant_url"),
+            "has_qdrant_api_key": data.get("has_qdrant_api_key"),
+            "rag_enabled": data.get("rag_enabled"),
             "retention_days": data.get("retention_days"),
             "has_ai_api_key": data.get("has_ai_api_key"),
             "ai_api_key_source": data.get("ai_api_key_source"),

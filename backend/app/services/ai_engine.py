@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from urllib.parse import urlparse, urlunparse
 
 from openai import (
@@ -255,7 +255,7 @@ async def verify_ai_model_availability(
             "effective_model": None,
             "effective_base_url": None,
             "message": "Model is required",
-            "checked_at": datetime.utcnow().isoformat() + "Z",
+            "checked_at": datetime.now(UTC).isoformat(),
             "attempts": [],
         }
 
@@ -283,7 +283,7 @@ async def verify_ai_model_availability(
                     "effective_base_url": candidate_base,
                     "message": "Model is available",
                     "preview": preview,
-                    "checked_at": datetime.utcnow().isoformat() + "Z",
+                    "checked_at": datetime.now(UTC).isoformat(),
                     "attempts": attempts,
                 }
             except APIStatusError as e:
@@ -323,7 +323,7 @@ async def verify_ai_model_availability(
         "effective_model": None,
         "effective_base_url": None,
         "message": "Model verification failed",
-        "checked_at": datetime.utcnow().isoformat() + "Z",
+        "checked_at": datetime.now(UTC).isoformat(),
         "attempts": attempts,
     }
 

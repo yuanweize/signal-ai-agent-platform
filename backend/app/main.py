@@ -17,7 +17,11 @@ from app.config import settings
 from app.database import async_session, close_db, init_db
 from app.services.data_retention import cleanup_expired_data
 from app.services.metrics import runtime_metrics
-from app.services.runtime_config import get_runtime_settings, is_ai_api_key_optional
+from app.services.runtime_config import (
+    get_runtime_settings,
+    is_ai_api_key_optional,
+    migrate_legacy_encrypted_settings,
+)
 from app.services.security_bootstrap import get_bootstrap_status
 from app.services.signal_client import signal_client
 from app.version import get_app_version
@@ -45,13 +49,15 @@ async def lifespan(app: FastAPI):
         icon = "✅" if enabled else "⬜"
         logger.info(f"   {icon} {name}: {'enabled' if enabled else 'disabled'}")
 
-    # Initialize database tables
-    await init_db()
-    logger.info("✅ Database initialized")
+    # Initialize database tables for development/test (migrations are authoritative in production)
+    if settings.environment in ("development", "test"):
+        await init_db()
+        logger.info("✅ Database initialized")
 
-    # Startup retention cleanup
+    # Startup retention cleanup & configuration migration
     runtime = None
     async with async_session() as session:
+        await migrate_legacy_encrypted_settings(session)
         runtime = await get_runtime_settings(session)
         settings.bot_default_language = (
             str(runtime.get("bot_default_language") or settings.bot_default_language).strip()
@@ -72,7 +78,8 @@ async def lifespan(app: FastAPI):
         )
 
     # Wire up Signal message pipeline
-    from app.services.ai_engine import ai_engine
+    from app.ai.mcp.client import mcp_manager
+    from app.ai.skills.registry import skill_registry
     from app.services.event_pipeline import event_pipeline
     from app.services.message_handler import message_handler
 
@@ -80,28 +87,29 @@ async def lifespan(app: FastAPI):
     await event_pipeline.start()
     signal_client.on_message = event_pipeline.enqueue
 
-    # Start Signal listener (runs in background)
-    if settings.signal_api_url and settings.signal_phone_number:
+    # Start Signal listener using effective DB/runtime configuration (Section 21)
+    effective_url = signal_client._api_url or settings.signal_api_url
+    effective_phone = signal_client._phone_number or settings.signal_phone_number
+    if effective_url and effective_phone:
         await signal_client.start()
         logger.info("✅ Signal listener started")
     else:
         logger.warning("⚠️  SIGNAL config incomplete (url/phone) — listener disabled")
 
-    # Initialize AI engine (only if feature is enabled)
-    ai_ok = await ai_engine.initialize()
-    message_handler.set_ai_engine(ai_engine)
-    if ai_ok:
-        logger.info(f"✅ AI engine active — model: {settings.ai_model}")
-    else:
-        logger.info(
-            "ℹ️  AI warmup skipped at startup. "
-            "Runtime key from Settings can still activate AI on next incoming message."
-        )
+    # Initialize AI platform & MCP runtime lifecycle
+    try:
+        async with async_session() as startup_session:
+            await skill_registry.sync_persisted_states(startup_session)
+            await mcp_manager.connect_enabled_servers(startup_session)
+        logger.info("✅ Unified AgentRuntime & MCP lifecycle active")
+    except Exception as e:
+        logger.warning(f"⚠️  AI lifecycle warmup partial: {e}")
 
     yield
 
     # Shutdown
     logger.info("🛑 Shutting down...")
+    await mcp_manager.disconnect_all()
     await signal_client.stop()
     await event_pipeline.stop()
     await close_db()
@@ -179,15 +187,17 @@ async def health_ready(response: Response):
             await session.execute(text("SELECT 1"))
             db_ok = True
             try:
+                from app.services.migration import get_expected_alembic_head
+
                 result = await session.execute(
                     text("SELECT version_num FROM alembic_version LIMIT 1")
                 )
                 row = result.scalar_one_or_none()
-                # Must be at head
-                if row and row == "c8927140f12a":
+                expected_head = get_expected_alembic_head()
+                if row and row == expected_head:
                     migration_ok = True
                 else:
-                    error_detail = f"Migration not at head: {row}"
+                    error_detail = f"Migration not at head: {row} (expected: {expected_head})"
             except Exception as e:
                 error_detail = f"Migration table missing or error: {e}"
     except Exception as e:
@@ -214,6 +224,7 @@ async def health_ready(response: Response):
 async def health_check():
     """Full health check endpoint including DB, migrations, runtime features, and queue metrics."""
     from app.services.event_pipeline import event_pipeline
+    from app.services.migration import get_expected_alembic_head
 
     bot_name = settings.bot_name
     db_ok = False
@@ -233,7 +244,7 @@ async def health_check():
                     text("SELECT version_num FROM alembic_version LIMIT 1")
                 )
                 row = result.scalar_one_or_none()
-                migration_ok = row == "c8927140f12a"
+                migration_ok = row == get_expected_alembic_head()
             except Exception:
                 migration_ok = False
 
@@ -245,10 +256,16 @@ async def health_check():
                 bool(runtime.get("has_ai_api_key")) or is_ai_api_key_optional(ai_base_url)
             )
             bootstrap_complete = not bootstrap_status.bootstrap_required
+            effective_sig_url = (
+                signal_client._api_url or runtime.get("signal_api_url") or settings.signal_api_url
+            )
+            effective_sig_phone = (
+                signal_client._phone_number
+                or runtime.get("signal_phone_number")
+                or settings.signal_phone_number
+            )
             runtime_features = {
-                "signal_configured": bool(
-                    runtime.get("signal_api_url") and runtime.get("signal_phone_number")
-                ),
+                "signal_configured": bool(effective_sig_url and effective_sig_phone),
                 "signal_listener": signal_client.is_connected,
                 "ai_configured": ai_enabled,
                 "market": bool(runtime.get("is_market_enabled")),

@@ -9,7 +9,7 @@ and campaign broadcasts.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +39,12 @@ class OutboundMessageService:
         sender_id: str | None = None,
         reply_to_id: int | None = None,
         tokens_used: int | None = None,
+        origin: str | None = None,
+        ai_run_id: int | None = None,
+        ai_suggestion_id: int | None = None,
+        admin_identity: str | None = None,
+        model: str | None = None,
+        prompt_version: str | None = None,
         client=None,
     ) -> Message:
         """
@@ -46,11 +52,23 @@ class OutboundMessageService:
         """
         cli = client or signal_client
 
+        # Default origin based on actor if not explicitly passed
+        resolved_origin = origin
+        if resolved_origin is None:
+            if actor == MessageActor.bot.value:
+                resolved_origin = "ai_auto"
+            elif actor == MessageActor.admin.value:
+                resolved_origin = "human_manual"
+            elif actor == MessageActor.system.value:
+                resolved_origin = "system"
+            else:
+                resolved_origin = "customer"
+
         # 1. Create message in pending status
         msg = Message(
             conversation_id=conversation_id,
             role="assistant"
-            if actor == MessageActor.bot.value
+            if actor in (MessageActor.bot.value, MessageActor.admin.value)
             else "system"
             if actor == MessageActor.system.value
             else "user",
@@ -60,6 +78,12 @@ class OutboundMessageService:
             content=content,
             tokens_used=tokens_used,
             reply_to_id=reply_to_id,
+            origin=resolved_origin,
+            ai_run_id=ai_run_id,
+            ai_suggestion_id=ai_suggestion_id,
+            admin_identity=admin_identity,
+            model=model,
+            prompt_version=prompt_version,
             delivery_status=MessageDeliveryStatus.pending.value,
             delivery_error=None,
         )
@@ -70,7 +94,7 @@ class OutboundMessageService:
         conv = await session.get(Conversation, conversation_id)
         if conv:
             conv.message_count = (conv.message_count or 0) + 1
-            conv.last_message_at = datetime.utcnow()
+            conv.last_message_at = datetime.now(UTC).replace(tzinfo=None)
 
         # 2. Attempt delivery through Signal Gateway
         success = False
@@ -91,7 +115,7 @@ class OutboundMessageService:
         if success:
             msg.delivery_status = MessageDeliveryStatus.sent.value
             msg.delivery_error = None
-            msg.occurred_at = datetime.utcnow()
+            msg.occurred_at = datetime.now(UTC).replace(tzinfo=None)
             logger.info(f"✅ Outbound message {msg.id} sent successfully to {recipient}")
         else:
             msg.delivery_status = MessageDeliveryStatus.failed.value
@@ -150,7 +174,7 @@ class OutboundMessageService:
         if success:
             msg.delivery_status = MessageDeliveryStatus.sent.value
             msg.delivery_error = None
-            msg.occurred_at = datetime.utcnow()
+            msg.occurred_at = datetime.now(UTC).replace(tzinfo=None)
         else:
             msg.delivery_status = MessageDeliveryStatus.failed.value
             msg.delivery_error = (err_msg or "Unknown delivery error")[:500]

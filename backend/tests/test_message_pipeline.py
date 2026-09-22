@@ -131,15 +131,16 @@ class TestBlockPolicy:
         session.add(user)
         await session.commit()
 
-        mock_ai = AsyncMock(return_value="AI reply")
+        mock_runtime = MagicMock()
+        mock_runtime.run = AsyncMock()
         handler = MessageHandler()
-        handler.set_ai_engine(mock_ai)
+        handler.set_agent_runtime(mock_runtime)
 
         incoming = _make_incoming("+420111000010", "hello blocked", timestamp=1700000010000)
         await handler.handle(incoming)
 
-        # AI should NOT have been called
-        mock_ai.generate_response = AsyncMock()
+        # AgentRuntime should NOT have been called
+        mock_runtime.run.assert_not_called()
         mock_signal_client.send_reply.assert_not_called()
 
     async def test_blocked_user_message_still_recorded(
@@ -255,15 +256,15 @@ class TestManualTakeover:
         session.add(conv)
         await session.commit()
 
-        mock_ai = MagicMock()
-        mock_ai.generate_response = AsyncMock(return_value="AI says hi")
+        mock_runtime = MagicMock()
+        mock_runtime.run = AsyncMock()
         handler = MessageHandler()
-        handler.set_ai_engine(mock_ai)
+        handler.set_agent_runtime(mock_runtime)
 
         incoming = _make_incoming("+420111000040", "any message", timestamp=1700000040000)
         await handler.handle(incoming)
 
-        # AI generate_response must NOT have been called
-        mock_ai.generate_response.assert_not_called()
+        # AgentRuntime must NOT have been called
+        mock_runtime.run.assert_not_called()
         # No outbound send should have happened
         mock_signal_client.send_reply.assert_not_called()

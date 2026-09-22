@@ -31,8 +31,18 @@ from app.database import Base
 
 class ConversationMode(str, Enum):  # noqa: UP042
     auto = "auto"  # AI replies automatically
+    copilot = "copilot"  # AI drafts suggestion; human reviews/sends
     manual = "manual"  # Admin replies; AI is suppressed
     paused = "paused"  # No auto-reply; messages are recorded only
+
+
+class MessageOrigin(str, Enum):  # noqa: UP042
+    customer = "customer"
+    ai_auto = "ai_auto"
+    human_manual = "human_manual"
+    human_ai_assisted = "human_ai_assisted"
+    system = "system"
+    campaign = "campaign"
 
 
 class ConversationType(str, Enum):  # noqa: UP042
@@ -194,6 +204,20 @@ class Message(Base):
 
     # Quoted reply target message ID
     reply_to_id: Mapped[int | None] = mapped_column(ForeignKey("messages.id"), nullable=True)
+
+    # Provenance fields for AI Platform v0.4
+    origin: Mapped[str | None] = mapped_column(
+        String(30), default=MessageOrigin.customer.value, nullable=True, index=True
+    )
+    ai_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ai_runs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    ai_suggestion_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ai_suggestions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    admin_identity: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # Exact time the event occurred externally (Signal timestamp converted to UTC datetime)
     occurred_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

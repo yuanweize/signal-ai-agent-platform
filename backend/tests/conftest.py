@@ -7,11 +7,19 @@ Uses an in-memory SQLite database so tests never touch the real bot.db.
 from __future__ import annotations
 
 import asyncio
+import os
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.database import Base
+
+# Sanitize NO_PROXY on macOS to prevent httpx InvalidURL: Invalid port: ':1'
+for var in ("NO_PROXY", "no_proxy"):
+    val = os.environ.get(var, "")
+    if "::" in val:
+        os.environ[var] = ",".join(p for p in val.split(",") if "::" not in p)
+
 
 # ---- In-memory async DB engine ----
 

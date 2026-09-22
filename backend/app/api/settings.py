@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -22,11 +23,14 @@ from app.schemas.settings import (
     AuditLogResponse,
     CleanupRequest,
     CleanupResponse,
+    ComponentTestResponse,
+    EmbeddingTestRequest,
     RuntimeSettingsResponse,
     RuntimeSettingsRollbackRequest,
     RuntimeSettingsUpdateRequest,
     SignalProbeRequest,
     SignalProbeResponse,
+    VectorStoreTestRequest,
 )
 from app.services.ai_engine import probe_ai_compatibility, verify_ai_model_availability
 from app.services.audit_log import list_audit_logs, write_audit_log
@@ -80,6 +84,15 @@ def _to_response(data: dict) -> RuntimeSettingsResponse:
         ai_models_cached_invalid=data.get("ai_models_cached_invalid", []),
         ai_models_listed_total=data.get("ai_models_listed_total", 0),
         ai_models_cached_at=data.get("ai_models_cached_at"),
+        embedding_base_url=data.get("embedding_base_url", ""),
+        embedding_model=data.get("embedding_model", "text-embedding-3-small"),
+        has_embedding_api_key=data.get("has_embedding_api_key", False),
+        embedding_api_key_masked=data.get("embedding_api_key_masked", ""),
+        vector_store_provider=data.get("vector_store_provider", "qdrant"),
+        qdrant_url=data.get("qdrant_url", "http://localhost:6333"),
+        has_qdrant_api_key=data.get("has_qdrant_api_key", False),
+        qdrant_api_key_masked=data.get("qdrant_api_key_masked", ""),
+        rag_enabled=data.get("rag_enabled", True),
         retention_days=data["retention_days"],
         ad_automation_enabled=data["ad_automation_enabled"],
         ad_min_interval_minutes=data["ad_min_interval_minutes"],
@@ -119,19 +132,10 @@ async def update_settings(
 
     target_base_url = (payload.ai_api_base_url or "").strip()
     if not target_base_url:
-        target_base_url = current.get("ai_api_base_url", "")
-    target_ai_enabled = (
-        payload.is_ai_enabled
-        if payload.is_ai_enabled is not None
-        else bool(current.get("is_ai_enabled"))
-    )
+        target_base_url = (current.get("ai_api_base_url") or "").strip()
 
-    if (
-        target_ai_enabled
-        and not is_ai_api_key_optional(target_base_url)
-        and not (payload.ai_api_key or "").strip()
-    ):
-        if not current.get("has_ai_api_key"):
+    if payload.ai_api_key is not None and not payload.ai_api_key.strip():
+        if not is_ai_api_key_optional(target_base_url):
             raise HTTPException(
                 status_code=400,
                 detail="Please provide an API key.",
@@ -152,6 +156,13 @@ async def update_settings(
         ai_temperature=payload.ai_temperature,
         ai_max_tokens=payload.ai_max_tokens,
         ai_context_messages=payload.ai_context_messages,
+        embedding_base_url=payload.embedding_base_url,
+        embedding_api_key=payload.embedding_api_key,
+        embedding_model=payload.embedding_model,
+        vector_store_provider=payload.vector_store_provider,
+        qdrant_url=payload.qdrant_url,
+        qdrant_api_key=payload.qdrant_api_key,
+        rag_enabled=payload.rag_enabled,
         retention_days=payload.retention_days,
         ad_automation_enabled=payload.ad_automation_enabled,
         ad_min_interval_minutes=payload.ad_min_interval_minutes,
@@ -229,6 +240,126 @@ async def test_signal_connection(
         listener_running=signal_client.is_running,
         listener_connected=signal_client.is_connected,
     )
+
+
+@router.post("/embedding/test", response_model=ComponentTestResponse)
+async def test_embedding_connection(
+    payload: EmbeddingTestRequest,
+    session: AsyncSession = Depends(get_session),
+    _admin: AdminUser = Depends(get_current_admin),
+):
+    current = await get_runtime_settings(session)
+    base_url = (payload.embedding_base_url or current.get("embedding_base_url") or "").strip()
+    model = (
+        payload.embedding_model or current.get("embedding_model") or "text-embedding-3-small"
+    ).strip()
+    api_key = (
+        payload.embedding_api_key
+        if payload.embedding_api_key is not None
+        else current.get("embedding_api_key", "")
+    )
+
+    if not base_url and not current.get("embedding_base_url"):
+        base_url = current.get("ai_api_base_url", "")
+    if not api_key:
+        api_key = current.get("ai_api_key", "")
+
+    if not base_url:
+        return ComponentTestResponse(
+            ok=False,
+            configured=False,
+            connected=False,
+            message="Embedding endpoint not configured (base URL is empty)",
+        )
+
+    start = time.perf_counter()
+    try:
+        from app.ai.providers.embeddings import OpenAIEmbeddingProvider
+
+        provider = OpenAIEmbeddingProvider(
+            api_key=api_key or "sk-dummy",
+            base_url=base_url,
+            model=model,
+        )
+        res = await provider.embed_query("ping")
+        latency = int((time.perf_counter() - start) * 1000)
+        if len(res) > 0:
+            return ComponentTestResponse(
+                ok=True,
+                configured=True,
+                connected=True,
+                latency_ms=latency,
+                message=f"Embedding provider connected ({model}, dim={len(res)})",
+            )
+        return ComponentTestResponse(
+            ok=False,
+            configured=True,
+            connected=False,
+            latency_ms=latency,
+            message="Embedding provider returned empty vector",
+        )
+    except Exception as e:
+        latency = int((time.perf_counter() - start) * 1000)
+        return ComponentTestResponse(
+            ok=False,
+            configured=True,
+            connected=False,
+            error=str(e)[:300],
+            latency_ms=latency,
+            message=f"Embedding connection failed: {str(e)[:150]}",
+        )
+
+
+@router.post("/vector-store/test", response_model=ComponentTestResponse)
+async def test_vector_store_connection(
+    payload: VectorStoreTestRequest,
+    session: AsyncSession = Depends(get_session),
+    _admin: AdminUser = Depends(get_current_admin),
+):
+    current = await get_runtime_settings(session)
+    provider = (
+        payload.vector_store_provider or current.get("vector_store_provider") or "qdrant"
+    ).strip()
+    url = (payload.qdrant_url or current.get("qdrant_url") or "http://localhost:6333").strip()
+    api_key = (
+        payload.qdrant_api_key
+        if payload.qdrant_api_key is not None
+        else current.get("qdrant_api_key", "")
+    )
+
+    if not url:
+        return ComponentTestResponse(
+            ok=False,
+            configured=False,
+            connected=False,
+            message="Vector store URL not configured",
+        )
+
+    start = time.perf_counter()
+    try:
+        from app.ai.rag.qdrant_store import QdrantStore
+
+        store = QdrantStore(url=url, api_key=api_key or None)
+        collections = await store.client.get_collections()
+        latency = int((time.perf_counter() - start) * 1000)
+        count = len(collections.collections) if hasattr(collections, "collections") else 0
+        return ComponentTestResponse(
+            ok=True,
+            configured=True,
+            connected=True,
+            latency_ms=latency,
+            message=f"Vector store connected successfully ({provider}, {count} collections)",
+        )
+    except Exception as e:
+        latency = int((time.perf_counter() - start) * 1000)
+        return ComponentTestResponse(
+            ok=False,
+            configured=True,
+            connected=False,
+            error=str(e)[:300],
+            latency_ms=latency,
+            message=f"Vector store connection failed: {str(e)[:150]}",
+        )
 
 
 @router.post("/ai/probe", response_model=AiProbeResponse)

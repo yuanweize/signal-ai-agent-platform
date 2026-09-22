@@ -1,0 +1,277 @@
+"""
+LLM Provider abstractions and implementations.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any, Protocol, runtime_checkable
+
+from openai import AsyncOpenAI
+
+logger = logging.getLogger("ai.providers.llm")
+
+
+@runtime_checkable
+class LLMProvider(Protocol):
+    """Protocol for LLM interactions."""
+
+    async def generate(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 800,
+    ) -> tuple[str, int]:
+        """Generate text completion from messages. Returns (content, tokens_used)."""
+        ...
+
+    async def tool_generate(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        model: str | None = None,
+    ) -> tuple[str | None, list[dict[str, Any]], int]:
+        """Generate response with optional tool calls. Returns (content, tool_calls, tokens_used)."""
+        ...
+
+
+class OpenAICompatibleProvider:
+    """OpenAI-compatible LLM provider implementation."""
+
+    def __init__(
+        self,
+        base_url: str = "https://api.openai.com/v1",
+        api_key: str = "",
+        default_model: str = "gpt-4o-mini",
+        timeout: float = 30.0,
+        temperature: float = 0.7,
+        max_tokens: int = 800,
+    ) -> None:
+        self.base_url = (base_url or "").strip().rstrip("/")
+        self.api_key = api_key or "__NO_KEY__"
+        self.default_model = default_model
+        self.provider_name = "openai_compatible"
+        self.timeout = timeout
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self._client: AsyncOpenAI | None = None
+
+    def _get_client(self) -> AsyncOpenAI:
+        if self._client is None:
+            self._client = AsyncOpenAI(
+                base_url=self.base_url,
+                api_key=self.api_key,
+                timeout=self.timeout,
+                max_retries=2,
+            )
+        return self._client
+
+    async def generate(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> tuple[str, int]:
+        client = self._get_client()
+        target_model = model or self.default_model
+        temp = temperature if temperature is not None else self.temperature
+        tokens_limit = max_tokens if max_tokens is not None else self.max_tokens
+        response = await client.chat.completions.create(
+            model=target_model,
+            messages=messages,  # type: ignore[arg-type]
+            temperature=temp,
+            max_tokens=tokens_limit,
+        )
+        content = response.choices[0].message.content or ""
+        tokens = response.usage.total_tokens if response.usage else len(content) // 4
+        return content, tokens
+
+    async def tool_generate(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        model: str | None = None,
+    ) -> tuple[str | None, list[dict[str, Any]], int]:
+        client = self._get_client()
+        target_model = model or self.default_model
+        kwargs: dict[str, Any] = {
+            "model": target_model,
+            "messages": messages,
+        }
+        if tools:
+            kwargs["tools"] = tools
+
+        response = await client.chat.completions.create(**kwargs)
+        choice = response.choices[0]
+        content = choice.message.content
+        tool_calls = []
+        if choice.message.tool_calls:
+            for tc in choice.message.tool_calls:
+                args = {}
+                try:
+                    args = json.loads(tc.function.arguments)
+                except Exception:
+                    args = {"raw": tc.function.arguments}
+                tool_calls.append(
+                    {
+                        "id": tc.id,
+                        "name": tc.function.name,
+                        "arguments": args,
+                    }
+                )
+
+        tokens = response.usage.total_tokens if response.usage else 0
+        return content, tool_calls, tokens
+
+
+class FakeLLMProvider:
+    """Deterministic fake LLM provider for unit tests and local evaluation."""
+
+    def __init__(self, fixed_reply: str | None = None) -> None:
+        self.fixed_reply = fixed_reply
+        self.default_model = "fake-eval-v1"
+        self.provider_name = "fake"
+        self.invocations: list[dict[str, Any]] = []
+
+    async def generate(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 800,
+    ) -> tuple[str, int]:
+        self.invocations.append(
+            {
+                "messages": messages,
+                "model": model,
+                "temperature": temperature,
+            }
+        )
+        if self.fixed_reply is not None:
+            return self.fixed_reply, 42
+
+        # Inspect messages for tool results
+        for m in messages:
+            content_str = m.get("content", "")
+            if "Business Tool Results:" in content_str:
+                tool_data = content_str.replace("Business Tool Results:", "").strip()
+                if (
+                    "search_products" in tool_data.lower()
+                    or "organic arabica coffee" in tool_data.lower()
+                ):
+                    return (
+                        "Here are our current featured products: Organic Arabica Coffee ($15.00).",
+                        35,
+                    )
+                return f"According to warehouse and inventory records: {tool_data}", 35
+
+        # Inspect last message for deterministic behaviors
+        last_msg = messages[-1]["content"] if messages else ""
+        lower = last_msg.lower()
+        if "coffee" in lower or "product" in lower:
+            return "Here are our current featured products: Organic Arabica Coffee ($15.00).", 35
+        if "return" in lower or "policy" in lower or "damage" in lower:
+            return (
+                "Our customer service policy allows item return within 30 days for damaged goods.",
+                30,
+            )
+        if "delivery" in lower or "hour" in lower:
+            return (
+                "Our customer support and delivery hours run Monday through Friday from 09:00 to 18:00.",
+                25,
+            )
+        if "refund" in lower:
+            return "Your refund request has been logged for supervisor approval.", 20
+        if "order" in lower:
+            return "Your order status is confirmed and scheduled for packaging.", 25
+        if "human" in lower or "agent" in lower:
+            return "I am connecting you with a human representative right now.", 20
+        return "Thank you for reaching out! How can I assist you today?", 15
+
+    async def tool_generate(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        model: str | None = None,
+    ) -> tuple[str | None, list[dict[str, Any]], int]:
+        self.invocations.append(
+            {
+                "messages": messages,
+                "tools": tools,
+                "model": model,
+            }
+        )
+        last_msg = messages[-1]["content"] if messages else ""
+        lower = last_msg.lower()
+        if "inventory" in lower or "sku" in lower:
+            tool_name = "warehouse_check_inventory"
+            if tools:
+                matched = next(
+                    (
+                        t["function"]["name"]
+                        for t in tools
+                        if "inventory" in t["function"]["name"].lower()
+                    ),
+                    None,
+                )
+                if matched:
+                    tool_name = matched
+            return (
+                None,
+                [{"id": "call_inv_1", "name": tool_name, "arguments": {"sku": "SKU-COFFEE-01"}}],
+                30,
+            )
+        if "dispatch" in lower or "ship order" in lower or "ship it" in lower:
+            tool_name = "warehouse_dispatch_order"
+            if tools:
+                matched = next(
+                    (
+                        t["function"]["name"]
+                        for t in tools
+                        if "dispatch" in t["function"]["name"].lower()
+                    ),
+                    None,
+                )
+                if matched:
+                    tool_name = matched
+            return (
+                None,
+                [{"id": "call_disp_1", "name": tool_name, "arguments": {"order_id": 101}}],
+                30,
+            )
+        if "search" in lower or "price" in lower:
+            return (
+                None,
+                [{"id": "call_1", "name": "search_products", "arguments": {"query": "coffee"}}],
+                30,
+            )
+        return await self.generate(messages, model=model)
+
+
+class DisabledLLMProvider:
+    """Explicit provider when AI is disabled or unconfigured in Settings."""
+
+    def __init__(self, reason: str = "AI is disabled") -> None:
+        self.provider_name = "disabled"
+        self.default_model = "disabled"
+        self.reason = reason
+
+    async def generate(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 800,
+    ) -> tuple[str, int]:
+        raise RuntimeError(f"AI provider call prohibited: {self.reason}")
+
+    async def tool_generate(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        model: str | None = None,
+    ) -> tuple[str | None, list[dict[str, Any]], int]:
+        raise RuntimeError(f"AI provider call prohibited: {self.reason}")

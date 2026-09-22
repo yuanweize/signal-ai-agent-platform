@@ -5,6 +5,22 @@ Usage:
     from app.models import User, Product, Order, ...
 """
 
+from app.models.ai import (
+    AIDecisionType,
+    AIRun,
+    AISuggestion,
+    AISuggestionStatus,
+    FeedbackEvent,
+    KnowledgeChunk,
+    KnowledgeDocument,
+    KnowledgeSource,
+    LearningCandidate,
+    MCPServerConfig,
+    MemoryItem,
+    PromptVersion,
+    ToolInvocation,
+    TrainingExample,
+)
 from app.models.audit import AuditLog
 from app.models.campaign import CampaignDeliveryLog
 from app.models.config import BotConfig
@@ -18,6 +34,7 @@ from app.models.conversation import (
     MessageAttachment,
     MessageDeliveryStatus,
     MessageDirection,
+    MessageOrigin,
     MessageReaction,
 )
 from app.models.group import Group, GroupMember
@@ -39,6 +56,7 @@ __all__ = [
     "MessageDirection",
     "MessageActor",
     "MessageDeliveryStatus",
+    "MessageOrigin",
     "MessageAttachment",
     "MessageReaction",
     "Group",
@@ -47,4 +65,19 @@ __all__ = [
     "BotConfig",
     "AuditLog",
     "CampaignDeliveryLog",
+    # AI Platform v0.4
+    "AIRun",
+    "AISuggestion",
+    "AISuggestionStatus",
+    "AIDecisionType",
+    "KnowledgeSource",
+    "KnowledgeDocument",
+    "KnowledgeChunk",
+    "MemoryItem",
+    "FeedbackEvent",
+    "LearningCandidate",
+    "TrainingExample",
+    "PromptVersion",
+    "MCPServerConfig",
+    "ToolInvocation",
 ]

@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -39,6 +39,7 @@ from app.models.conversation import (
     MessageAttachment,
     MessageDeliveryStatus,
     MessageDirection,
+    MessageOrigin,
     MessageReaction,
 )
 from app.models.group import Group, GroupMember
@@ -49,22 +50,28 @@ from app.services.metrics import runtime_metrics
 from app.services.outbound_service import outbound_service
 from app.services.signal_client import signal_client
 
-logger = logging.getLogger("signal.handler")
+logger = logging.getLogger("services.message_handler")
+
+
+def utc_now() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class MessageHandler:
     """Processes incoming Signal messages through the full pipeline."""
 
     def __init__(self) -> None:
-        self._ai_engine = None
+        self._agent_runtime = None
 
-    def set_ai_engine(self, engine) -> None:
-        """Inject AI engine (called during startup)."""
-        self._ai_engine = engine
+    def set_agent_runtime(self, runtime) -> None:
+        """Inject AgentRuntime (for testing or runtime override)."""
+        self._agent_runtime = runtime
 
     async def handle_message(self, incoming: SignalIncomingMessage) -> None:
         """Alias for handle."""
         await self.handle(incoming)
+
+    handle_envelope = handle_message
 
     async def handle(self, incoming: SignalIncomingMessage) -> None:
         """Main entry point — called for each incoming message."""
@@ -120,7 +127,7 @@ class MessageHandler:
                             is_removed=reaction.is_remove,
                             occurred_at=datetime.fromtimestamp(parsed.timestamp / 1000)
                             if parsed.timestamp
-                            else datetime.utcnow(),
+                            else utc_now(),
                         )
                         session.add(rx)
                         await session.commit()
@@ -170,7 +177,7 @@ class MessageHandler:
                     )
                     self._store_attachments(session, msg, envelope)
                     conversation.message_count += 1
-                    conversation.last_message_at = datetime.utcnow()
+                    conversation.last_message_at = utc_now()
                     await session.commit()
                 except IntegrityError:
                     logger.debug(f"Duplicate attachment event suppressed: {signal_event_id}")
@@ -232,11 +239,11 @@ class MessageHandler:
                         self._store_attachments(session, inbound_msg, envelope)
 
                     conversation.message_count += 1
-                    conversation.last_message_at = datetime.utcnow()
-                    conversation.updated_at = datetime.utcnow()
+                    conversation.last_message_at = utc_now()
+                    conversation.updated_at = utc_now()
                     if group:
                         group.total_messages += 1
-                        group.last_activity = datetime.utcnow()
+                        group.last_activity = utc_now()
                     await session.commit()
                 except IntegrityError:
                     logger.debug(f"Duplicate inbound event suppressed: {signal_event_id}")
@@ -264,32 +271,167 @@ class MessageHandler:
                     logger.info(f"⏸ Conversation #{conversation.id} paused — auto-reply suppressed")
                     return
 
-                # 7. Generate Reply
-                asyncio.create_task(signal_client.show_typing(parsed.reply_recipient))
-                reply_text = await self._generate_reply(session, conversation, parsed)
-                asyncio.create_task(signal_client.hide_typing(parsed.reply_recipient))
+                # 7. Unified AI Agent Execution (Auto & Copilot share AgentRuntime)
+                from app.ai.runtime.context import AgentContext
+                from app.ai.runtime.decisions import AgentDecision
+                from app.ai.runtime.factory import get_production_agent_runtime
+                from app.services.runtime_config import get_runtime_settings
 
-                if not reply_text:
+                runtime_settings = await get_runtime_settings(session)
+                is_ai_enabled = bool(runtime_settings.get("is_ai_enabled"))
+
+                # In non-injected runtime, respect explicit AI-disabled toggle
+                if not is_ai_enabled and not self._agent_runtime:
+                    if conversation.mode == ConversationMode.auto.value:
+                        text_lower = (parsed.text or "").lower().strip()
+                        keywords = [
+                            "menu",
+                            "produkty",
+                            "ceník",
+                            "nabídka",
+                            "products",
+                            "help",
+                            "pomoc",
+                            "/menu",
+                            "/start",
+                        ]
+                        if any(text_lower == k for k in keywords) or any(
+                            k in text_lower.split() for k in keywords
+                        ):
+                            menu_reply = await self._generate_fallback_menu(session)
+                            await outbound_service.send_message(
+                                session=session,
+                                conversation_id=conversation.id,
+                                content=menu_reply,
+                                recipient=parsed.reply_recipient,
+                                actor=MessageActor.bot.value,
+                                origin=MessageOrigin.rule_keyword.value,
+                            )
+                        else:
+                            logger.info(
+                                f"AI disabled in Settings — auto reply suppressed for conv #{conversation.id}"
+                            )
                     return
 
-                # 8. RACE CONDITION CHECK (Section 25)
-                # Re-query authoritative conversation mode before sending in case admin switched to manual mid-generation!
-                await session.refresh(conversation)
-                if conversation.mode != ConversationMode.auto.value:
+                runtime = self._agent_runtime or await get_production_agent_runtime(session)
+
+                context = AgentContext(
+                    conversation_id=conversation.id,
+                    message_id=inbound_msg.id,
+                    sender_id=parsed.sender_id,
+                    user_id=user.id if user else None,
+                    text=parsed.text,
+                    is_group=parsed.is_group,
+                    group_id=parsed.group_id,
+                    mode=conversation.mode,
+                )
+
+                async def _safe_typing(coro):
+                    try:
+                        await coro
+                    except Exception:
+                        pass
+
+                asyncio.create_task(_safe_typing(signal_client.show_typing(parsed.reply_recipient)))
+                try:
+                    agent_response = await runtime.run(session, context)
+                finally:
+                    asyncio.create_task(
+                        _safe_typing(signal_client.hide_typing(parsed.reply_recipient))
+                    )
+
+                if conversation.mode == ConversationMode.copilot.value:
                     logger.info(
-                        f"✋ Admin switched conversation #{conversation.id} to mode '{conversation.mode}' "
-                        f"during AI generation — discarding outbound reply!"
+                        f"🤖 Conversation #{conversation.id} in copilot mode — "
+                        f"drafted suggestion #{agent_response.ai_suggestion_id}"
                     )
                     return
 
-                # 9. Deliver Outbound Reply via OutboundMessageService
-                await outbound_service.send_message(
-                    session=session,
-                    conversation_id=conversation.id,
-                    content=reply_text,
-                    recipient=parsed.reply_recipient,
-                    actor=MessageActor.bot.value,
-                )
+                # In Auto mode: check decision
+                if agent_response.decision == AgentDecision.reply.value and agent_response.answer:
+                    # 8. RACE CONDITION CHECK (Section 25)
+                    # Re-query authoritative conversation mode before sending in case admin switched to manual mid-generation!
+                    await session.refresh(conversation)
+                    if conversation.mode != ConversationMode.auto.value:
+                        logger.info(
+                            f"✋ Admin switched conversation #{conversation.id} to mode '{conversation.mode}' "
+                            f"during AI generation — discarding outbound reply!"
+                        )
+                        if agent_response.ai_suggestion_id:
+                            from app.models.ai import AISuggestion, AISuggestionStatus
+
+                            sug_to_expire = await session.get(
+                                AISuggestion, agent_response.ai_suggestion_id
+                            )
+                            if sug_to_expire:
+                                sug_to_expire.status = AISuggestionStatus.expired.value
+                                await session.commit()
+                        return
+
+                    # 9. Deliver Outbound Reply via OutboundMessageService with Provenance
+                    from app.models.ai import AIRun, AISuggestion, AISuggestionStatus
+
+                    outbound_msg = await outbound_service.send_message(
+                        session=session,
+                        conversation_id=conversation.id,
+                        content=agent_response.answer,
+                        recipient=parsed.reply_recipient,
+                        actor=MessageActor.bot.value,
+                        origin=MessageOrigin.ai_auto.value,
+                        ai_run_id=agent_response.ai_run_id,
+                        ai_suggestion_id=agent_response.ai_suggestion_id,
+                        tokens_used=agent_response.tokens,
+                        model=agent_response.model,
+                        prompt_version=agent_response.prompt_version,
+                    )
+
+                    # Update suggestion & run finalization based on real network send outcome
+                    if outbound_msg.delivery_status == MessageDeliveryStatus.sent.value:
+                        if agent_response.ai_suggestion_id:
+                            sug_to_update = await session.get(
+                                AISuggestion, agent_response.ai_suggestion_id
+                            )
+                            if sug_to_update:
+                                sug_to_update.status = AISuggestionStatus.auto_sent.value
+                                sug_to_update.final_message_id = outbound_msg.id
+                        if agent_response.ai_run_id:
+                            run_to_update = await session.get(AIRun, agent_response.ai_run_id)
+                            if run_to_update:
+                                run_to_update.final_message_id = outbound_msg.id
+                        await session.commit()
+                    else:
+                        if agent_response.ai_suggestion_id:
+                            sug_to_update = await session.get(
+                                AISuggestion, agent_response.ai_suggestion_id
+                            )
+                            if sug_to_update:
+                                sug_to_update.status = AISuggestionStatus.send_failed.value
+                                sug_to_update.final_message_id = outbound_msg.id
+                        await session.commit()
+                elif agent_response.decision == AgentDecision.draft_for_human.value:
+                    logger.info(
+                        f"⚠️ AI requested human review for conversation #{conversation.id} "
+                        f"(decision: draft_for_human) — suggestion #{agent_response.ai_suggestion_id} created"
+                    )
+                elif agent_response.decision == AgentDecision.handoff.value:
+                    logger.info(
+                        f"🔄 AI requested human handoff for conversation #{conversation.id}"
+                    )
+                    conversation.mode = ConversationMode.manual.value
+                    await session.commit()
+                    if agent_response.answer:
+                        await outbound_service.send_message(
+                            session=session,
+                            conversation_id=conversation.id,
+                            content=agent_response.answer,
+                            recipient=parsed.reply_recipient,
+                            actor=MessageActor.bot.value,
+                            origin=MessageOrigin.ai_auto.value,
+                            ai_run_id=agent_response.ai_run_id,
+                            tokens_used=agent_response.tokens,
+                            model=agent_response.model,
+                            prompt_version=agent_response.prompt_version,
+                        )
 
             except Exception as e:
                 logger.error(f"❌ Pipeline error: {e}", exc_info=True)
@@ -336,10 +478,11 @@ class MessageHandler:
             signal_timestamp_ms=parsed.timestamp or None,
             signal_event_id=signal_event_id,
             delivery_status=None,
+            origin=MessageOrigin.customer.value,
             occurred_at=datetime.fromtimestamp(parsed.timestamp / 1000)
             if parsed.timestamp
-            else datetime.utcnow(),
-            timestamp=datetime.utcnow(),
+            else utc_now(),
+            timestamp=utc_now(),
         )
         session.add(msg)
         await session.flush()
@@ -381,7 +524,7 @@ class MessageHandler:
             await session.flush()
             logger.info(f"👤 New user created: {parsed.sender_name} ({parsed.sender_id})")
         else:
-            user.last_seen = datetime.utcnow()
+            user.last_seen = utc_now()
             if parsed.sender_name and parsed.sender_name != user.display_name:
                 user.display_name = parsed.sender_name
 
@@ -404,7 +547,7 @@ class MessageHandler:
             await session.flush()
             logger.info(f"👥 New group registered: {group.group_id}")
         else:
-            group.last_activity = datetime.utcnow()
+            group.last_activity = utc_now()
 
         # Update or create GroupMember
         res_m = await session.execute(
@@ -421,12 +564,12 @@ class MessageHandler:
                 external_identifier=parsed.sender_id,
                 is_admin=False,
                 role="member",
-                last_seen_at=datetime.utcnow(),
+                last_seen_at=utc_now(),
             )
             session.add(member)
             await session.flush()
         else:
-            member.last_seen_at = datetime.utcnow()
+            member.last_seen_at = utc_now()
             if member.user_id is None and user.id:
                 member.user_id = user.id
 
@@ -472,49 +615,6 @@ class MessageHandler:
 
         return conversation
 
-    async def _generate_reply(
-        self,
-        session: AsyncSession,
-        conversation: Conversation,
-        parsed: ParsedMessage,
-    ) -> str | None:
-        """Generate a reply via AI engine or fallback catalog."""
-        if self._ai_engine is not None:
-            try:
-                reply = await self._ai_engine.generate_response(
-                    session=session,
-                    conversation=conversation,
-                    user_message=parsed.text,
-                    sender_name=parsed.sender_name,
-                    group_id=parsed.group_id,
-                    current_signal_timestamp_ms=parsed.timestamp,
-                )
-                if reply:
-                    return reply
-            except Exception as e:
-                logger.error(f"❌ AI engine error: {e}", exc_info=True)
-
-        # Fallback command handling
-        text_lower = parsed.text.lower().strip()
-        keywords = [
-            "menu",
-            "produkty",
-            "ceník",
-            "nabídka",
-            "products",
-            "help",
-            "pomoc",
-            "/menu",
-            "/start",
-        ]
-        if any(text_lower == k for k in keywords) or any(k in text_lower.split() for k in keywords):
-            return await self._generate_fallback_menu(session)
-
-        return (
-            "✅ Zpráva dorazila. AI asistent je momentálně vypnutý.\n"
-            "Napište prosím *menu* pro zobrazení nabídky, nebo vyčkejte na manuální odpověď."
-        )
-
     async def _generate_fallback_menu(self, session: AsyncSession) -> str:
         """Generate a simple text menu of active products when AI is disabled."""
         result = await session.execute(select(Product).where(Product.is_active == True))  # noqa: E712
@@ -559,7 +659,7 @@ class MessageHandler:
         await session.flush()
 
         conversation.message_count = (conversation.message_count or 0) + 1
-        conversation.last_message_at = datetime.utcnow()
+        conversation.last_message_at = utc_now()
 
         success = False
         try:

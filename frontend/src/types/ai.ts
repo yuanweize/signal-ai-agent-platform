@@ -1,0 +1,208 @@
+/**
+ * AI Platform v0.4 Domain Types.
+ */
+
+export interface AISuggestionDTO {
+  id: number;
+  conversation_id: number;
+  inbound_message_id?: number | null;
+  ai_run_id?: number | null;
+  suggested_text: string;
+  status: 'pending' | 'accepted' | 'edited' | 'rejected' | 'expired' | 'auto_sent';
+  generated_at: string;
+  reviewed_at?: string | null;
+  reviewed_by?: string | null;
+  edit_distance?: number | null;
+  edit_ratio?: number | null;
+  metadata?: {
+    citations?: Array<{
+      chunk_id?: number;
+      title?: string;
+      snippet?: string;
+      score?: number;
+    }>;
+    skills_used?: string[];
+    memories_used?: Array<{
+      id?: number;
+      content?: string;
+      type?: string;
+    }>;
+    tools_called?: Array<{
+      name?: string;
+      arguments?: Record<string, unknown>;
+    }>;
+  } | null;
+}
+
+export interface AIRunExplainabilityDTO {
+  id: number;
+  trace_id: string;
+  conversation_id: number;
+  model?: string | null;
+  provider?: string | null;
+  prompt_version?: string | null;
+  decision: string;
+  confidence?: number | null;
+  latency_ms?: number | null;
+  tokens?: number | null;
+  skills: string[];
+  citations: Array<{
+    chunk_id?: number;
+    title?: string;
+    snippet?: string;
+    score?: number;
+  }>;
+  memories: Array<{
+    id?: number;
+    content?: string;
+    type?: string;
+  }>;
+  tool_calls: Array<{
+    name?: string;
+    arguments?: Record<string, unknown>;
+  }>;
+  created_at: string;
+}
+
+export interface AIOverviewMetricsDTO {
+  total_ai_runs?: number;
+  total_runs: number;
+  automation_rate?: number;
+  copilot_rate?: number;
+  human_takeover_rate?: number;
+  suggestion_acceptance_rate?: number;
+  copilot_acceptance_rate: number;
+  copilot_suggestions_count?: number;
+  suggestion_edit_rate?: number;
+  copilot_avg_edit_ratio?: number;
+  suggestion_rejection_rate?: number;
+  rag_hit_rate?: number;
+  knowledge_documents_count?: number;
+  knowledge_sources_count?: number;
+  knowledge_chunks_count?: number;
+  memory_items_count: number;
+  average_latency_ms?: number;
+  avg_latency_ms: number;
+  total_tokens_used?: number;
+  total_tokens: number;
+}
+
+export interface KnowledgeSourceDTO {
+  id: number;
+  title: string;
+  source_type: string;
+  source_uri?: string | null;
+  language: string;
+  status: string;
+  trust_level: string;
+  version: number;
+  document_count?: number;
+  documents_count?: number;
+  chunk_count?: number;
+  chunks_count?: number;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoryItemDTO {
+  id: number;
+  scope_type: 'user' | 'group' | 'global';
+  scope_id: string;
+  content: string;
+  memory_type: string;
+  confidence?: number;
+  importance: number;
+  sensitivity?: string;
+  status?: string;
+  is_pii_redacted?: boolean;
+  created_by: string;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface SkillDTO {
+  name: string;
+  description: string;
+  version: string;
+  scope: string;
+  is_enabled: boolean;
+  instructions_preview?: string;
+  body?: string | null;
+}
+
+export interface MCPServerDTO {
+  id: number;
+  name: string;
+  transport?: string;
+  transport_type?: string;
+  command_or_url?: string;
+  endpoint_url?: string | null;
+  command?: string | null;
+  status: string;
+  is_enabled: boolean;
+  tools_count?: number;
+  tool_count?: number;
+  last_connected_at?: string | null;
+  last_health_check?: string | null;
+  error_message?: string | null;
+}
+
+export interface LearningCandidateDTO {
+  id: number;
+  conversation_id: number;
+  customer_question: string;
+  human_answer: string;
+  suggested_faq_q?: string | null;
+  suggested_faq_a?: string | null;
+  category: string;
+  language: string;
+  source_quality: string;
+  status: 'pending' | 'promoted' | 'approved' | 'rejected';
+  created_at: string;
+}
+
+export interface EvaluationResultCaseDTO {
+  case_id: string;
+  case_name: string;
+  passed: boolean;
+  decision_correct: boolean;
+  actual_decision: string;
+  keyword_score: number;
+  latency_ms: number;
+  tokens: number;
+}
+
+export interface EvaluationSummaryDTO {
+  total_cases: number;
+  passed_cases: number;
+  pass_rate: number;
+  decision_accuracy: number;
+  average_latency_ms: number;
+  total_tokens: number;
+  results: EvaluationResultCaseDTO[];
+}
+
+export interface PromptVersionDTO {
+  id: number;
+  version: string;
+  name: string;
+  template: string;
+  is_active: boolean;
+  created_by: string;
+  created_at: string;
+  activated_at?: string | null;
+}
+
+export interface AIDiagnosticsDTO {
+  llm: { name?: string; model?: string; status: string };
+  llm_provider?: { name?: string; model?: string; status: string };
+  embedding: { name?: string; model?: string; status: string };
+  embedding_provider?: { name?: string; model?: string; status: string };
+  vector_store: { provider: string; status: string };
+  rag_index: { documents_count: number; chunks_count: number; status: string };
+  mcp: { active_servers: number; total_servers: number; status: string };
+  signal_gateway: { status: string; api_url?: string; phone_number?: string };
+}
+
+

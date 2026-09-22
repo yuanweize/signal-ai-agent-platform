@@ -3,9 +3,16 @@
  */
 
 export type ConversationType = 'dm' | 'group';
-export type ConversationMode = 'auto' | 'manual' | 'paused';
+export type ConversationMode = 'auto' | 'copilot' | 'manual' | 'paused';
 export type DeliveryStatus = 'received' | 'pending' | 'sent' | 'failed' | 'delivered' | 'read';
 export type MessageActor = 'customer' | 'bot' | 'admin' | 'system';
+export type MessageOrigin =
+  | 'customer'
+  | 'ai_auto'
+  | 'human_manual'
+  | 'human_ai_assisted'
+  | 'system'
+  | 'campaign';
 
 export interface AttachmentDTO {
   id: number;
@@ -40,6 +47,12 @@ export interface MessageDTO {
   delivery_error?: string | null;
   signal_timestamp_ms?: number | null;
   occurred_at?: string | null;
+  origin?: MessageOrigin | null;
+  ai_run_id?: number | null;
+  ai_suggestion_id?: number | null;
+  admin_identity?: string | null;
+  model?: string | null;
+  prompt_version?: string | null;
   timestamp: string;
   attachments: AttachmentDTO[];
   reactions: ReactionDTO[];

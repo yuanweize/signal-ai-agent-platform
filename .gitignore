@@ -34,13 +34,14 @@ frontend/tsconfig.tsbuildinfo
 .env.*.local
 *.pem
 *.key
+.master_key
+*.master_key
+**/.master_key
 
-# ===== Database =====
-data/*.db
-data/*.db-journal
-data/*.db-wal
-data/*.db-shm
-data/backups/
+# ===== Database & Runtime Data =====
+data/*
+!data/.gitkeep
+backend/data/
 *.sqlite3
 
 # ===== Docker =====

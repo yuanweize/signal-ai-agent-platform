@@ -62,12 +62,27 @@ class SignalClient:
         self._running = False
         self._connected = False
         self._http_client: httpx.AsyncClient | None = None
+        self._api_url: str = settings.signal_api_url or ""
+        self._phone_number: str = settings.signal_phone_number or ""
+        self._api_token: str = settings.signal_api_token or ""
 
         # Reconnection state
         self._reconnect_delay = 1.0  # Start at 1 second
         self._max_reconnect_delay = 60.0
         self._max_reconnect_attempts = 100  # Hard cap to prevent infinite storm
         self._reconnect_attempts = 0
+
+    @property
+    def api_url(self) -> str:
+        return self._api_url or settings.signal_api_url or ""
+
+    @property
+    def phone_number(self) -> str:
+        return self._phone_number or settings.signal_phone_number or ""
+
+    @property
+    def api_token(self) -> str:
+        return self._api_token or settings.signal_api_token or ""
 
     @property
     def on_message(self) -> MessageCallback | None:
@@ -804,9 +819,13 @@ class SignalClient:
         restart_listener: bool = True,
     ) -> None:
         """Apply runtime Signal settings and refresh transports if needed."""
-        settings.signal_api_url = signal_api_url.strip()
-        settings.signal_api_token = signal_api_token.strip()
-        settings.signal_phone_number = signal_phone_number.strip()
+        self._api_url = signal_api_url.strip()
+        self._api_token = signal_api_token.strip()
+        self._phone_number = signal_phone_number.strip()
+
+        settings.signal_api_url = self._api_url
+        settings.signal_api_token = self._api_token
+        settings.signal_phone_number = self._phone_number
 
         if self._http_client and not self._http_client.is_closed:
             await self._http_client.aclose()
@@ -815,7 +834,7 @@ class SignalClient:
         if not restart_listener:
             return
 
-        is_ready = bool(settings.signal_api_url and settings.signal_phone_number)
+        is_ready = bool(self._api_url and self._phone_number)
         if self._running:
             await self.stop()
 

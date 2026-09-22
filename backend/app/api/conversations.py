@@ -12,15 +12,22 @@ Provides:
 
 from __future__ import annotations
 
-from datetime import datetime
+import difflib
+import json
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import desc, select, update
 from sqlalchemy import func as sa_func
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.learning.curation import learning_service
+from app.ai.learning.feedback import feedback_service
+from app.ai.runtime.context import AgentContext
+from app.ai.runtime.factory import get_production_agent_runtime
 from app.api.deps import AdminUser, get_current_admin
 from app.database import get_session
+from app.models.ai import AIRun, AISuggestion, AISuggestionStatus
 from app.models.conversation import (
     Conversation,
     ConversationReadState,
@@ -34,6 +41,13 @@ from app.models.conversation import (
 )
 from app.models.group import Group, GroupMember
 from app.models.user import User
+from app.schemas.ai import (
+    AcceptSuggestionRequest,
+    AIRunDTO,
+    AISuggestionDTO,
+    EditSuggestionRequest,
+    RejectSuggestionRequest,
+)
 from app.schemas.conversation import (
     AttachmentDTO,
     ConversationDetailDTO,
@@ -377,6 +391,19 @@ async def get_conversation_messages(
             delivery_error=m.delivery_error,
             signal_timestamp_ms=m.signal_timestamp_ms,
             occurred_at=m.occurred_at,
+            origin=m.origin
+            or (
+                "customer"
+                if m.direction == "inbound"
+                else "ai_auto"
+                if m.actor == "bot"
+                else "human_manual"
+            ),
+            ai_run_id=m.ai_run_id,
+            ai_suggestion_id=m.ai_suggestion_id,
+            admin_identity=m.admin_identity,
+            model=m.model,
+            prompt_version=m.prompt_version,
             timestamp=m.timestamp,
             attachments=attachments_map.get(m.id, []),
             reactions=reactions_map.get(m.id, []),
@@ -444,7 +471,63 @@ async def send_conversation_message(
         actor=MessageActor.admin.value,
         sender_id=admin.username,
         reply_to_id=payload.reply_to_id,
+        origin="human_manual",
+        admin_identity=admin.username,
     )
+
+    # Human manual reply learning & feedback loop
+    target_inbound = None
+    if payload.reply_to_id:
+        cand_inbound = await session.get(Message, payload.reply_to_id)
+        if (
+            cand_inbound
+            and cand_inbound.conversation_id == conv.id
+            and cand_inbound.direction == MessageDirection.inbound.value
+        ):
+            target_inbound = cand_inbound
+
+    if not target_inbound:
+        last_inbound_res = await session.execute(
+            select(Message)
+            .where(
+                Message.conversation_id == conv.id,
+                Message.direction == MessageDirection.inbound.value,
+            )
+            .order_by(desc(Message.id))
+            .limit(1)
+        )
+        target_inbound = last_inbound_res.scalar_one_or_none()
+
+    if target_inbound:
+        # Expire any pending AI suggestions since admin took manual action
+        pending_sugs = await session.execute(
+            select(AISuggestion).where(
+                AISuggestion.conversation_id == conv.id,
+                AISuggestion.status == AISuggestionStatus.pending.value,
+            )
+        )
+        for ps in pending_sugs.scalars().all():
+            ps.status = AISuggestionStatus.expired.value
+
+        await feedback_service.record_event(
+            session=session,
+            event_type="human_manual_reply",
+            conversation_id=conv.id,
+            message_id=msg.id,
+            actor=admin.username,
+        )
+
+        if msg.delivery_status not in ("failed", "cancelled", "unsent"):
+            await learning_service.create_candidate(
+                session=session,
+                conversation_id=conv.id,
+                customer_question=target_inbound.content,
+                human_answer=payload.message,
+                inbound_message_id=target_inbound.id,
+                outbound_message_id=msg.id,
+                category="support",
+                source_quality="human_manual",
+            )
 
     await write_audit_log(
         session=session,
@@ -456,6 +539,7 @@ async def send_conversation_message(
             "recipient": recipient,
             "delivery_status": msg.delivery_status,
             "length": len(payload.message),
+            "origin": msg.origin,
         },
         ip_address=http_request.client.host if http_request.client else None,
     )
@@ -475,6 +559,12 @@ async def send_conversation_message(
         delivery_error=msg.delivery_error,
         signal_timestamp_ms=msg.signal_timestamp_ms,
         occurred_at=msg.occurred_at,
+        origin=msg.origin,
+        ai_run_id=msg.ai_run_id,
+        ai_suggestion_id=msg.ai_suggestion_id,
+        admin_identity=msg.admin_identity,
+        model=msg.model,
+        prompt_version=msg.prompt_version,
         timestamp=msg.timestamp,
         attachments=[],
         reactions=[],
@@ -496,7 +586,7 @@ async def update_conversation_mode(
 
     old_mode = conv.mode
     conv.mode = payload.mode
-    conv.updated_at = datetime.utcnow()
+    conv.updated_at = datetime.now(UTC).replace(tzinfo=None)
     await session.commit()
 
     await write_audit_log(
@@ -544,13 +634,13 @@ async def mark_conversation_read(
 
     if read_state:
         read_state.last_read_message_id = max(read_state.last_read_message_id, target_id)
-        read_state.last_read_at = datetime.utcnow()
+        read_state.last_read_at = datetime.now(UTC).replace(tzinfo=None)
     else:
         read_state = ConversationReadState(
             conversation_id=conversation_id,
             admin_identity=admin.username,
             last_read_message_id=target_id,
-            last_read_at=datetime.utcnow(),
+            last_read_at=datetime.now(UTC).replace(tzinfo=None),
         )
         session.add(read_state)
 
@@ -595,7 +685,569 @@ async def retry_outbound_message(
         delivery_error=retried.delivery_error,
         signal_timestamp_ms=retried.signal_timestamp_ms,
         occurred_at=retried.occurred_at,
+        origin=retried.origin,
+        ai_run_id=retried.ai_run_id,
+        ai_suggestion_id=retried.ai_suggestion_id,
+        admin_identity=retried.admin_identity,
+        model=retried.model,
+        prompt_version=retried.prompt_version,
         timestamp=retried.timestamp,
         attachments=[],
         reactions=[],
+    )
+
+
+# --- AI Copilot Endpoints ---
+
+
+@router.get("/{conversation_id}/suggestion", response_model=AISuggestionDTO | None)
+async def get_pending_suggestion(
+    conversation_id: int,
+    session: AsyncSession = Depends(get_session),
+    _admin: AdminUser = Depends(get_current_admin),
+):
+    """Fetch the active pending Copilot draft for this conversation."""
+    stmt = (
+        select(AISuggestion)
+        .where(
+            AISuggestion.conversation_id == conversation_id,
+            AISuggestion.status == AISuggestionStatus.pending.value,
+        )
+        .order_by(desc(AISuggestion.generated_at))
+        .limit(1)
+    )
+    res = await session.execute(stmt)
+    sug = res.scalar_one_or_none()
+    if not sug:
+        return None
+
+    meta = json.loads(sug.metadata_json) if sug.metadata_json else {}
+    return AISuggestionDTO(
+        id=sug.id,
+        conversation_id=sug.conversation_id,
+        inbound_message_id=sug.inbound_message_id,
+        ai_run_id=sug.ai_run_id,
+        suggested_text=sug.suggested_text,
+        status=sug.status,
+        generated_at=sug.generated_at,
+        reviewed_at=sug.reviewed_at,
+        reviewed_by=sug.reviewed_by,
+        final_message_id=sug.final_message_id,
+        edit_distance=sug.edit_distance,
+        edit_ratio=sug.edit_ratio,
+        metadata=meta,
+    )
+
+
+@router.post("/{conversation_id}/suggestion/generate", response_model=AISuggestionDTO)
+async def generate_suggestion_manually(
+    conversation_id: int,
+    session: AsyncSession = Depends(get_session),
+    admin: AdminUser = Depends(get_current_admin),
+):
+    """Manually generate an AI draft suggestion on-demand (e.g. in manual mode)."""
+    conv = await session.get(Conversation, conversation_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    stmt = (
+        select(Message)
+        .where(
+            Message.conversation_id == conversation_id,
+            Message.direction == MessageDirection.inbound.value,
+        )
+        .order_by(desc(Message.id))
+        .limit(1)
+    )
+    res = await session.execute(stmt)
+    last_inbound = res.scalar_one_or_none()
+    if not last_inbound:
+        raise HTTPException(
+            status_code=400, detail="No inbound customer message found to respond to"
+        )
+
+    context = AgentContext(
+        conversation_id=conv.id,
+        message_id=last_inbound.id,
+        sender_id=last_inbound.sender_id or conv.signal_id,
+        text=last_inbound.content,
+        is_group=conv.type == ConversationType.group.value or bool(conv.group_id),
+        group_id=conv.group_id,
+        mode="copilot",
+    )
+    runtime = await get_production_agent_runtime(session)
+    await runtime.run(session=session, context=context)
+
+    sug_res = await session.execute(
+        select(AISuggestion)
+        .where(
+            AISuggestion.conversation_id == conversation_id,
+            AISuggestion.status == AISuggestionStatus.pending.value,
+        )
+        .order_by(desc(AISuggestion.generated_at))
+        .limit(1)
+    )
+    sug = sug_res.scalar_one_or_none()
+    if not sug:
+        raise HTTPException(status_code=500, detail="Failed to generate suggestion")
+
+    meta = json.loads(sug.metadata_json) if sug.metadata_json else {}
+    return AISuggestionDTO(
+        id=sug.id,
+        conversation_id=sug.conversation_id,
+        inbound_message_id=sug.inbound_message_id,
+        ai_run_id=sug.ai_run_id,
+        suggested_text=sug.suggested_text,
+        status=sug.status,
+        generated_at=sug.generated_at,
+        reviewed_at=sug.reviewed_at,
+        reviewed_by=sug.reviewed_by,
+        final_message_id=sug.final_message_id,
+        edit_distance=sug.edit_distance,
+        edit_ratio=sug.edit_ratio,
+        metadata=meta,
+    )
+
+
+def _to_message_dto(msg: Message, sender_name: str | None = None) -> MessageDTO:
+    return MessageDTO(
+        id=msg.id,
+        conversation_id=msg.conversation_id,
+        direction=msg.direction,
+        actor=msg.actor,
+        role=msg.role,
+        sender_id=msg.sender_id,
+        sender_name=sender_name or msg.admin_identity or msg.sender_id,
+        content=msg.content,
+        tokens_used=msg.tokens_used,
+        reply_to_id=msg.reply_to_id,
+        delivery_status=msg.delivery_status,
+        delivery_error=msg.delivery_error,
+        signal_timestamp_ms=msg.signal_timestamp_ms,
+        occurred_at=msg.occurred_at,
+        origin=msg.origin,
+        ai_run_id=msg.ai_run_id,
+        ai_suggestion_id=msg.ai_suggestion_id,
+        admin_identity=msg.admin_identity,
+        model=msg.model,
+        prompt_version=msg.prompt_version,
+        timestamp=msg.timestamp,
+        attachments=[],
+        reactions=[],
+    )
+
+
+@router.post("/{conversation_id}/suggestion/accept", response_model=MessageDTO)
+async def accept_suggestion(
+    conversation_id: int,
+    http_request: Request,
+    payload: AcceptSuggestionRequest | None = None,
+    suggestion_id: int | None = Query(None),
+    session: AsyncSession = Depends(get_session),
+    admin: AdminUser = Depends(get_current_admin),
+):
+    """Accept the Copilot AI draft and deliver to customer via Signal with atomic claim."""
+    conv = await session.get(Conversation, conversation_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    target_id = (
+        payload.suggestion_id if payload and payload.suggestion_id else None
+    ) or suggestion_id
+    if target_id:
+        target_sug = await session.get(AISuggestion, target_id)
+        if not target_sug or target_sug.conversation_id != conversation_id:
+            raise HTTPException(status_code=404, detail="Suggestion not found")
+        if target_sug.status != AISuggestionStatus.pending.value:
+            if (
+                target_sug.status
+                in (AISuggestionStatus.accepted.value, AISuggestionStatus.edited.value)
+                and target_sug.final_message_id
+            ):
+                final_msg = await session.get(Message, target_sug.final_message_id)
+                if final_msg:
+                    return _to_message_dto(final_msg, sender_name=admin.username)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Suggestion is already in '{target_sug.status}' status",
+            )
+        target_sug_id = target_id
+    else:
+        stmt = (
+            select(AISuggestion.id)
+            .where(
+                AISuggestion.conversation_id == conversation_id,
+                AISuggestion.status == AISuggestionStatus.pending.value,
+            )
+            .order_by(desc(AISuggestion.generated_at))
+            .limit(1)
+        )
+        res = await session.execute(stmt)
+        target_sug_id = res.scalar_one_or_none()
+        if not target_sug_id:
+            raise HTTPException(status_code=404, detail="No pending suggestion found")
+
+    # Atomic compare-and-set claim: only one concurrent task can win
+    claim_stmt = (
+        update(AISuggestion)
+        .where(
+            AISuggestion.id == target_sug_id,
+            AISuggestion.status == AISuggestionStatus.pending.value,
+        )
+        .values(status=AISuggestionStatus.processing.value)
+    )
+    claim_res = await session.execute(claim_stmt)
+    await session.commit()
+
+    if claim_res.rowcount != 1:
+        current_sug = await session.get(AISuggestion, target_sug_id)
+        if (
+            current_sug
+            and current_sug.status
+            in (AISuggestionStatus.accepted.value, AISuggestionStatus.edited.value)
+            and current_sug.final_message_id
+        ):
+            final_msg = await session.get(Message, current_sug.final_message_id)
+            if final_msg:
+                return _to_message_dto(final_msg, sender_name=admin.username)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Suggestion is currently being processed or has already been reviewed",
+        )
+
+    sug = await session.get(AISuggestion, target_sug_id)
+    if not sug:
+        raise HTTPException(status_code=404, detail="Suggestion not found after claim")
+
+    recipient = conv.signal_id
+    if conv.type == ConversationType.group.value or conv.group_id:
+        gid = conv.group_id or conv.signal_id
+        recipient = gid if gid.startswith("group.") else f"group.{gid}"
+
+    msg = await outbound_service.send_message(
+        session=session,
+        conversation_id=conv.id,
+        content=sug.suggested_text,
+        recipient=recipient,
+        actor=MessageActor.admin.value,
+        sender_id=admin.username,
+        origin="human_ai_assisted",
+        ai_suggestion_id=sug.id,
+        ai_run_id=sug.ai_run_id,
+        admin_identity=admin.username,
+    )
+
+    if msg.delivery_status == MessageDeliveryStatus.failed.value:
+        sug.status = AISuggestionStatus.send_failed.value
+        sug.final_message_id = msg.id
+        await session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to deliver suggestion via Signal: {msg.delivery_error or 'gateway failure'}",
+        )
+
+    sug.status = AISuggestionStatus.accepted.value
+    sug.reviewed_at = datetime.now(UTC).replace(tzinfo=None)
+    sug.reviewed_by = admin.username
+    sug.final_message_id = msg.id
+    sug.edit_distance = 0
+    sug.edit_ratio = 0.0
+
+    if sug.ai_run_id:
+        ai_run = await session.get(AIRun, sug.ai_run_id)
+        if ai_run:
+            ai_run.final_message_id = msg.id
+
+    await session.commit()
+
+    await feedback_service.record_event(
+        session=session,
+        event_type="suggestion_accepted",
+        conversation_id=conv.id,
+        message_id=msg.id,
+        ai_suggestion_id=sug.id,
+        ai_run_id=sug.ai_run_id,
+        actor=admin.username,
+    )
+
+    await write_audit_log(
+        session=session,
+        action="copilot.accept_suggestion",
+        actor=admin.username,
+        target=f"suggestion:{sug.id}",
+        details={"conversation_id": conv.id, "message_id": msg.id},
+        ip_address=http_request.client.host if http_request.client else None,
+    )
+
+    return _to_message_dto(msg, sender_name=admin.username)
+
+
+@router.post("/{conversation_id}/suggestion/edit", response_model=MessageDTO)
+@router.post(
+    "/{conversation_id}/suggestion/edit-send", response_model=MessageDTO, include_in_schema=False
+)
+async def edit_and_send_suggestion(
+    conversation_id: int,
+    payload: EditSuggestionRequest,
+    http_request: Request,
+    suggestion_id: int | None = Query(None),
+    session: AsyncSession = Depends(get_session),
+    admin: AdminUser = Depends(get_current_admin),
+):
+    """Edit the AI draft and dispatch the finalized response with atomic claim."""
+    conv = await session.get(Conversation, conversation_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    target_id = payload.suggestion_id or suggestion_id
+    if target_id:
+        target_sug = await session.get(AISuggestion, target_id)
+        if not target_sug or target_sug.conversation_id != conversation_id:
+            raise HTTPException(status_code=404, detail="Suggestion not found")
+        if target_sug.status != AISuggestionStatus.pending.value:
+            if (
+                target_sug.status
+                in (AISuggestionStatus.accepted.value, AISuggestionStatus.edited.value)
+                and target_sug.final_message_id
+            ):
+                final_msg = await session.get(Message, target_sug.final_message_id)
+                if final_msg:
+                    return _to_message_dto(final_msg, sender_name=admin.username)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Suggestion is already in '{target_sug.status}' status",
+            )
+        target_sug_id = target_id
+    else:
+        stmt = (
+            select(AISuggestion.id)
+            .where(
+                AISuggestion.conversation_id == conversation_id,
+                AISuggestion.status == AISuggestionStatus.pending.value,
+            )
+            .order_by(desc(AISuggestion.generated_at))
+            .limit(1)
+        )
+        res = await session.execute(stmt)
+        target_sug_id = res.scalar_one_or_none()
+        if not target_sug_id:
+            raise HTTPException(status_code=404, detail="No pending suggestion found")
+
+    # Atomic compare-and-set claim
+    claim_stmt = (
+        update(AISuggestion)
+        .where(
+            AISuggestion.id == target_sug_id,
+            AISuggestion.status == AISuggestionStatus.pending.value,
+        )
+        .values(status=AISuggestionStatus.processing.value)
+    )
+    claim_res = await session.execute(claim_stmt)
+    await session.commit()
+
+    if claim_res.rowcount != 1:
+        current_sug = await session.get(AISuggestion, target_sug_id)
+        if (
+            current_sug
+            and current_sug.status
+            in (AISuggestionStatus.accepted.value, AISuggestionStatus.edited.value)
+            and current_sug.final_message_id
+        ):
+            final_msg = await session.get(Message, current_sug.final_message_id)
+            if final_msg:
+                return _to_message_dto(final_msg, sender_name=admin.username)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Suggestion is currently being processed or has already been reviewed",
+        )
+
+    sug = await session.get(AISuggestion, target_sug_id)
+    if not sug:
+        raise HTTPException(status_code=404, detail="Suggestion not found after claim")
+
+    # Calculate edit distance & ratio
+    ratio = difflib.SequenceMatcher(None, sug.suggested_text, payload.edited_text).ratio()
+    edit_ratio = round(1.0 - ratio, 3)
+    edit_distance = round((1.0 - ratio) * max(len(sug.suggested_text), len(payload.edited_text)))
+
+    recipient = conv.signal_id
+    if conv.type == ConversationType.group.value or conv.group_id:
+        gid = conv.group_id or conv.signal_id
+        recipient = gid if gid.startswith("group.") else f"group.{gid}"
+
+    msg = await outbound_service.send_message(
+        session=session,
+        conversation_id=conv.id,
+        content=payload.edited_text,
+        recipient=recipient,
+        actor=MessageActor.admin.value,
+        sender_id=admin.username,
+        origin="human_ai_assisted",
+        ai_suggestion_id=sug.id,
+        ai_run_id=sug.ai_run_id,
+        admin_identity=admin.username,
+    )
+
+    if msg.delivery_status == MessageDeliveryStatus.failed.value:
+        sug.status = AISuggestionStatus.send_failed.value
+        sug.final_message_id = msg.id
+        await session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to deliver edited suggestion via Signal: {msg.delivery_error or 'gateway failure'}",
+        )
+
+    sug.status = AISuggestionStatus.edited.value
+    sug.reviewed_at = datetime.now(UTC).replace(tzinfo=None)
+    sug.reviewed_by = admin.username
+    sug.final_message_id = msg.id
+    sug.edit_distance = edit_distance
+    sug.edit_ratio = edit_ratio
+
+    if sug.ai_run_id:
+        ai_run = await session.get(AIRun, sug.ai_run_id)
+        if ai_run:
+            ai_run.final_message_id = msg.id
+
+    await session.commit()
+
+    await feedback_service.record_event(
+        session=session,
+        event_type="suggestion_edited",
+        conversation_id=conv.id,
+        message_id=msg.id,
+        ai_suggestion_id=sug.id,
+        ai_run_id=sug.ai_run_id,
+        notes=f"edit_ratio={edit_ratio}",
+        actor=admin.username,
+    )
+
+    # Distill human-edited Q&A into learning candidate
+    if sug.inbound_message_id and msg.delivery_status not in ("failed", "cancelled", "unsent"):
+        inbound_msg = await session.get(Message, sug.inbound_message_id)
+        if inbound_msg:
+            await learning_service.create_candidate(
+                session=session,
+                conversation_id=conv.id,
+                customer_question=inbound_msg.content,
+                human_answer=payload.edited_text,
+                inbound_message_id=inbound_msg.id,
+                outbound_message_id=msg.id,
+                category="support",
+                source_quality="human_ai_edited",
+            )
+
+    await write_audit_log(
+        session=session,
+        action="copilot.edit_suggestion",
+        actor=admin.username,
+        target=f"suggestion:{sug.id}",
+        details={"conversation_id": conv.id, "message_id": msg.id, "edit_ratio": edit_ratio},
+        ip_address=http_request.client.host if http_request.client else None,
+    )
+
+    return _to_message_dto(msg, sender_name=admin.username)
+
+
+@router.post("/{conversation_id}/suggestion/reject")
+async def reject_suggestion(
+    conversation_id: int,
+    payload: RejectSuggestionRequest | None = None,
+    suggestion_id: int | None = Query(None),
+    session: AsyncSession = Depends(get_session),
+    admin: AdminUser = Depends(get_current_admin),
+):
+    """Discard an AI suggestion draft with atomic state transition."""
+    target_id = (payload.suggestion_id if payload else None) or suggestion_id
+    if target_id:
+        target_sug_id = target_id
+    else:
+        stmt = (
+            select(AISuggestion.id)
+            .where(
+                AISuggestion.conversation_id == conversation_id,
+                AISuggestion.status == AISuggestionStatus.pending.value,
+            )
+            .order_by(desc(AISuggestion.generated_at))
+            .limit(1)
+        )
+        res = await session.execute(stmt)
+        target_sug_id = res.scalar_one_or_none()
+        if not target_sug_id:
+            raise HTTPException(status_code=404, detail="No pending suggestion found")
+
+    reject_stmt = (
+        update(AISuggestion)
+        .where(
+            AISuggestion.id == target_sug_id,
+            AISuggestion.status == AISuggestionStatus.pending.value,
+        )
+        .values(
+            status=AISuggestionStatus.rejected.value,
+            reviewed_at=datetime.now(UTC).replace(tzinfo=None),
+            reviewed_by=admin.username,
+        )
+    )
+    res = await session.execute(reject_stmt)
+    await session.commit()
+
+    if res.rowcount != 1:
+        current_sug = await session.get(AISuggestion, target_sug_id)
+        if not current_sug:
+            raise HTTPException(status_code=404, detail="Suggestion not found")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Suggestion is already in '{current_sug.status}' status",
+        )
+
+    sug = await session.get(AISuggestion, target_sug_id)
+    await feedback_service.record_event(
+        session=session,
+        event_type="suggestion_rejected",
+        conversation_id=conversation_id,
+        ai_suggestion_id=target_sug_id,
+        ai_run_id=sug.ai_run_id if sug else None,
+        notes=payload.reason if payload else None,
+        actor=admin.username,
+    )
+
+    return {"ok": True, "suggestion_id": target_sug_id, "status": "rejected"}
+
+
+@router.get("/{conversation_id}/ai-run/{ai_run_id}", response_model=AIRunDTO)
+async def get_ai_run_explainability(
+    conversation_id: int,
+    ai_run_id: int,
+    session: AsyncSession = Depends(get_session),
+    _admin: AdminUser = Depends(get_current_admin),
+):
+    """Return transparent AI decision explainability metadata (citations, tools, latency)."""
+    run = await session.get(AIRun, ai_run_id)
+    if not run or run.conversation_id != conversation_id:
+        raise HTTPException(status_code=404, detail="AI run not found for this conversation")
+
+    skills = json.loads(run.skills) if run.skills else []
+    retrieval = json.loads(run.retrieval) if run.retrieval else []
+    mem = json.loads(run.memory) if run.memory else []
+    tools = json.loads(run.tool_calls) if run.tool_calls else []
+
+    return AIRunDTO(
+        id=run.id,
+        trace_id=run.trace_id,
+        conversation_id=run.conversation_id,
+        input_message_id=run.input_message_id,
+        model=run.model,
+        provider=run.provider,
+        prompt_version=run.prompt_version,
+        skills=skills,
+        retrieval=retrieval,
+        memory=mem,
+        tool_calls=tools,
+        decision=run.decision,
+        confidence=run.confidence,
+        latency_ms=run.latency_ms,
+        tokens=run.tokens,
+        errors=run.errors,
+        final_message_id=run.final_message_id,
+        created_at=run.created_at,
     )
