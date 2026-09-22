@@ -31,22 +31,28 @@
 
 ## 🌟 Overview
 
-**Signal Market Bot** is a high-performance, enterprise-grade conversational commerce and customer automation platform designed specifically for the Signal messaging ecosystem. It seamlessly bridges end-to-end Signal messaging with modern LLM intelligence, human agent intervention, e-commerce catalog management, and automated broadcast campaigns.
+**Signal Market Bot** is a high-performance, enterprise-grade **Signal-native AI Customer Service & Automation Platform** designed specifically for the Signal messaging ecosystem. It seamlessly bridges end-to-end Signal messaging with modern LLM intelligence, human agent intervention, e-commerce catalog management, and automated broadcast campaigns.
 
-Built on an asynchronous **FastAPI** backend and a reactive **React + Tailwind + DaisyUI** admin dashboard, Signal Market Bot eliminates fragile `.env`-based operational friction by providing a self-contained, DB-backed runtime configuration console with bank-grade security controls.
+With **AI Platform v0.4**, the system introduces an agentic architecture powered by **LangGraph**, offering **Copilot mode with message provenance**, **Progressive Skills**, **Scoped RAG retrieval with cross-tenant isolation**, **Durable Scoped Memory**, **MCP tool governance**, and a **Human-in-the-Loop continuous learning loop**.
 
 ---
 
 ## 🚀 Key Features
 
-### 🧠 Pluggable AI Intelligence
-- **Universal Provider Compatibility**: Seamlessly connect OpenAI, DeepSeek, Ollama, vLLM, LocalAI, Azure OpenAI, or any OpenAI-compatible endpoint.
-- **Dynamic Context Injection**: Grounded bot responses incorporating live product inventory, customer conversation history, and tailored domain instructions.
-- **Conversation State Awareness**: Intelligent group context handling attributing messages to specific senders while preventing redundant prompt echoes.
+### 🤖 AI Platform & Agent Runtime (v0.4 New)
+- **LangGraph Agent Workflow**: Directed state graph executing progressive skill discovery, multi-scope RAG, tool authorization, grounded generation, and decision classification (`reply`, `draft_for_human`, `ask_clarifying`, `handoff`, `no_reply`).
+- **Inbox Copilot Mode**: Real-time drafting assistant for human operators with one-click **Accept & Send**, **Edit in Composer**, **Discard**, and an **Evidence Drawer** revealing citations, memories, and tools used.
+- **Message Provenance Tracking**: Strict origin classification (`customer`, `ai_auto`, `human_ai_assisted`, `human_manual`, `system`, `campaign`) linked to `ai_run_id` for explainable AI auditing.
+- **Progressive Skills System**: Dynamic two-tier loading with YAML metadata indexing and on-demand instruction injection, cutting prompt token consumption by 70%+.
+- **Scoped RAG Knowledge Base**: Strict triple-tier isolation (`Global`, `Group`, `User`) ensuring group chats cannot access private customer DM data.
+- **Durable Scoped Memory**: Automated customer preference extraction with automated PII & secret redaction and GDPR double-deletion compliance.
+- **Governed Tools & Model Context Protocol (MCP)**: Strict read/write permissions where sensitive actions require human authorization; SSRF outbound network validation.
+- **Human-in-the-Loop Learning Loop**: Automatically detects significant operator edits, curates learning candidates, allows one-click FAQ promotion, and exports fine-tuning JSONL datasets.
+- **Golden Dataset Evaluation Suite**: Built-in benchmark harness (`python evals/run_evals.py`) scoring pass rate, decision accuracy, keyword recall, and latency.
 
 ### 📥 Real-Time Support Inbox & Takeover
 - **Dual-Pane Conversation Console**: Complete customer conversation visibility with unread counters, message search, and type filters (DMs / Groups / Unread).
-- **Concurrency-Safe Manual Takeover**: Instantly toggle between **Auto (AI)**, **Manual (Human)**, and **Paused (Mute)**. Includes pre-send state verification that automatically discards stale AI outbound messages if an agent takes over mid-generation.
+- **4-State Takeover Engine**: Seamlessly toggle between **Auto (AI)**, **Copilot (Assisted Drafts)**, **Manual (Human Only)**, and **Paused (Mute)** with pre-send state locks.
 - **Delivery State Machine**: Comprehensive message lifecycle tracking (`received` / `pending` -> `sent` / `failed` -> `delivered` -> `read`) with one-click failed message retries.
 - **Rich Media & Reactions**: Native parsing and rendering of media attachments and emoji reactions.
 
@@ -54,10 +60,6 @@ Built on an asynchronous **FastAPI** backend and a reactive **React + Tailwind +
 - **Backpressure-Controlled Queue**: Bounded in-memory event pipeline (`maxsize=1000`) preventing memory spikes during message surges.
 - **Concurrent Worker Pool**: Multi-worker asynchronous processing with per-conversation partition locking to guarantee strict chronological message order without blocking unrelated chats.
 - **Robust Deduplication**: Dual-layer deduplication combining fast LRU in-memory filtering with database unique constraints across reconnect cycles.
-
-### 👥 Identity Resolution & Group Membership
-- **Unified Identity System**: Resolves Signal UUIDs and E.164 phone numbers to a single canonical customer record.
-- **Group Roster Synchronization**: Dynamic group synchronization tracking participant rosters, member roles, and admin permissions.
 
 ### 📢 Targeted Campaign Broadcasts
 - **Smart Group Broadcasting**: Disseminate marketing announcements and updates to selected Signal groups.
@@ -67,6 +69,19 @@ Built on an asynchronous **FastAPI** backend and a reactive **React + Tailwind +
 - **First-Run Security Bootstrap**: One-time setup wizard configuring administrative credentials with scrypt password hashing and mandatory or optional TOTP 2FA.
 - **Encrypted Runtime Configuration**: Configure Signal gateways, AI API keys, retention periods, and prompts directly in the UI with automated credential masking and encrypted DB storage.
 - **Comprehensive Audit Trail**: Structured event logging recording authentication attempts, takeover actions, and configuration updates.
+
+---
+
+## 📚 Technical Documentation
+
+- [AI Architecture & LangGraph Workflow](docs/AI_ARCHITECTURE.md)
+- [Privacy-Preserving Scoped RAG](docs/RAG.md)
+- [Scoped Memory & PII Redaction](docs/MEMORY.md)
+- [Model Context Protocol (MCP) & Tool Governance](docs/MCP.md)
+- [Progressive Skills System](docs/SKILLS.md)
+- [Human-in-the-Loop Learning Loop](docs/LEARNING_LOOP.md)
+- [Automated Golden Dataset Evaluation](docs/AI_EVALUATION.md)
+- [AI Privacy Boundaries & Security](docs/AI_PRIVACY.md)
 
 ---
 
@@ -85,22 +100,37 @@ graph TD
         OMS[Outbound Message Service]
     end
 
-    subgraph Intelligence & Storage
-        AI[OpenAI-Compatible LLM Engine]
+    subgraph AI Platform v0.4
+        AR[AgentRuntime / LangGraph]
+        SK[Progressive Skills Registry]
+        RAG[Scoped RAG Vector Store]
+        MEM[Durable Memory Engine]
+        TR[Governed Tools & MCP]
+    end
+
+    subgraph Storage & Observability
         DB[(SQLite WAL Database)]
+        QD[(Qdrant Vector DB)]
+        TRC[Telemetry & AIRun Tracing]
     end
 
     subgraph Management Dashboard
-        UI[React 18 Admin Console]
-        API[FastAPI Asynchronous Gateway]
+        UI[React 18 Admin Console + AI Studio]
+        API[FastAPI Gateway]
     end
 
-    SG -- WebSocket / Polling --> EV
+    SG -- Webhook / WebSocket --> EV
     EV --> WQ
     WQ --> PL
-    PL --> AI
+    PL --> AR
     PL --> DB
-    AI --> OMS
+    AR <--> SK
+    AR <--> RAG
+    AR <--> MEM
+    AR <--> TR
+    RAG <--> QD
+    AR --> TRC
+    AR --> OMS
     OMS -- REST Dispatch --> SG
     API <--> DB
     UI <--> API

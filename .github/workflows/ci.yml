@@ -2,12 +2,12 @@ name: CI
 
 on:
   push:
-    branches: ["main", "refactor/**"]
+    branches: ["main", "refactor/**", "feat/**"]
   pull_request:
 
 jobs:
   # ============================================================
-  # Backend — lint, format, type-check, compile, pytest, migrations
+  # Backend — lint, format, type-check, compile, pytest, migrations, evals
   # ============================================================
   backend-check:
     runs-on: ubuntu-latest
@@ -30,10 +30,10 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Ruff lint
-        run: ruff check app/ tests/
+        run: ruff check app/ tests/ evals/
 
       - name: Ruff format check
-        run: ruff format --check app/ tests/
+        run: ruff format --check app/ tests/ evals/
 
       - name: Compile check
         run: python -m compileall app/
@@ -42,6 +42,9 @@ jobs:
         run: pytest tests/ -v --tb=short
         env:
           DATABASE_URL: "sqlite+aiosqlite:///:memory:"
+
+      - name: Run Golden Dataset AI Evaluation Benchmarks
+        run: python evals/run_evals.py
 
       - name: Alembic migration tests (fresh & legacy 112aa6e)
         run: pytest tests/test_migrations.py -v

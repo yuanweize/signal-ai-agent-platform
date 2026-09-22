@@ -35,12 +35,29 @@ def build_agent_graph(
         candidate_skills: list[str] = []
         instructions: list[str] = []
 
-        if any(w in text for w in ["price", "buy", "product", "catalog", "order", "cost", "stock"]):
-            candidate_skills.append("product-sales")
+        is_policy_inquiry = any(w in text for w in ["policy", "terms", "rules", "faq"])
         if any(
+            w in text
+            for w in [
+                "price",
+                "buy",
+                "product",
+                "catalog",
+                "order",
+                "cost",
+                "stock",
+                "coffee",
+                "available",
+                "how much",
+            ]
+        ):
+            candidate_skills.append("product-sales")
+        if not is_policy_inquiry and any(
             w in text
             for w in ["broken", "defect", "refund", "complaint", "terrible", "late", "damage"]
         ):
+            candidate_skills.append("complaints")
+        elif "refund" in text:
             candidate_skills.append("complaints")
         if any(
             w in text for w in ["human", "agent", "person", "representative", "manager", "staff"]
@@ -181,7 +198,9 @@ def build_agent_graph(
 
         # 3. Determine decision
         mode = state.get("mode", "auto")
-        if requires_approval or "complaint" in (state.get("selected_skills") or []):
+        if requires_approval or any(
+            s in (state.get("selected_skills") or []) for s in ["complaints", "complaint"]
+        ):
             decision = AgentDecision.draft_for_human.value
         elif mode == "copilot":
             decision = AgentDecision.draft_for_human.value

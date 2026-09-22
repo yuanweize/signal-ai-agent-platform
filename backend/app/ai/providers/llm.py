@@ -146,11 +146,24 @@ class FakeLLMProvider:
 
         # Inspect last message for deterministic behaviors
         last_msg = messages[-1]["content"] if messages else ""
-        if "product" in last_msg.lower():
+        lower = last_msg.lower()
+        if "coffee" in lower or "product" in lower:
             return "Here are our current featured products: Organic Arabica Coffee ($15.00).", 35
-        if "order" in last_msg.lower():
+        if "return" in lower or "policy" in lower or "damage" in lower:
+            return (
+                "Our customer service policy allows item return within 30 days for damaged goods.",
+                30,
+            )
+        if "delivery" in lower or "hour" in lower:
+            return (
+                "Our customer support and delivery hours run Monday through Friday from 09:00 to 18:00.",
+                25,
+            )
+        if "refund" in lower:
+            return "Your refund request has been logged for supervisor approval.", 20
+        if "order" in lower:
             return "Your order status is confirmed and scheduled for packaging.", 25
-        if "human" in last_msg.lower() or "agent" in last_msg.lower():
+        if "human" in lower or "agent" in lower:
             return "I am connecting you with a human representative right now.", 20
         return "Thank you for reaching out! How can I assist you today?", 15
 
