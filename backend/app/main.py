@@ -183,8 +183,8 @@ async def health_ready(response: Response):
                     text("SELECT version_num FROM alembic_version LIMIT 1")
                 )
                 row = result.scalar_one_or_none()
-                # Must be at head
-                if row and row == "c8927140f12a":
+                # Must be at head (e1f2a3b4c5d6 for AI Platform v0.4)
+                if row and row == "e1f2a3b4c5d6":
                     migration_ok = True
                 else:
                     error_detail = f"Migration not at head: {row}"
@@ -233,7 +233,7 @@ async def health_check():
                     text("SELECT version_num FROM alembic_version LIMIT 1")
                 )
                 row = result.scalar_one_or_none()
-                migration_ok = row == "c8927140f12a"
+                migration_ok = row == "e1f2a3b4c5d6"
             except Exception:
                 migration_ok = False
 
