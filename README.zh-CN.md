@@ -192,7 +192,7 @@ npm run dev
 | **前端技术栈** | [React](https://react.dev/) 18 + [Vite](https://vitejs.dev/) + [TypeScript](https://www.typescriptlang.org/) + [React Router](https://reactrouter.com/) 7.18+ |
 | **UI 样式体系** | [Tailwind CSS](https://tailwindcss.com/) + [DaisyUI](https://daisyui.com/) |
 | **安全与认证** | Scrypt KDF 密码哈希 + [PyOTP](https://github.com/pyauth/pyotp) (TOTP 2FA) + [python-jose](https://github.com/mpdavis/python-jose) (JWT) |
-| **测试与质量网关** | [pytest](https://docs.pytest.org/) (73 项后端测试) + [Vitest](https://vitest.dev/) (18 项前端测试) + 32 项确定性契约测试 |
+| **测试与质量网关** | [pytest](https://docs.pytest.org/) (75 项后端测试) + [Vitest](https://vitest.dev/) (18 项前端测试) + 32 项确定性契约测试 |
 | **容器化交付** | Docker 多阶段构建 + Docker Compose + GitHub Container Registry (GHCR) |
 
 ---

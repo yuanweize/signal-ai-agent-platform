@@ -20,26 +20,26 @@ Signal Market Bot handles sensitive customer conversations across direct message
    - **Forbidden scopes**: Private user memory or documents belonging to ANY user, including the message sender.
 
 ### Implementation Verification
-- [`backend/app/ai/rag/retrieval.py`](file:///Users/yuanweize/我的文档/服务器/GITHUB/signal-market-bot/backend/app/ai/rag/retrieval.py):
+- [`backend/app/ai/rag/retrieval.py`](../backend/app/ai/rag/retrieval.py):
   ```python
   if is_group:
       # P0 Safety Guard: Groups must never retrieve individual user-scoped knowledge
       allowed_scopes.discard("user")
   ```
-- [`backend/app/ai/runtime/agent_runtime.py`](file:///Users/yuanweize/我的文档/服务器/GITHUB/signal-market-bot/backend/app/ai/runtime/agent_runtime.py):
+- [`backend/app/ai/runtime/agent_runtime.py`](../backend/app/ai/runtime/agent_runtime.py):
   ```python
   if context.is_group:
       # P0 Safety Guard: Groups must NEVER load individual user memories
       turn_memories = []
   ```
-- Verified by automated regression tests in [`backend/tests/test_ai_platform.py`](file:///Users/yuanweize/我的文档/服务器/GITHUB/signal-market-bot/backend/tests/test_ai_platform.py) (`test_group_cannot_retrieve_user_rag` and `test_group_prompt_contains_no_private_user_memory`).
+- Verified by automated regression tests in [`backend/tests/test_ai_platform.py`](../backend/tests/test_ai_platform.py) (`test_group_cannot_retrieve_user_rag` and `test_group_prompt_contains_no_private_user_memory`).
 
 ---
 
 ## 2. Canonical Identity Protection
 
 Signal users may communicate via phone number, contact name, or Signal UUID.
-- User memories and conversation attribution are tied to `canonical_user_id` in [`backend/app/models/user.py`](file:///Users/yuanweize/我的文档/服务器/GITHUB/signal-market-bot/backend/app/models/user.py).
+- User memories and conversation attribution are tied to `canonical_user_id` in [`backend/app/models/user.py`](../backend/app/models/user.py).
 - A user contacting via phone and later via UUID accesses the identical memory namespace without duplicate or conflicting profiles.
 - Verified by `test_same_user_phone_uuid_share_memory`.
 

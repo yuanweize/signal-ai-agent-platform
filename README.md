@@ -192,7 +192,7 @@ npm run dev
 | **Frontend Stack** | [React](https://react.dev/) 18 + [Vite](https://vitejs.dev/) + [TypeScript](https://www.typescriptlang.org/) + [React Router](https://reactrouter.com/) 7.18+ |
 | **Styling System** | [Tailwind CSS](https://tailwindcss.com/) + [DaisyUI](https://daisyui.com/) |
 | **Security & Auth** | Scrypt KDF + [PyOTP](https://github.com/pyauth/pyotp) (TOTP 2FA) + [python-jose](https://github.com/mpdavis/python-jose) (JWT) |
-| **Quality Gates** | [pytest](https://docs.pytest.org/) (73 passing tests) + [Vitest](https://vitest.dev/) (18 passing tests) + Deterministic AI eval (32 cases) |
+| **Quality Gates** | [pytest](https://docs.pytest.org/) (75 passing tests) + [Vitest](https://vitest.dev/) (18 passing tests) + Deterministic AI eval (32 cases) |
 | **Deployment** | Docker multi-stage builds + Docker Compose + GitHub Container Registry (GHCR) |
 
 ---

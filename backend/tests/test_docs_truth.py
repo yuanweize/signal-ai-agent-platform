@@ -72,11 +72,11 @@ def test_readme_test_counts_accuracy():
     readme_en = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     readme_zh = (REPO_ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
 
-    assert "73 passing tests" in readme_en or "73" in readme_en
+    assert "75 passing tests" in readme_en or "75" in readme_en
     assert "18 passing tests" in readme_en or "18" in readme_en
     assert "32" in readme_en
 
-    assert "73" in readme_zh
+    assert "75" in readme_zh
     assert "18" in readme_zh
     assert "32" in readme_zh
 
