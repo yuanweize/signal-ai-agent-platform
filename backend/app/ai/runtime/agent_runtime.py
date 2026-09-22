@@ -7,6 +7,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import sys
 import time
 import uuid
 from typing import Any
@@ -26,6 +28,7 @@ from app.ai.rag.vector_store import FakeVectorStore
 from app.ai.runtime.context import AgentContext
 from app.ai.runtime.decisions import AgentDecision, AgentResponse
 from app.models.ai import AIRun, AISuggestion, AISuggestionStatus
+from app.models.user import User
 
 logger = logging.getLogger("ai.runtime")
 
@@ -38,10 +41,32 @@ class AgentRuntime:
         llm_provider: LLMProvider | None = None,
         retriever: KnowledgeRetriever | None = None,
         memory_provider: NativeMemoryProvider | None = None,
+        vector_store: Any | None = None,
+        embedding_provider: Any | None = None,
     ) -> None:
+        if os.environ.get("ENVIRONMENT", "").lower() in ("production", "prod"):
+            is_test = False
+        else:
+            is_test = (
+                os.getenv("TESTING", "").lower() in ("1", "true", "yes")
+                or os.getenv("ENVIRONMENT", "").lower() in ("test", "testing")
+                or bool(os.getenv("PYTEST_CURRENT_TEST"))
+                or "pytest" in sys.modules
+            )
+        if not is_test:
+            if isinstance(llm_provider, FakeLLMProvider):
+                raise RuntimeError(
+                    "FakeLLMProvider is prohibited in non-test environment. Configure real AI provider."
+                )
+
         self.llm = llm_provider or FakeLLMProvider()
-        self.vector_store = FakeVectorStore()
-        self.embedding_provider = FakeEmbeddingProvider()
+        self.llm_provider = self.llm
+        self.vector_store = vector_store or (
+            retriever.vector_store if retriever else FakeVectorStore()
+        )
+        self.embedding_provider = embedding_provider or (
+            retriever.embedding_provider if retriever else FakeEmbeddingProvider()
+        )
         self.retriever = retriever or KnowledgeRetriever(self.embedding_provider, self.vector_store)
         self.memory = memory_provider or NativeMemoryProvider()
         self.graph = build_agent_graph(self.llm, self.retriever)
@@ -71,15 +96,31 @@ class AgentRuntime:
                     ai_run_id=existing_run.id,
                 )
 
+        # Resolve canonical user ID for durable memory isolation
+        canonical_user_id: str | None = (
+            str(context.user_id) if context.user_id is not None else None
+        )
+        if not canonical_user_id and context.sender_id:
+            stmt_user = select(User).where(
+                (User.signal_id == context.sender_id) | (User.signal_uuid == context.sender_id)
+            )
+            u_res = await session.execute(stmt_user)
+            u = u_res.scalar_one_or_none()
+            if u:
+                canonical_user_id = str(u.id)
+            else:
+                canonical_user_id = context.sender_id
+
         # 2. Extract durable memories from user turn (background task style)
-        if context.text and context.sender_id:
+        # P0 Invariant: Never auto-extract private personal memories from public group chatter
+        if not context.is_group and context.text and canonical_user_id:
             candidates = memory_extractor.extract_candidates(context.text)
             for c in candidates:
                 try:
                     await self.memory.add(
                         session=session,
                         scope_type="user",
-                        scope_id=context.sender_id,
+                        scope_id=canonical_user_id,
                         content=c.content,
                         memory_type=c.memory_type,
                         importance=c.importance,
@@ -88,19 +129,34 @@ class AgentRuntime:
                 except Exception as e:
                     logger.warning(f"Failed to auto-save memory candidate: {e}")
 
-        # 3. Retrieve relevant customer memory
-        user_memories: list[dict[str, Any]] = []
-        if context.sender_id:
-            mem_items = await self.memory.search(
-                session=session,
-                scope_type="user",
-                scope_id=context.sender_id,
-                query=context.text,
-                limit=3,
-            )
-            user_memories = [
-                {"id": m.id, "content": m.content, "type": m.memory_type} for m in mem_items
-            ]
+        # 3. Retrieve relevant memory
+        # P0 Invariant: Group chats MUST NEVER load private user memories.
+        # Groups only load group-scoped memories. DMs load user-scoped memories.
+        turn_memories: list[dict[str, Any]] = []
+        if context.is_group:
+            if context.group_id:
+                group_mems = await self.memory.search(
+                    session=session,
+                    scope_type="group",
+                    scope_id=str(context.group_id),
+                    query=context.text,
+                    limit=3,
+                )
+                turn_memories = [
+                    {"id": m.id, "content": m.content, "type": m.memory_type} for m in group_mems
+                ]
+        else:
+            if canonical_user_id:
+                user_mems = await self.memory.search(
+                    session=session,
+                    scope_type="user",
+                    scope_id=canonical_user_id,
+                    query=context.text,
+                    limit=3,
+                )
+                turn_memories = [
+                    {"id": m.id, "content": m.content, "type": m.memory_type} for m in user_mems
+                ]
 
         # 4. Prepare initial state
         initial_state: AgentState = {
@@ -113,7 +169,7 @@ class AgentRuntime:
             "text": context.text,
             "language": context.language,
             "mode": context.mode,
-            "memories": user_memories,
+            "memories": turn_memories,
             "retrieved_chunks": [],
             "selected_skills": [],
             "skill_instructions": [],
@@ -121,7 +177,7 @@ class AgentRuntime:
             "tool_results": [],
             "decision": AgentDecision.reply.value,
             "draft": None,
-            "confidence": 1.0,
+            "confidence": None,
             "citations": [],
             "tokens": 0,
             "error": None,
@@ -141,7 +197,7 @@ class AgentRuntime:
             output_state = {
                 "draft": "I am looking into this for you. A customer service representative will assist you shortly.",
                 "decision": AgentDecision.handoff.value,
-                "confidence": 0.5,
+                "confidence": None,
                 "tokens": 0,
                 "citations": [],
             }
@@ -151,7 +207,7 @@ class AgentRuntime:
             output_state = {
                 "draft": "Thank you for reaching out. An operator will be with you in a moment.",
                 "decision": AgentDecision.handoff.value,
-                "confidence": 0.5,
+                "confidence": None,
                 "tokens": 0,
                 "citations": [],
             }
@@ -164,55 +220,61 @@ class AgentRuntime:
         retrieved_chunks = output_state.get("retrieved_chunks") or []
         tool_calls = output_state.get("tool_calls") or []
 
+        model_name = getattr(self.llm_provider, "default_model", "default")
+        provider_name = getattr(self.llm_provider, "provider_name", "unknown")
+
         # 6. Record AIRun trace
         run_record = await local_tracer.record_run(
             session=session,
             trace_id=trace_id,
             conversation_id=context.conversation_id,
             input_message_id=context.message_id,
-            model="default",
-            provider="openai",
-            prompt_version="v1.0",
+            model=model_name,
+            provider=provider_name,
+            prompt_version="v0.4",
             skills_used=skills_used,
             retrieved_chunks=retrieved_chunks,
-            memories_used=user_memories,
+            memories_used=turn_memories,
             tool_calls=tool_calls,
             decision=decision,
-            confidence=output_state.get("confidence", 1.0),
+            confidence=output_state.get("confidence"),
             latency_ms=latency_ms,
             tokens=output_state.get("tokens", 0),
             errors=error_msg,
         )
+        run_id = run_record.id
 
         # 7. Copilot Draft Handling
-        sug: AISuggestion | None = None
+        sug_id: int | None = None
         if context.mode == "copilot" or decision == AgentDecision.draft_for_human.value:
             sug = AISuggestion(
                 conversation_id=context.conversation_id,
                 inbound_message_id=context.message_id,
-                ai_run_id=run_record.id,
+                ai_run_id=run_id,
                 suggested_text=answer,
                 status=AISuggestionStatus.pending.value,
                 metadata_json=json.dumps(
                     {
                         "citations": citations,
                         "skills_used": skills_used,
-                        "memories_used": user_memories,
+                        "memories_used": turn_memories,
                         "tools_called": tool_calls,
                     }
                 ),
             )
             session.add(sug)
             await session.commit()
+            await session.refresh(sug)
+            sug_id = sug.id
             logger.info(
-                f"Created Copilot AISuggestion #{sug.id} for conversation #{context.conversation_id}"
+                f"Created Copilot AISuggestion #{sug_id} for conversation #{context.conversation_id}"
             )
         elif context.mode == "auto" and decision == AgentDecision.reply.value:
             # In auto mode with direct reply, record suggestion as auto_sent
             sug = AISuggestion(
                 conversation_id=context.conversation_id,
                 inbound_message_id=context.message_id,
-                ai_run_id=run_record.id,
+                ai_run_id=run_id,
                 suggested_text=answer,
                 status=AISuggestionStatus.auto_sent.value,
                 metadata_json=json.dumps(
@@ -224,26 +286,25 @@ class AgentRuntime:
             )
             session.add(sug)
             await session.commit()
+            await session.refresh(sug)
+            sug_id = sug.id
 
         return AgentResponse(
             answer=answer,
             decision=decision,
-            confidence=output_state.get("confidence", 1.0),
-            model="default",
-            provider="openai",
-            prompt_version="v1.0",
+            confidence=output_state.get("confidence"),
+            model=model_name,
+            provider=provider_name,
+            prompt_version="v0.4",
             skills_used=skills_used,
-            memories_used=user_memories,
+            memories_used=turn_memories,
             knowledge_chunks=retrieved_chunks,
             tools_called=tool_calls,
             citations=citations,
             latency_ms=latency_ms,
             tokens=output_state.get("tokens", 0),
             trace_id=trace_id,
-            ai_run_id=run_record.id,
-            ai_suggestion_id=sug.id if sug else None,
+            ai_run_id=run_id,
+            ai_suggestion_id=sug_id,
             error=error_msg,
         )
-
-
-agent_runtime = AgentRuntime()

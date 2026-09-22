@@ -14,6 +14,9 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # ---- Environment ----
+    environment: str = "development"
+
     # ---- Signal API Gateway ----
     signal_api_url: str = ""
     signal_api_token: str = ""

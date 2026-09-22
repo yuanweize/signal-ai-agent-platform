@@ -51,8 +51,57 @@ class MCPClientManager:
 
         logger.info(f"Connecting to MCP server '{name}' via {transport}...")
 
+        ctx = None
+        session = None
+        tools: list[DiscoveredMCPTool] = []
+
+        # 2. Real MCP SDK connection for stdio transport
+        if transport == "stdio" and name != "mock_warehouse_mcp":
+            from mcp import ClientSession
+            from mcp.client.stdio import StdioServerParameters, stdio_client
+
+            params = StdioServerParameters(
+                command=command_or_url,
+                args=args or [],
+                env=env or None,
+            )
+            ctx = stdio_client(params)
+            read_stream, write_stream = await ctx.__aenter__()
+            session = ClientSession(read_stream, write_stream)
+            await session.__aenter__()
+            await session.initialize()
+
+            sdk_tools = await session.list_tools()
+            for t in sdk_tools.tools:
+                schema = t.inputSchema if hasattr(t, "inputSchema") and t.inputSchema else {}
+                # Governance: default deny write. Detect sensitive keywords requiring human approval
+                is_write = any(
+                    w in t.name.lower()
+                    for w in [
+                        "dispatch",
+                        "write",
+                        "delete",
+                        "refund",
+                        "cancel",
+                        "create",
+                        "ship",
+                        "modify",
+                        "update",
+                    ]
+                )
+                tools.append(
+                    DiscoveredMCPTool(
+                        name=t.name,
+                        description=t.description or f"MCP tool {t.name}",
+                        parameters_schema=schema,
+                        server_name=name,
+                        read_only=not is_write,
+                        requires_approval=is_write,
+                    )
+                )
+
         # In testing or mock scenarios, provide known mock tools
-        if name == "mock_warehouse_mcp":
+        elif name == "mock_warehouse_mcp":
             tools = [
                 DiscoveredMCPTool(
                     name="warehouse_check_inventory",
@@ -80,14 +129,23 @@ class MCPClientManager:
                 ),
             ]
         else:
-            # Placeholder for standard MCP discovery (SDK client integration)
             tools = []
 
         # Register discovered tools with ToolRegistry
         for t in tools:
-            # Create invocation closure
-            def make_handler(tool_name: str, is_approval_req: bool):
+            # Create invocation closure bound to real session if available
+            def make_handler(tool_name: str, active_session: Any | None):
                 async def handler(**kwargs):
+                    if active_session:
+                        res = await active_session.call_tool(tool_name, arguments=kwargs)
+                        text_blocks = [c.text for c in (res.content or []) if hasattr(c, "text")]
+                        result_str = text_blocks[0] if len(text_blocks) == 1 else text_blocks
+                        return {
+                            "mcp_server": name,
+                            "tool": tool_name,
+                            "result": result_str,
+                            "status": "success",
+                        }
                     return {
                         "mcp_server": name,
                         "tool": tool_name,
@@ -100,7 +158,7 @@ class MCPClientManager:
             tool_registry.register(
                 name=t.name,
                 description=t.description,
-                func=make_handler(t.name, t.requires_approval),
+                func=make_handler(t.name, session),
                 permission=ToolPermission(
                     name=t.name,
                     description=t.description,
@@ -118,18 +176,37 @@ class MCPClientManager:
             "transport": transport,
             "command_or_url": command_or_url,
             "tools_count": len(tools),
+            "session": session,
+            "ctx": ctx,
         }
         return tools
 
-    def disconnect_server(self, name: str) -> bool:
+    async def disconnect_server(self, name: str) -> bool:
         if name in self._active_servers:
-            del self._active_servers[name]
+            server_info = self._active_servers.pop(name)
+            session = server_info.get("session")
+            ctx = server_info.get("ctx")
+            try:
+                if session:
+                    await session.__aexit__(None, None, None)
+                if ctx:
+                    await ctx.__aexit__(None, None, None)
+            except Exception as e:
+                logger.warning(f"Error cleanly closing MCP server {name}: {e}")
             logger.info(f"Disconnected MCP server: {name}")
             return True
         return False
 
     def list_servers(self) -> list[dict[str, Any]]:
-        return list(self._active_servers.values())
+        return [
+            {
+                "name": s["name"],
+                "transport": s["transport"],
+                "command_or_url": s["command_or_url"],
+                "tools_count": s["tools_count"],
+            }
+            for s in self._active_servers.values()
+        ]
 
 
 mcp_manager = MCPClientManager()

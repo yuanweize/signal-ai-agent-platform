@@ -113,12 +113,18 @@ class ToolRegistry:
         try:
             func = tool.func
             sig = inspect.signature(func)
-            kwargs = {}
-            for param in sig.parameters.values():
-                if param.name in arguments:
-                    kwargs[param.name] = arguments[param.name]
-                elif param.name in extra_kwargs:
-                    kwargs[param.name] = extra_kwargs[param.name]
+            has_var_keyword = any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+            )
+            if has_var_keyword:
+                kwargs = {**arguments, **extra_kwargs}
+            else:
+                kwargs = {}
+                for param in sig.parameters.values():
+                    if param.name in arguments:
+                        kwargs[param.name] = arguments[param.name]
+                    elif param.name in extra_kwargs:
+                        kwargs[param.name] = extra_kwargs[param.name]
 
             if inspect.iscoroutinefunction(func):
                 result = await func(**kwargs)

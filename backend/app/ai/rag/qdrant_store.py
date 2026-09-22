@@ -5,6 +5,7 @@ Qdrant Vector Store implementation.
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Any
 
 from qdrant_client import AsyncQdrantClient
@@ -13,6 +14,16 @@ from qdrant_client.http import models as qmodels
 from app.ai.rag.vector_store import VectorSearchResult
 
 logger = logging.getLogger("ai.rag.qdrant")
+
+
+def to_qdrant_id(raw_id: str | int) -> str | int:
+    """Convert any string or integer ID to a valid Qdrant point ID (UUID or int)."""
+    if isinstance(raw_id, int):
+        return raw_id
+    try:
+        return str(uuid.UUID(str(raw_id)))
+    except ValueError:
+        return str(uuid.uuid5(uuid.NAMESPACE_DNS, str(raw_id)))
 
 
 class QdrantVectorStore:
@@ -24,21 +35,27 @@ class QdrantVectorStore:
         api_key: str | None = None,
         dimension: int = 1536,
         timeout: float = 10.0,
+        location: str | None = None,
+        client: AsyncQdrantClient | None = None,
     ) -> None:
         self.url = url
         self.api_key = api_key
         self.dimension = dimension
         self.timeout = timeout
-        self._client: AsyncQdrantClient | None = None
+        self.location = location
+        self._client: AsyncQdrantClient | None = client
         self._initialized_collections: set[str] = set()
 
     def _get_client(self) -> AsyncQdrantClient:
         if self._client is None:
-            self._client = AsyncQdrantClient(
-                url=self.url,
-                api_key=self.api_key,
-                timeout=self.timeout,
-            )
+            if self.location:
+                self._client = AsyncQdrantClient(location=self.location)
+            else:
+                self._client = AsyncQdrantClient(
+                    url=self.url,
+                    api_key=self.api_key,
+                    timeout=self.timeout,
+                )
         return self._client
 
     async def _ensure_collection(self, collection: str, vector_size: int) -> None:
@@ -74,9 +91,9 @@ class QdrantVectorStore:
 
         q_points = [
             qmodels.PointStruct(
-                id=p["id"],
+                id=to_qdrant_id(p["id"]),
                 vector=p["vector"],
-                payload=p.get("payload", {}),
+                payload={**p.get("payload", {}), "original_id": str(p["id"])},
             )
             for p in points
         ]
@@ -122,19 +139,20 @@ class QdrantVectorStore:
                 q_filter = qmodels.Filter(must=must_conditions)
 
         try:
-            results = await client.search(
+            response = await client.query_points(
                 collection_name=collection,
-                query_vector=query_vector,
+                query=query_vector,
                 limit=limit,
                 query_filter=q_filter,
+                with_payload=True,
             )
             return [
                 VectorSearchResult(
-                    id=str(r.id),
+                    id=str(r.payload.get("original_id", r.id)),
                     score=float(r.score),
                     payload=r.payload or {},
                 )
-                for r in results
+                for r in response.points
             ]
         except Exception as e:
             logger.error(f"Qdrant search error: {e}")
@@ -146,10 +164,11 @@ class QdrantVectorStore:
         ids: list[str],
     ) -> bool:
         client = self._get_client()
+        q_ids = [to_qdrant_id(i) for i in ids]
         try:
             await client.delete(
                 collection_name=collection,
-                points_selector=qmodels.PointIdsList(points=ids),
+                points_selector=qmodels.PointIdsList(points=q_ids),
             )
             return True
         except Exception as e:

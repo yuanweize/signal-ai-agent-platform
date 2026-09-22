@@ -121,19 +121,36 @@ def build_agent_graph(
             results.append({"tool": tool_name, "output": res})
 
         if "refund" in text:
-            # Sensitive tool requiring approval test
-            calls.append(
-                {
-                    "name": "trigger_sample_refund",
-                    "arguments": {"order_id": 1, "amount": 25.0, "reason": "damaged"},
+            # Sensitive financial action: extract validated parameters from text instead of hardcoding dummy values
+            import re
+
+            order_m = re.search(r"order\s*#?\s*(\d+)", text)
+            amount_m = re.search(r"\$?\s*(\d+(?:\.\d+)?)\s*(?:usd|eur|czk|\$)?", text)
+
+            if order_m and amount_m:
+                refund_args = {
+                    "order_id": int(order_m.group(1)),
+                    "amount": float(amount_m.group(1)),
+                    "reason": "customer_request",
                 }
-            )
-            res = await tool_registry.execute(
-                "trigger_sample_refund",
-                {"order_id": 1, "amount": 25.0, "reason": "damaged"},
-                user_approved=False,
-            )
-            results.append({"tool": "trigger_sample_refund", "output": res})
+                calls.append({"name": "trigger_sample_refund", "arguments": refund_args})
+                res = await tool_registry.execute(
+                    "trigger_sample_refund",
+                    refund_args,
+                    user_approved=False,
+                )
+                results.append({"tool": "trigger_sample_refund", "output": res})
+            else:
+                calls.append({"name": "trigger_sample_refund", "arguments": {}})
+                results.append(
+                    {
+                        "tool": "trigger_sample_refund",
+                        "output": {
+                            "status": "requires_approval",
+                            "error": "Missing validated order_id and amount for refund action.",
+                        },
+                    }
+                )
 
         return {
             "tool_calls": calls,
@@ -149,11 +166,14 @@ def build_agent_graph(
             r.get("output", {}).get("status") == "requires_approval" for r in tool_results
         )
 
-        if "human" in text or "agent" in text or "representative" in text:
+        if "human-handoff" in (state.get("selected_skills") or []) or any(
+            w in text for w in ["human", "agent", "representative", "manager", "person", "staff"]
+        ):
             return {
                 "draft": "I understand you would like to speak to a representative. I am notifying our support team now.",
                 "decision": AgentDecision.handoff.value,
-                "confidence": 0.99,
+                "decision_reason": "user_requested_human",
+                "confidence": None,
                 "tokens": 25,
             }
 
@@ -196,21 +216,26 @@ def build_agent_graph(
 
         reply, tokens = await llm.generate(messages)
 
-        # 3. Determine decision
+        # 3. Determine decision & reason
         mode = state.get("mode", "auto")
-        if requires_approval or any(
-            s in (state.get("selected_skills") or []) for s in ["complaints", "complaint"]
-        ):
+        if requires_approval:
             decision = AgentDecision.draft_for_human.value
+            decision_reason = "tool_requires_approval"
+        elif any(s in (state.get("selected_skills") or []) for s in ["complaints", "complaint"]):
+            decision = AgentDecision.draft_for_human.value
+            decision_reason = "complaint_escalation"
         elif mode == "copilot":
             decision = AgentDecision.draft_for_human.value
+            decision_reason = "copilot_mode"
         else:
             decision = AgentDecision.reply.value
+            decision_reason = "autonomous_reply"
 
         return {
             "draft": reply,
             "decision": decision,
-            "confidence": 0.92,
+            "decision_reason": decision_reason,
+            "confidence": None,
             "tokens": tokens,
         }
 

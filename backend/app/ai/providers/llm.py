@@ -50,6 +50,7 @@ class OpenAICompatibleProvider:
         self.base_url = (base_url or "").strip().rstrip("/")
         self.api_key = api_key or "__NO_KEY__"
         self.default_model = default_model
+        self.provider_name = "openai_compatible"
         self.timeout = timeout
         self._client: AsyncOpenAI | None = None
 
@@ -125,6 +126,8 @@ class FakeLLMProvider:
 
     def __init__(self, fixed_reply: str | None = None) -> None:
         self.fixed_reply = fixed_reply
+        self.default_model = "fake-eval-v1"
+        self.provider_name = "fake"
         self.invocations: list[dict[str, Any]] = []
 
     async def generate(

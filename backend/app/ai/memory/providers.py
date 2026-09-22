@@ -113,7 +113,9 @@ class NativeMemoryProvider:
         return item
 
     async def delete(self, session: AsyncSession, memory_id: int) -> bool:
-        await session.execute(delete(MemoryItem).where(MemoryItem.id == memory_id))
+        res = await session.execute(delete(MemoryItem).where(MemoryItem.id == memory_id))
         await session.commit()
-        logger.info(f"Purged memory item #{memory_id}")
-        return True
+        if res.rowcount > 0:
+            logger.info(f"Purged memory item #{memory_id}")
+            return True
+        return False

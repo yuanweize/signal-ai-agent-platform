@@ -47,6 +47,7 @@ class KnowledgeRetriever:
         vector_store: VectorStore,
     ) -> None:
         self.embeddings = embedding_provider
+        self.embedding_provider = embedding_provider
         self.vector_store = vector_store
 
     async def retrieve(
@@ -90,13 +91,17 @@ class KnowledgeRetriever:
 
             # P0: Strict Scope Isolation
             if scope_type == "global":
-                pass  # Permitted
+                pass  # Permitted in all contexts
             elif scope_type == "group":
                 if not is_group or not group_id or str(scope_id) != str(group_id):
-                    continue  # Leakage prevention
+                    continue  # Leakage prevention: groups can only access their own group scope
             elif scope_type == "user":
+                if is_group:
+                    # P0 Invariant: Group chats MUST NEVER access private user scope data,
+                    # even if the sender is the author of the note.
+                    continue
                 if not user_str or str(scope_id) != user_str:
-                    continue  # Leakage prevention
+                    continue  # Leakage prevention: DMs can only access their own user scope
             else:
                 continue
 

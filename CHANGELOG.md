@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### AI Customer Service Platform (v0.4 Release Candidate)
+
+#### Highlights
+- **Unified AgentRuntime**: Unified both Auto and Copilot modes on a single LangGraph-based `AgentRuntime` engine.
+- **Production Runtime Factory**: Eliminates silent fallback to fake providers in production; instantiates live OpenAI-compatible LLM/Embedding adapters and Qdrant vector store.
+- **Strict Group Privacy Invariant (P0)**: Group chat conversations are strictly forbidden from retrieving private user documents or loading private user memories.
+- **Qdrant Vector Database Integration**: Native vector storage with point UUID mapping, `query_points` search, and full relational-to-vector reindexing (`/api/ai-studio/knowledge/reindex`).
+- **Official Model Context Protocol (MCP) SDK Integration**: Dynamic discovery and execution of external tools over stdio sessions using the official Python `mcp` SDK.
+- **Human-in-the-Loop Copilot**: Inbound messages in copilot mode generate pending `AISuggestion` drafts linked to underlying `AIRun` traces for human operator review and provenance tracking.
+- **Deterministic Agent Contract Evaluation**: 32-case deterministic evaluation suite covering prompt injection, human handoff, refund approval gates, multi-language support, and privacy boundaries with 100% accuracy in CI.
+- **No Hardcoded Metrics**: Dynamic RAG hit rate calculation from persisted `AIRun` records and real-time observability diagnostics endpoint (`GET /api/ai-studio/diagnostics`).
+- **Linear Alembic Revision Chain**: Single linear migration chain from `<base>` to `e1f2a3b4c5d6` (head).
+
+#### Security & Privacy Hardening
+- Reject user-scoped knowledge retrieval when `is_group=True`.
+- Disable loading individual user memories in group contexts.
+- Enforce canonical user identity mapping across telephone numbers and Signal UUIDs.
+- Bound financial or destructive tool actions (e.g. refunds) behind administrative approval gates.
+- Tag retrieved knowledge chunks as untrusted data context to mitigate prompt injection.
+
+---
+
 ## [v0.3.0] - 2026-09-21
 
 ### Highlights

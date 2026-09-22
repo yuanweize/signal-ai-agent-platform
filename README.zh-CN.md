@@ -2,7 +2,7 @@
 
 # 🤖 Signal Market Bot
 
-### 面向 Signal 生态的生产级智能客服与对话式电商中台
+### 面向 Signal 生态的智能客服与对话式电商自动化中台
 
 [![Release](https://img.shields.io/github/v/release/yuanweize/signal-market-bot?color=7c3aed&label=Release)](https://github.com/yuanweize/signal-market-bot/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/yuanweize/signal-market-bot/ci.yml?branch=main&label=CI)](https://github.com/yuanweize/signal-market-bot/actions)
@@ -11,7 +11,7 @@
 [![React](https://img.shields.io/badge/React-18%20%2B%20Vite-61DAFB?logo=react&logoColor=black)](frontend/package.json)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-[English](README.md) • [简体中文](README.zh-CN.md) • [系统架构文档](docs/ARCHITECTURE_CURRENT.md) • [更新日志](CHANGELOG.md)
+[English](README.md) • [简体中文](README.zh-CN.md) • [系统架构文档](docs/ARCHITECTURE.md) • [更新日志](CHANGELOG.md)
 
 </div>
 
@@ -31,49 +31,67 @@
 
 ## 🌟 项目概述
 
-**Signal Market Bot** 是一套专为 Signal 通信场景打造的高性能、企业级对话电商与智能客户支持中台。系统将端到端 Signal 安全即时通讯与现代大语言模型（LLM）、实时人工客服接管、商品目录库及合规社群自动化群发能力深度结合。
+**Signal Market Bot** 是一套专为 Signal 通信生态打造的智能客户支持与对话电商自动化中台。系统将端到端加密的 Signal 即时通讯与现代大语言模型（LLM）智能体、实时人工客服接管、商品目录库及合规社群自动化群发能力深度结合。
 
-系统基于高并发异步 **FastAPI** 后端与现代化 **React + Tailwind + DaisyUI** 前端控制台构建，彻底废弃了繁琐且易出错的 `.env` 环境变量配置方式，提供完全基于数据库持久化与金融级加密的后台运行时配置界面，开箱即用。
+在 **v0.4 AI 平台升级** 中，系统引入了基于 **LangGraph** 的生产级智能体运行时，具备 **Copilot 人机协同（带消息溯源）**、**渐进式技能加载**、**基于 Qdrant 的多范围隔离 RAG 检索**、**规范身份持久化记忆**、**官方 MCP SDK 工具治理** 以及 **Human-in-the-Loop 持续学习闭环**。
 
 ---
 
 ## 🚀 核心特性
 
-### 🧠 全能插拔式 AI 大模型中台
-- **通用协议兼容**：无缝对接 OpenAI、DeepSeek、Ollama、vLLM、LocalAI、Azure OpenAI 及任何兼容 OpenAI 协议的自建模型网关。
-- **动态上下文注入**：自动将最新商品库存、上下文历史会话以及业务提示词精准注入 Prompt。
-- **群聊环境智能感知**：群聊场景下精准标记发言人身份与昵称，智能过滤重复消息，提供自然拟人化的回复交互。
+### 🤖 AI 智能体平台 (v0.4)
+- **LangGraph 状态图工作流**：基于有向状态图执行渐进式技能匹配、多范围 RAG 检索、工具鉴权、事实依据生成与决策分类（`reply`、`draft_for_human`、`handoff`、`no_reply`）。
+- **生产运行时工厂（杜绝假实现）**：生产环境下严格禁止静默回退到 Fake 模拟器，必须连接真实的 OpenAI 兼容大模型/向量嵌入接口以及 Qdrant 向量数据库，否则明确抛出异常并降级。
+- **严格群组隐私隔离（P0 不变量）**：群聊上下文严格禁止检索或向 Prompt 注入任何用户的私聊笔记或个人记忆，杜绝群聊越权泄露私密数据。
+- **客服收件箱 Copilot 协同**：为人工坐席提供实时回复草稿，支持一键“采纳发送”、“在编辑器中修改”、“放弃草稿”，并通过“证据抽屉”查看引用的知识源切片、记忆条目与工具调用。
+- **消息溯源全链路追踪**：严格标记消息来源（`customer`、`ai_auto`、`human_ai_assisted`、`human_manual`、`system`、`campaign`）并关联底层的 `ai_run_id` 执行追踪。
+- **多范围隔离 RAG 知识库**：采用 Qdrant 向量数据库，支持确定性 UUID 映射、稠密向量检索以及从关系型数据库全量重建向量索引（`POST /api/ai-studio/knowledge/reindex`）。
+- **规范身份持久化记忆**：提取并沉淀客户长期偏好与事实，严格绑定规范用户身份（手机号与 Signal UUID 归一到同一命名空间），支持单条安全删除。
+- **受控工具与官方 MCP SDK 集成**：使用官方 Python `mcp` SDK 实现 stdio 客户端会话与工具动态发现；敏感/写操作（如退款）强制触发主管审核草稿（`draft_for_human`），禁止模型擅自执行。
+- **持续学习闭环**：捕获人工坐席对 AI 草稿的修改，自动聚合并推荐高质量知识候选，支持一键沉淀为标准 FAQ 或导出微调 JSONL 数据集。
+- **确定性契约评测套件**：内置 32 项确定性契约测试案例（`python evals/run_evals.py`），覆盖 Prompt 注入防御、人工转接、退款审批、跨语言支持与隐私隔离边界，CI 准确率保持 100%。
 
-### 📥 现代客服收件箱与竞态消除接管
-- **双栏直观客服控制台**：全量会话可视化视图，支持未读计数徽标、全局会话检索与多维筛选（单聊 / 群聊 / 未读）。
-- **并发安全的人工接管**：支持在 **Auto（AI自动回复）**、**Manual（人工接管）** 与 **Paused（会话静音）** 之间即时热切换；内置消息出站前会话状态二次校验机制，若客服在模型生成期间介入，AI 消息将自动安全废弃，防止机器人与人工争抢回复。
-- **投递状态机全链路追踪**：每条出站消息具备完整状态流转（`received` / `pending` -> `sent` / `failed` -> `delivered` -> `read`），网络抖动失败时提供一键重新发送机制。
-- **富媒体与表情互动**：完整解析并持久化 Signal 附件与 Emoji Reaction 事件并在时间线中渲染。
+### 📥 现代客服收件箱与接管
+- **双栏客服控制台**：全量会话可视化视图，支持未读计数徽标、全局会话检索与多维筛选（单聊 / 群聊 / 未读）。
+- **4 态无竞态接管引擎**：支持在 **Auto（AI自动回复）**、**Copilot（人机协同草稿）**、**Manual（纯人工接管）** 与 **Paused（会话静音）** 之间即时切换；在消息出站前进行严格并发校验，人工介入时自动废弃 AI 消息。
+- **投递状态机全链路追踪**：每条出站消息具备完整状态流转（`received` / `pending` -> `sent` / `failed` -> `delivered` -> `read`），网络抖动失败时提供一键重发。
+- **富媒体与表情互动**：完整解析并持久化 Signal 附件与 Emoji Reaction 事件并在会话时间线中渲染。
 
 ### ⚡ 弹性消息摄取与分发流水线
-- **背压控制有界队列**：内存事件管道采用固定容量缓冲队列（`maxsize=1000`），无惧瞬时高并发流量冲击。
-- **并发多协程工作池**：异步多线程/协程消费，采用会话级别（Conversation Partition）并发锁，在保证不同聊天相互隔离的同时，绝对确保同一会话消息的严格时序。
+- **背压控制有界队列**：内存事件管道采用固定容量缓冲队列（`maxsize=1000`），防止瞬时流量激增导致内存溢出。
+- **并发多工作池与分区保序**：异步工作池采用会话级并发锁（Conversation Partition Locking），确保不同会话并发隔离的同时，严格保持单会话消息时序。
 - **双重可靠去重**：LRU 高速内存去重过滤配合数据库唯一约束，无惧网关重连与重复推送。
 
-### 👥 用户身份归一与群组成员同步
-- **用户身份统一解析**：将用户手机号（E.164）与 Signal UUID 映射到唯一的物理用户实体，确保跨场景资产与记录归一。
-- **群组成员与权限花名册**：自动抓取并维护群成员列表、管理员权限与入群退群动态。
-
-### 📢 精准社群广播与安全风控
+### 📢 精准社群广播与风控
 - **批量群发投放**：一键面向多个目标 Signal 群组推送营销活动与通知公告。
-- **合规风控策略**：内置静音时段保护、群组黑名单屏蔽与免发真实消息的安全演练（Dry-Run）预览模式。
+- **合规风控策略**：内置静音时段保护、群组黑名单屏蔽与零风险安全演练（Dry-Run）预览模式。
 
-### 🔒 银行级安全与免 .env 运营
-- **首次部署安全初始化**：首次启动提供向导式管理员配置，采用高强度 scrypt 算法密码哈希与可选 TOTP 双因子动态口令（2FA）。
+### 🔒 运营安全与免 .env 配置
+- **首次部署安全初始化**：首次启动提供向导式管理员配置，采用 scrypt 算法密码哈希与可选 TOTP 双因子动态口令（2FA）。
 - **加密运行时配置**：所有外部网关凭证、大模型密钥及敏感配置均通过前端管理后台维护，存储于加密数据库中，配置即时热重载。
 - **审计追踪体系**：关键管理操作、权限变更与接管记录均全量持久化为安全审计日志。
+
+---
+
+## 📚 技术文档
+
+- 🏛️ [系统架构与数据流转](docs/ARCHITECTURE.md)
+- 🤖 [AI 平台子系统与运行时工厂](docs/AI_PLATFORM.md)
+- 🔒 [安全规范与隐私隔离不变量](docs/SECURITY_PRIVACY.md)
+- 📊 [功能现状与真实性矩阵](docs/CAPABILITIES.md)
+- 🧪 [自动化测试矩阵与验证报告](docs/TESTING.md)
+- 🗺️ [产品演进路线图](docs/ROADMAP.md)
+- 🔄 [数据库迁移指南 (Alembic)](docs/MIGRATION.md)
+- 🔌 [Signal 网关 API 契约与 Webhooks](docs/SIGNAL_API_CONTRACT.md)
+- 📱 [Signal 真实环境验证指南](docs/REAL_SIGNAL_VALIDATION.md)
+- 🔍 [v0.4 真实性审计报告](docs/V04_REALITY_AUDIT.md)
 
 ---
 
 ## 🏗️ 架构拓扑
 
 ```mermaid
-graph TD
+flowchart TD
     subgraph 外部网关
         SG[Signal-CLI REST API 网关]
     end
@@ -85,70 +103,38 @@ graph TD
         OMS[出站投递服务]
     end
 
-    subgraph 智能与数据存储
-        AI[OpenAI 兼容 LLM 大模型]
-        DB[(SQLite WAL 数据库)]
+    subgraph AI 智能体运行时
+        AR[AgentRuntime 工厂]
+        LG[LangGraph 状态图]
+        RAG[Qdrant 隔离 RAG]
+        MEM[规范用户持久化记忆]
+        MCP[官方 MCP 工具网关]
     end
 
-    subgraph 管理后台交互
-        UI[React 18 管理控制台]
-        API[FastAPI 异步业务网关]
+    subgraph 数据存储
+        DB[(SQLite / PostgreSQL 数据库)]
+        QD[(Qdrant 向量数据库)]
     end
 
-    SG -- WebSocket / 轮询 --> EV
+    SG -->|Webhook| EV
     EV --> WQ
     WQ --> PL
-    PL --> AI
-    PL --> DB
-    AI --> OMS
-    OMS -- REST 调度 --> SG
-    API <--> DB
-    UI <--> API
-    API --> OMS
+    PL --> AR
+    AR --> LG
+    LG --> RAG
+    LG --> MEM
+    LG --> MCP
+    RAG --> QD
+    MEM --> DB
+
+    LG -->|决策: 发送| OMS
+    LG -->|决策: 草稿| DB
+    OMS --> SG
 ```
 
 ---
 
-## 🏁 快速上手
-
-### 环境准备
-- [Docker](https://docs.docker.com/get-docker/) 与 [Docker Compose](https://docs.docker.com/compose/)
-- 一个可用的 Signal 账号以及运行中的 [signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api)
-
-### 1. 使用 Docker Compose 一键启动
-
-```bash
-git clone https://github.com/yuanweize/signal-market-bot.git
-cd signal-market-bot
-
-# 拉取官方最新预构建镜像并启动
-docker compose pull
-docker compose up -d
-
-# 执行数据库初始版本迁移
-docker compose exec backend alembic upgrade head
-```
-
-### 2. 访问服务控制台
-
-| 服务入口 | 地址 | 说明 |
-|---|---|---|
-| **管理后台** | [http://localhost:3000](http://localhost:3000) | 现代化 Web 运维与客服操作端 |
-| **核心 API 服务** | [http://localhost:8000](http://localhost:8000) | 异步主网关端口 |
-| **交互式 API 文档** | [http://localhost:8000/docs](http://localhost:8000/docs) | OpenAPI Swagger 接口测试平台 |
-| **存活健康探针** | [http://localhost:8000/health/live](http://localhost:8000/health/live) | 容器生命周期健康检查 |
-| **就绪就绪探针** | [http://localhost:8000/health/ready](http://localhost:8000/health/ready) | 数据库连接与迁移状态就绪检查 |
-
-### 3. 首次部署安全向导
-
-1. 浏览器打开 [http://localhost:3000/login](http://localhost:3000/login)。
-2. 系统自动识别首次运行状态，引导设置初始管理员用户名及高强度密码。
-3. 可选绑定 TOTP 双因子动态令牌（如 Google Authenticator、1Password）。
-4. 登录后进入 **Settings** 页面，配置您的 Signal Gateway 链接与 AI 引擎参数即可投入运营。
-
----
-
-## 🛠️ 本地开发环境
+## 🛠️ 本地开发指南
 
 ### 后端开发
 
@@ -159,15 +145,18 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 
-# 安装开发依赖
+# 可编辑模式安装依赖
 pip install -e ".[dev]"
 
-# 运行后端自动化单元测试与代码检查
+# 运行单元/集成测试与代码检查
 pytest tests/ -v
-ruff check app tests
-ruff format --check app tests
+ruff check app tests evals
+ruff format --check app tests evals
 
-# 启动本地热重载调试服务
+# 运行 32 项确定性智能体契约评测套件
+python evals/run_evals.py
+
+# 启动开发服务器
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -176,57 +165,38 @@ uvicorn app.main:app --reload --port 8000
 ```bash
 cd frontend
 
-# 安装依赖
-npm install
+# 安装 Node 依赖
+npm ci
 
-# 运行前端组件单元测试与语法检查
+# 运行组件测试与代码检查
 npm test
 npm run lint
 npx tsc --noEmit
+npm run build
 
-# 启动开发服务器
+# 启动 Vite 本地开发热重载服务器
 npm run dev
 ```
 
 ---
 
-## 📊 技术栈与架构指标
+## 📊 技术规格
 
-| 分层 | 技术选型 |
+| 分层 | 关键技术选型 |
 |---|---|
-| **后端框架** | [FastAPI](https://fastapi.tiangolo.com/) 0.115+ (Python 3.11+ 异步并发架构) |
-| **数据库与持久层** | [SQLAlchemy](https://www.sqlalchemy.org/) 2.0 (AsyncIO) + [aiosqlite](https://github.com/omnilib/aiosqlite) + [Alembic](https://alembic.sqlalchemy.org/) 科学迁移系统 |
-| **前端技术栈** | [React](https://react.dev/) 18 + [Vite](https://vitejs.dev/) + [TypeScript](https://www.typescriptlang.org/) |
-| **样式与组件库** | [Tailwind CSS](https://tailwindcss.com/) + [DaisyUI](https://daisyui.com/) (无缝自适应桌面与移动端) |
-| **身份安全机制** | Scrypt 强密钥派生 + [PyOTP](https://github.com/pyauth/pyotp) (2FA 动态认证) + [python-jose](https://github.com/mpdavis/python-jose) (JWT 令牌) |
-| **工程质量门禁** | [pytest](https://docs.pytest.org/) (54 项全量用例) + [Vitest](https://vitest.dev/) (14 项组件测试) + [Ruff](https://astral.sh/ruff) + [ESLint](https://eslint.org/) |
-| **容器化与部署** | Docker Multi-stage 多阶段构建 + GitHub Container Registry 持续发布 |
-
----
-
-## 📚 详细技术文档
-
-如需了解完整的工程架构设计、领域模型细节及迁移指南，请参阅：
-
-- 🏛️ [系统架构与数据流转拓扑](docs/ARCHITECTURE_CURRENT.md)
-- 🔌 [Signal Gateway 接口契约与事件模型](docs/SIGNAL_API_CONTRACT.md)
-- 🔄 [数据库 Schema 设计与平滑迁移手册](docs/MIGRATION.md)
-- 🧪 [自动化测试矩阵与质量门禁规范](docs/TEST_MATRIX.md)
-- 📱 [Signal 外部真实环境联调手册](docs/REAL_SIGNAL_VALIDATION.md)
-- 🗺️ [演进目标架构路线图](docs/ARCHITECTURE_TARGET.md)
-
----
-
-## 🗺️ 产品迭代路线
-
-- [x] **v0.3.0**: 消息管道重构、多重身份归一、群组成员管理与现代化响应式客服收件箱。
-- [ ] **v0.4.0**: 全双工 Server-Sent Events (SSE) / WebSocket 实时消息下发（替代轮询）。
-- [ ] **v0.5.0**: 多模态媒体支持（音频语音消息直接转写、图片预览与本地缓存加速）。
-- [ ] **v0.6.0**: 内置自动化订单结算全链路（集成 Stripe 与加密货币网关）。
-- [ ] **v0.7.0**: 多客服协同冲突防碰撞与全局已读光标同步。
+| **后端框架** | [FastAPI](https://fastapi.tiangolo.com/) 0.115+ (异步 Python 3.11+) |
+| **智能体编排** | [LangGraph](https://github.com/langchain-ai/langgraph) + StateGraph + 渐进式技能系统 |
+| **向量数据库** | [Qdrant](https://qdrant.tech/) 官方 `qdrant-client` 1.10+ (`query_points`) |
+| **工具协议** | 官方 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) Python SDK 2.x |
+| **ORM 与数据持久化** | [SQLAlchemy](https://www.sqlalchemy.org/) 2.0 (AsyncIO) + [aiosqlite](https://github.com/omnilib/aiosqlite) + [Alembic](https://alembic.sqlalchemy.org/) 线性迁移 |
+| **前端技术栈** | [React](https://react.dev/) 18 + [Vite](https://vitejs.dev/) + [TypeScript](https://www.typescriptlang.org/) + [React Router](https://reactrouter.com/) 7.18+ |
+| **UI 样式体系** | [Tailwind CSS](https://tailwindcss.com/) + [DaisyUI](https://daisyui.com/) |
+| **安全与认证** | Scrypt KDF 密码哈希 + [PyOTP](https://github.com/pyauth/pyotp) (TOTP 2FA) + [python-jose](https://github.com/mpdavis/python-jose) (JWT) |
+| **测试与质量网关** | [pytest](https://docs.pytest.org/) (73 项后端测试) + [Vitest](https://vitest.dev/) (18 项前端测试) + 32 项确定性契约测试 |
+| **容器化交付** | Docker 多阶段构建 + Docker Compose + GitHub Container Registry (GHCR) |
 
 ---
 
 ## 📄 开源许可证
 
-本项目采用 [MIT License](LICENSE) 开源许可证。
+本项目基于 [MIT License](LICENSE) 协议开源。

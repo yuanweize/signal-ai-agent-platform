@@ -58,10 +58,15 @@ class MessageHandler:
 
     def __init__(self) -> None:
         self._ai_engine = None
+        self._agent_runtime = None
 
     def set_ai_engine(self, engine) -> None:
-        """Inject AI engine (called during startup)."""
+        """Inject AI engine (called during startup or legacy tests)."""
         self._ai_engine = engine
+
+    def set_agent_runtime(self, runtime) -> None:
+        """Inject AgentRuntime (for testing or runtime override)."""
+        self._agent_runtime = runtime
 
     async def handle_message(self, incoming: SignalIncomingMessage) -> None:
         """Alias for handle."""
@@ -265,42 +270,112 @@ class MessageHandler:
                     logger.info(f"⏸ Conversation #{conversation.id} paused — auto-reply suppressed")
                     return
 
+                # 7. Unified AI Agent Execution (Auto & Copilot share AgentRuntime)
+                from app.ai.runtime.context import AgentContext
+                from app.ai.runtime.decisions import AgentDecision
+                from app.ai.runtime.factory import get_production_agent_runtime
+
+                if self._agent_runtime:
+                    runtime = self._agent_runtime
+                elif self._ai_engine and hasattr(self._ai_engine, "generate_response"):
+
+                    class _LegacyEngineAdapter:
+                        def __init__(self, engine):
+                            self.engine = engine
+
+                        async def run(self, session, context):
+                            from app.ai.runtime.agent_runtime import AgentResponse
+                            from app.ai.runtime.decisions import AgentDecision
+
+                            resp = await self.engine.generate_response(
+                                session, context.conversation_id, context.text, context.is_group
+                            )
+                            if resp and getattr(resp, "text", None):
+                                return AgentResponse(
+                                    decision=AgentDecision.reply.value, answer=resp.text
+                                )
+                            return AgentResponse(decision=AgentDecision.no_reply.value)
+
+                    runtime = _LegacyEngineAdapter(self._ai_engine)
+                else:
+                    runtime = await get_production_agent_runtime(session)
+
+                context = AgentContext(
+                    conversation_id=conversation.id,
+                    message_id=inbound_msg.id,
+                    sender_id=parsed.sender_id,
+                    user_id=user.id if user else None,
+                    text=parsed.text,
+                    is_group=parsed.is_group,
+                    group_id=parsed.group_id,
+                    mode=conversation.mode,
+                )
+
+                async def _safe_typing(coro):
+                    try:
+                        await coro
+                    except Exception:
+                        pass
+
+                asyncio.create_task(_safe_typing(signal_client.show_typing(parsed.reply_recipient)))
+                try:
+                    agent_response = await runtime.run(session, context)
+                finally:
+                    asyncio.create_task(
+                        _safe_typing(signal_client.hide_typing(parsed.reply_recipient))
+                    )
+
                 if conversation.mode == ConversationMode.copilot.value:
                     logger.info(
-                        f"🤖 Conversation #{conversation.id} in copilot mode — drafting suggestion"
-                    )
-                    await self._generate_copilot_draft(
-                        session, conversation, parsed, inbound_msg.id
+                        f"🤖 Conversation #{conversation.id} in copilot mode — "
+                        f"drafted suggestion #{agent_response.ai_suggestion_id}"
                     )
                     return
 
-                # 7. Generate Reply
-                asyncio.create_task(signal_client.show_typing(parsed.reply_recipient))
-                reply_text = await self._generate_reply(session, conversation, parsed)
-                asyncio.create_task(signal_client.hide_typing(parsed.reply_recipient))
+                # In Auto mode: check decision
+                if agent_response.decision == AgentDecision.reply.value and agent_response.answer:
+                    # 8. RACE CONDITION CHECK (Section 25)
+                    # Re-query authoritative conversation mode before sending in case admin switched to manual mid-generation!
+                    await session.refresh(conversation)
+                    if conversation.mode != ConversationMode.auto.value:
+                        logger.info(
+                            f"✋ Admin switched conversation #{conversation.id} to mode '{conversation.mode}' "
+                            f"during AI generation — discarding outbound reply!"
+                        )
+                        return
 
-                if not reply_text:
-                    return
-
-                # 8. RACE CONDITION CHECK (Section 25)
-                # Re-query authoritative conversation mode before sending in case admin switched to manual mid-generation!
-                await session.refresh(conversation)
-                if conversation.mode != ConversationMode.auto.value:
+                    # 9. Deliver Outbound Reply via OutboundMessageService with Provenance
+                    await outbound_service.send_message(
+                        session=session,
+                        conversation_id=conversation.id,
+                        content=agent_response.answer,
+                        recipient=parsed.reply_recipient,
+                        actor=MessageActor.bot.value,
+                        origin=MessageOrigin.ai_auto.value,
+                        ai_run_id=agent_response.ai_run_id,
+                        ai_suggestion_id=agent_response.ai_suggestion_id,
+                    )
+                elif agent_response.decision == AgentDecision.draft_for_human.value:
                     logger.info(
-                        f"✋ Admin switched conversation #{conversation.id} to mode '{conversation.mode}' "
-                        f"during AI generation — discarding outbound reply!"
+                        f"⚠️ AI requested human review for conversation #{conversation.id} "
+                        f"(decision: draft_for_human) — suggestion #{agent_response.ai_suggestion_id} created"
                     )
-                    return
-
-                # 9. Deliver Outbound Reply via OutboundMessageService
-                await outbound_service.send_message(
-                    session=session,
-                    conversation_id=conversation.id,
-                    content=reply_text,
-                    recipient=parsed.reply_recipient,
-                    actor=MessageActor.bot.value,
-                    origin=MessageOrigin.ai_auto.value,
-                )
+                elif agent_response.decision == AgentDecision.handoff.value:
+                    logger.info(
+                        f"🔄 AI requested human handoff for conversation #{conversation.id}"
+                    )
+                    conversation.mode = ConversationMode.manual.value
+                    await session.commit()
+                    if agent_response.answer:
+                        await outbound_service.send_message(
+                            session=session,
+                            conversation_id=conversation.id,
+                            content=agent_response.answer,
+                            recipient=parsed.reply_recipient,
+                            actor=MessageActor.bot.value,
+                            origin=MessageOrigin.ai_auto.value,
+                            ai_run_id=agent_response.ai_run_id,
+                        )
 
             except Exception as e:
                 logger.error(f"❌ Pipeline error: {e}", exc_info=True)
@@ -536,9 +611,10 @@ class MessageHandler:
     ) -> None:
         """Generate an AI draft for operator review without dispatching to Signal."""
         try:
-            from app.ai.runtime.agent_runtime import agent_runtime
             from app.ai.runtime.context import AgentContext
+            from app.ai.runtime.factory import get_production_agent_runtime
 
+            runtime = self._agent_runtime or await get_production_agent_runtime(session)
             context = AgentContext(
                 conversation_id=conversation.id,
                 message_id=inbound_message_id,
@@ -548,7 +624,7 @@ class MessageHandler:
                 group_id=parsed.group_id,
                 mode="copilot",
             )
-            await agent_runtime.run(session, context)
+            await runtime.run(session, context)
         except Exception as e:
             logger.error(f"❌ Error generating copilot draft: {e}", exc_info=True)
 

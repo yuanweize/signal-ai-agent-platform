@@ -18,7 +18,7 @@ from app.ai.learning.examples import dataset_exporter
 from app.ai.mcp.client import mcp_manager
 from app.ai.prompts.manager import prompt_manager
 from app.ai.rag.ingestion import KnowledgeIngestionService
-from app.ai.runtime.agent_runtime import agent_runtime
+from app.ai.runtime.factory import get_production_agent_runtime
 from app.ai.skills.registry import skill_registry
 from app.api.deps import AdminUser, get_current_admin
 from app.database import get_session
@@ -114,6 +114,16 @@ async def get_ai_overview_metrics(
     auto_rate = round(auto_sent / total_runs, 3) if total_runs > 0 else 0.0
     copilot_rate = round(total_sugs / total_runs, 3) if total_runs > 0 else 0.0
     takeover_rate = round(manual_takeovers / total_runs, 3) if total_runs > 0 else 0.0
+    runs_with_rag = (
+        await session.execute(
+            select(sa_func.count(AIRun.id)).where(
+                AIRun.retrieval.is_not(None),
+                AIRun.retrieval != "[]",
+                AIRun.retrieval != "",
+            )
+        )
+    ).scalar() or 0
+    actual_rag_hit_rate = round(runs_with_rag / total_runs, 3) if total_runs > 0 else 0.0
 
     return AIOverviewMetricsDTO(
         total_ai_runs=total_runs,
@@ -123,12 +133,95 @@ async def get_ai_overview_metrics(
         suggestion_acceptance_rate=acc_rate,
         suggestion_edit_rate=edit_rate,
         suggestion_rejection_rate=rej_rate,
-        rag_hit_rate=0.85,
+        rag_hit_rate=actual_rag_hit_rate,
         memory_items_count=memory_count,
         knowledge_documents_count=docs_count,
         average_latency_ms=round(float(avg_lat), 1),
         total_tokens_used=int(tokens_sum),
     )
+
+
+@router.get("/diagnostics")
+async def get_ai_diagnostics(
+    session: AsyncSession = Depends(get_session),
+    _admin: AdminUser = Depends(get_current_admin),
+):
+    """Observable status of real AI providers: LLM, Embedding, Vector Store, MCP, and Gateway."""
+    from app.config import settings
+    from app.services.signal_client import signal_client
+
+    runtime = await get_production_agent_runtime(session)
+
+    # 1. LLM status
+    llm_prov = runtime.llm_provider
+    llm_configured = bool(
+        getattr(llm_prov, "api_key", None) and getattr(llm_prov, "api_key") != "__NO_KEY__"
+    )
+    llm_status = (
+        "configured"
+        if llm_configured
+        else ("degraded" if settings.environment != "test" else "configured")
+    )
+
+    # 2. Embedding status
+    emb_prov = runtime.embedding_provider
+    emb_configured = bool(
+        getattr(emb_prov, "api_key", None) and getattr(emb_prov, "api_key") != "__NO_KEY__"
+    )
+    emb_status = (
+        "configured"
+        if emb_configured
+        else ("degraded" if settings.environment != "test" else "configured")
+    )
+
+    # 3. Vector store status
+    vec_store = runtime.vector_store
+    vec_provider = type(vec_store).__name__
+    vec_status = "connected"
+    if hasattr(vec_store, "client") and getattr(vec_store, "client") is not None:
+        try:
+            await vec_store.client.get_collections()
+            vec_status = "connected"
+        except Exception:
+            vec_status = "degraded"
+    elif vec_provider == "FakeVectorStore":
+        vec_status = "degraded" if settings.environment != "test" else "configured"
+
+    # 4. MCP manager status
+    active_mcp = mcp_manager.list_servers()
+    mcp_status = "connected" if active_mcp else "configured"
+
+    # 5. Signal Gateway status
+    gw_status = "configured"
+    try:
+        about = await signal_client.get_about()
+        gw_status = "connected" if about else "degraded"
+    except Exception:
+        gw_status = "degraded"
+
+    return {
+        "llm_provider": {
+            "name": getattr(llm_prov, "provider_name", type(llm_prov).__name__),
+            "model": getattr(llm_prov, "default_model", "unknown"),
+            "status": llm_status,
+        },
+        "embedding_provider": {
+            "name": type(emb_prov).__name__,
+            "status": emb_status,
+        },
+        "vector_store": {
+            "provider": vec_provider,
+            "status": vec_status,
+        },
+        "mcp": {
+            "active_servers": len(active_mcp),
+            "status": mcp_status,
+        },
+        "signal_gateway": {
+            "url": settings.signal_api_url,
+            "status": gw_status,
+        },
+    }
 
 
 @router.get("/runs", response_model=list[AIRunDTO])
@@ -265,9 +358,10 @@ async def delete_knowledge_source(
     if not source:
         raise HTTPException(status_code=404, detail="Knowledge source not found")
 
+    runtime = await get_production_agent_runtime(session)
     ingestion = KnowledgeIngestionService(
-        embedding_provider=agent_runtime.embedding_provider,
-        vector_store=agent_runtime.vector_store,
+        embedding_provider=runtime.embedding_provider,
+        vector_store=runtime.vector_store,
     )
     await ingestion.delete_source(session=session, source_id=source_id)
 
@@ -293,9 +387,10 @@ async def add_document_to_source(
     if not source:
         raise HTTPException(status_code=404, detail="Knowledge source not found")
 
+    runtime = await get_production_agent_runtime(session)
     ingestion = KnowledgeIngestionService(
-        embedding_provider=agent_runtime.embedding_provider,
-        vector_store=agent_runtime.vector_store,
+        embedding_provider=runtime.embedding_provider,
+        vector_store=runtime.vector_store,
     )
     doc = await ingestion.ingest_document(
         session=session,
@@ -319,9 +414,10 @@ async def add_faq_to_source(
     if not source:
         raise HTTPException(status_code=404, detail="Knowledge source not found")
 
+    runtime = await get_production_agent_runtime(session)
     ingestion = KnowledgeIngestionService(
-        embedding_provider=agent_runtime.embedding_provider,
-        vector_store=agent_runtime.vector_store,
+        embedding_provider=runtime.embedding_provider,
+        vector_store=runtime.vector_store,
     )
     doc = await ingestion.ingest_document(
         session=session,
@@ -344,10 +440,12 @@ async def test_knowledge_retrieval(
     is_group: bool = False,
     group_id: str | None = None,
     user_id: str | None = None,
+    session: AsyncSession = Depends(get_session),
     _admin: AdminUser = Depends(get_current_admin),
 ):
     """Simulate RAG search with scope isolation testing."""
-    chunks = await agent_runtime.retriever.retrieve(
+    runtime = await get_production_agent_runtime(session)
+    chunks = await runtime.retriever.retrieve(
         query=query,
         limit=limit,
         is_group=is_group,
@@ -367,6 +465,40 @@ async def test_knowledge_retrieval(
         )
         for c in chunks
     ]
+
+
+@router.post("/knowledge/documents/{document_id}/reindex")
+async def reindex_document(
+    document_id: int,
+    session: AsyncSession = Depends(get_session),
+    _admin: AdminUser = Depends(get_current_admin),
+):
+    """Re-chunk, embed, and refresh vector store embeddings for a specific document."""
+    runtime = await get_production_agent_runtime(session)
+    ingestion = KnowledgeIngestionService(
+        embedding_provider=runtime.embedding_provider,
+        vector_store=runtime.vector_store,
+    )
+    try:
+        chunks_count = await ingestion.reindex_document(session=session, document_id=document_id)
+        return {"ok": True, "document_id": document_id, "chunks_reindexed": chunks_count}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/knowledge/reindex")
+async def reindex_all_knowledge(
+    session: AsyncSession = Depends(get_session),
+    _admin: AdminUser = Depends(get_current_admin),
+):
+    """Rebuild entire vector index from relational database."""
+    runtime = await get_production_agent_runtime(session)
+    ingestion = KnowledgeIngestionService(
+        embedding_provider=runtime.embedding_provider,
+        vector_store=runtime.vector_store,
+    )
+    result = await ingestion.reindex_all(session=session)
+    return {"ok": True, **result}
 
 
 # ---------------------------------------------------------------------------
@@ -415,7 +547,8 @@ async def create_memory_item(
     session: AsyncSession = Depends(get_session),
     admin: AdminUser = Depends(get_current_admin),
 ):
-    mem = await agent_runtime.memory.add(
+    runtime = await get_production_agent_runtime(session)
+    mem = await runtime.memory.add(
         session=session,
         scope_type=payload.scope_type,
         scope_id=payload.scope_id,
@@ -446,7 +579,8 @@ async def delete_memory_item(
     session: AsyncSession = Depends(get_session),
     _admin: AdminUser = Depends(get_current_admin),
 ):
-    ok = await agent_runtime.memory.delete(session=session, memory_id=memory_id)
+    runtime = await get_production_agent_runtime(session)
+    ok = await runtime.memory.delete(session=session, memory_id=memory_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Memory item not found")
     return {"ok": True, "deleted_memory_id": memory_id}
@@ -643,9 +777,10 @@ async def promote_candidate(
     session: AsyncSession = Depends(get_session),
     admin: AdminUser = Depends(get_current_admin),
 ):
+    runtime = await get_production_agent_runtime(session)
     ingestion = KnowledgeIngestionService(
-        embedding_provider=agent_runtime.embedding_provider,
-        vector_store=agent_runtime.vector_store,
+        embedding_provider=runtime.embedding_provider,
+        vector_store=runtime.vector_store,
     )
     ok = await learning_service.promote_to_knowledge(
         session=session,
@@ -701,7 +836,8 @@ async def run_evaluation_suite(
     _admin: AdminUser = Depends(get_current_admin),
 ):
     """Execute the golden evaluation benchmark suite."""
-    summary = await eval_runner.run_suite(session=session, runtime=agent_runtime)
+    runtime = await get_production_agent_runtime(session)
+    summary = await eval_runner.run_suite(session=session, runtime=runtime)
     return EvaluationSuiteResultDTO(**summary)
 
 

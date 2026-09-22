@@ -23,8 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.learning.curation import learning_service
 from app.ai.learning.feedback import feedback_service
-from app.ai.runtime.agent_runtime import agent_runtime
 from app.ai.runtime.context import AgentContext
+from app.ai.runtime.factory import get_production_agent_runtime
 from app.api.deps import AdminUser, get_current_admin
 from app.database import get_session
 from app.models.ai import AIRun, AISuggestion, AISuggestionStatus
@@ -759,7 +759,8 @@ async def generate_suggestion_manually(
         group_id=conv.group_id,
         mode="copilot",
     )
-    await agent_runtime.run(session=session, context=context)
+    runtime = await get_production_agent_runtime(session)
+    await runtime.run(session=session, context=context)
 
     sug_res = await session.execute(
         select(AISuggestion)

@@ -157,3 +157,94 @@ class KnowledgeIngestionService:
         await session.commit()
         logger.info(f"Deleted source #{source_id} and purged {len(vector_ids)} vectors")
         return True
+
+    async def reindex_document(
+        self,
+        session: AsyncSession,
+        document_id: int,
+    ) -> int:
+        """Re-chunks, embeds, and repopulates vectors for an existing document."""
+        doc = await session.get(KnowledgeDocument, document_id)
+        if not doc:
+            raise ValueError(f"Document #{document_id} not found")
+
+        # 1. Delete existing vectors and chunk rows
+        stmt = select(KnowledgeChunk).where(KnowledgeChunk.document_id == document_id)
+        res = await session.execute(stmt)
+        old_chunks = list(res.scalars().all())
+        old_vector_ids = [c.vector_id for c in old_chunks if c.vector_id]
+        if old_vector_ids:
+            await self.vector_store.delete(KNOWLEDGE_COLLECTION, old_vector_ids)
+
+        await session.execute(
+            delete(KnowledgeChunk).where(KnowledgeChunk.document_id == document_id)
+        )
+        await session.flush()
+
+        # 2. Re-chunk text
+        metadata = json.loads(doc.metadata_json) if doc.metadata_json else {}
+        chunks = self.chunker.chunk_text(doc.content, metadata)
+        doc.chunk_count = len(chunks)
+
+        if not chunks:
+            await session.commit()
+            return 0
+
+        # 3. Compute embeddings
+        texts = [c.content for c in chunks]
+        vectors = await self.embeddings.embed_documents(texts)
+
+        # 4. Create new DB chunk records
+        db_chunks: list[KnowledgeChunk] = []
+        for idx, (c, vec) in enumerate(zip(chunks, vectors)):
+            kc = KnowledgeChunk(
+                document_id=doc.id,
+                source_id=doc.source_id,
+                chunk_index=idx,
+                content=c.content,
+                token_count=c.token_count,
+                vector_id=f"kc_{doc.id}_{idx}",
+                scope_type=doc.scope_type,
+                scope_id=doc.scope_id,
+                metadata_json=json.dumps(c.metadata),
+            )
+            session.add(kc)
+            db_chunks.append(kc)
+
+        await session.flush()
+
+        # 5. Upsert into Vector Store
+        points = [
+            {
+                "id": kc.vector_id,
+                "vector": vec,
+                "payload": {
+                    "document_id": doc.id,
+                    "source_id": doc.source_id,
+                    "chunk_id": kc.id,
+                    "chunk_index": kc.chunk_index,
+                    "scope_type": doc.scope_type,
+                    "scope_id": doc.scope_id,
+                    "title": doc.title,
+                    "content": kc.content,
+                },
+            }
+            for kc, vec in zip(db_chunks, vectors)
+        ]
+        await self.vector_store.upsert(KNOWLEDGE_COLLECTION, points)
+        await session.commit()
+        logger.info(f"Reindexed document #{doc.id} with {len(chunks)} chunks into vector store")
+        return len(chunks)
+
+    async def reindex_all(self, session: AsyncSession) -> dict[str, int]:
+        """Reindex all documents in the relational database into the vector store."""
+        stmt = select(KnowledgeDocument)
+        docs = list((await session.execute(stmt)).scalars().all())
+        total_chunks = 0
+        for doc in docs:
+            chunks_count = await self.reindex_document(session, doc.id)
+            total_chunks += chunks_count
+        return {
+            "documents_reindexed": len(docs),
+            "chunks_reindexed": total_chunks,
+        }

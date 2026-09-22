@@ -160,20 +160,45 @@ async def test_rag_cross_scope_isolation(session):
     )
     res_b_texts = " ".join([c.content for c in res_b])
     assert "30% discount" not in res_b_texts, "Group A private data leaked to Group B!"
-    assert "allergic to peanuts" not in res_b_texts, "User 1 private data leaked to User 2!"
-    assert "open 24/7" in res_b_texts, "Global docs should be accessible to all users"
+    assert "allergic to peanuts" not in res_b_texts, "User 1 private data leaked to Group B!"
+    assert "open 24/7" in res_b_texts, "Global docs should be accessible to all groups"
 
-    # Query as User 1 in Group A: CAN see User 1 note and Group A rules
+    # Query as User 1 in Group A: CAN see Group A rules, but MUST NEVER see ANY user private scope!
     res_a = await retriever.retrieve(
-        query="peanuts discount",
+        query="peanuts discount open",
         is_group=True,
         group_id="group_A",
         user_id="user_1",
         min_score=0.0,
     )
     res_a_texts = " ".join([c.content for c in res_a])
-    assert "30% discount" in res_a_texts
-    assert "allergic to peanuts" in res_a_texts
+    assert "30% discount" in res_a_texts, "Group A members should see Group A documents"
+    assert "open 24/7" in res_a_texts, "Group A members should see Global documents"
+    assert "allergic to peanuts" not in res_a_texts, (
+        "P0 VIOLATION: User 1 private medical note leaked into Group A context!"
+    )
+
+    # Query as User 1 in private DM: CAN see own user note and global, CANNOT see group rules
+    res_dm1 = await retriever.retrieve(
+        query="peanuts discount open",
+        is_group=False,
+        user_id="user_1",
+        min_score=0.0,
+    )
+    res_dm1_texts = " ".join([c.content for c in res_dm1])
+    assert "allergic to peanuts" in res_dm1_texts, "User 1 in DM should see their own notes"
+    assert "open 24/7" in res_dm1_texts, "User 1 in DM should see global documents"
+    assert "30% discount" not in res_dm1_texts, "Group A internal rules must not leak into DM"
+
+    # Query as User 2 in private DM: CANNOT see User 1 note
+    res_dm2 = await retriever.retrieve(
+        query="peanuts open",
+        is_group=False,
+        user_id="user_2",
+        min_score=0.0,
+    )
+    res_dm2_texts = " ".join([c.content for c in res_dm2])
+    assert "allergic to peanuts" not in res_dm2_texts, "User 1 note leaked to User 2 in DM"
 
 
 # ---------------------------------------------------------------------------
@@ -217,12 +242,97 @@ async def test_scoped_memory_and_pii_redaction(session):
     # Delete memory
     deleted = await memory_provider.delete(session, mem_item.id)
     assert deleted is True
+    # Deleting already-deleted or non-existent memory ID must return False
+    assert await memory_provider.delete(session, mem_item.id) is False
+    assert await memory_provider.delete(session, 999999) is False
+
     remaining = await memory_provider.search(session, scope_type="user", scope_id="user_100")
     assert len(remaining) == 0
 
 
-# ---------------------------------------------------------------------------
-# 4. Tool Permissions & Governed Execution Tests
+@pytest.mark.asyncio
+async def test_group_prompt_contains_no_private_user_memory(session):
+    """P0 Invariant: User private memory MUST NEVER be loaded in group conversations."""
+    # 1. Setup user with private memory
+    user = User(signal_id="+420777000999", display_name="Alice")
+    session.add(user)
+    await session.flush()
+
+    mem_provider = NativeMemoryProvider()
+    await mem_provider.add(
+        session,
+        scope_type="user",
+        scope_id=str(user.id),
+        content="Secret home address: 42 Secret St, Prague",
+        memory_type="fact",
+    )
+
+    llm = FakeLLMProvider()
+    runtime = AgentRuntime(llm_provider=llm, memory_provider=mem_provider)
+
+    # 2. Inbound interaction in Group context
+    ctx_group = AgentContext(
+        conversation_id=8801,
+        message_id=7701,
+        sender_id=user.signal_id,
+        user_id=user.id,
+        group_id="secret_group_alpha",
+        is_group=True,
+        text="What is my address and what do you know about me?",
+        mode="auto",
+    )
+    resp = await runtime.run(session=session, context=ctx_group)
+
+    # Assert memories_used does not contain the secret address
+    memories_used = resp.memories_used or []
+    assert len(memories_used) == 0, "Group context MUST NOT load private user memories"
+    for call in llm.invocations:
+        prompt_text = " ".join([m["content"] for m in call.get("messages", [])])
+        assert "42 Secret St" not in prompt_text, (
+            "P0 VIOLATION: Private user memory injected into group prompt!"
+        )
+
+
+@pytest.mark.asyncio
+async def test_same_user_phone_uuid_share_memory(session):
+    """Canonical User identity: phone number and Signal UUID must resolve to same memory namespace."""
+    user = User(
+        signal_id="+420777222333",
+        signal_uuid="b1111111-2222-3333-4444-555555555555",
+        display_name="Bob",
+    )
+    session.add(user)
+    await session.flush()
+
+    mem_provider = NativeMemoryProvider()
+    runtime = AgentRuntime(memory_provider=mem_provider)
+
+    # 1. Add preference via phone number in DM
+    ctx_phone = AgentContext(
+        conversation_id=8802,
+        message_id=7702,
+        sender_id="+420777222333",
+        text="Please remember I prefer oat milk in my latte.",
+        is_group=False,
+        mode="auto",
+    )
+    await runtime.run(session=session, context=ctx_phone)
+
+    # 2. Query as same user using Signal UUID in DM
+    ctx_uuid = AgentContext(
+        conversation_id=8803,
+        message_id=7703,
+        sender_id="b1111111-2222-3333-4444-555555555555",
+        text="What milk do I like?",
+        is_group=False,
+        mode="auto",
+    )
+    resp = await runtime.run(session=session, context=ctx_uuid)
+    mems = resp.memories_used or []
+    assert len(mems) >= 1
+    assert any("oat milk" in m["content"] for m in mems)
+
+
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_tool_permissions():
@@ -348,7 +458,7 @@ async def test_copilot_suggestion_api_workflow(session, auth_headers):
             status="pending",
         )
         session.add(sug_1)
-        await session.flush()
+        await session.commit()
 
         from datetime import datetime
 
@@ -376,7 +486,7 @@ async def test_copilot_suggestion_api_workflow(session, auth_headers):
             data = resp.json()
             assert data["content"] == sug_1.suggested_text
             assert data["origin"] == MessageOrigin.human_ai_assisted.value
-            sug_1_db = await session.get(AISuggestion, sug_1.id)
+            sug_1_db = await session.get(AISuggestion, sug_1.id, populate_existing=True)
             assert sug_1_db.status == "accepted"
 
         # 2. Edit Suggestion
@@ -386,7 +496,7 @@ async def test_copilot_suggestion_api_workflow(session, auth_headers):
             status="pending",
         )
         session.add(sug_2)
-        await session.flush()
+        await session.commit()
 
         with patch(
             "app.api.conversations.outbound_service.send_message",
@@ -416,7 +526,7 @@ async def test_copilot_suggestion_api_workflow(session, auth_headers):
             assert data["content"] == "We have Colombian and Ethiopian beans in stock."
             assert data["origin"] == MessageOrigin.human_ai_assisted.value
 
-            sug_2_db = await session.get(AISuggestion, sug_2.id)
+            sug_2_db = await session.get(AISuggestion, sug_2.id, populate_existing=True)
             assert sug_2_db.status == "edited"
             assert sug_2_db.edit_distance > 0
             assert 0.0 < sug_2_db.edit_ratio <= 1.0
@@ -428,7 +538,7 @@ async def test_copilot_suggestion_api_workflow(session, auth_headers):
             status="pending",
         )
         session.add(sug_3)
-        await session.flush()
+        await session.commit()
 
         resp = await client.post(
             f"/api/conversations/{conv.id}/suggestion/reject",

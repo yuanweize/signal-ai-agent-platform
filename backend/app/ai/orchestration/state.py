@@ -30,8 +30,9 @@ class AgentState(TypedDict, total=False):
 
     # Response decision
     decision: str  # reply | draft_for_human | ask_clarifying | handoff | no_reply
+    decision_reason: str | None
     draft: str | None
-    confidence: float
+    confidence: float | None
     citations: list[dict[str, Any]]
     tokens: int
     error: str | None

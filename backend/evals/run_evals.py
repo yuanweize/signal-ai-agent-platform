@@ -8,8 +8,12 @@ Can be executed in local terminal or during CI pipeline:
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from pathlib import Path
+
+# Explicitly ensure evaluation test runner executes under test environment
+os.environ.setdefault("ENVIRONMENT", "test")
 
 # Ensure backend directory is in sys.path
 backend_dir = Path(__file__).resolve().parent.parent
@@ -26,7 +30,7 @@ from app.database import Base  # noqa: E402
 
 async def main() -> int:
     print("=" * 70)
-    print("  Signal Market Bot — AI Platform v0.4 Evaluation Suite")
+    print("  Deterministic Agent Contract Evaluation Suite (32 Invariants)")
     print("=" * 70)
 
     # In-memory test engine for isolated eval execution
