@@ -580,6 +580,7 @@ async def test_learning_loop_curation_and_export(session):
         session=session,
         candidate_id=cand.id,
         ingestion_service=ingest,
+        confirm_global_privacy=True,
     )
     assert promoted_ok is True
     assert cand.status == "promoted"

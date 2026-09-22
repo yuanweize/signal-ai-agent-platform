@@ -16,8 +16,8 @@ import sys
 import tempfile
 
 
-def _run_alembic_upgrade_head(db_path: str) -> subprocess.CompletedProcess:
-    """Run alembic upgrade head against the specified SQLite database."""
+def _run_alembic_upgrade(db_path: str, revision: str = "head") -> subprocess.CompletedProcess:
+    """Run alembic upgrade <revision> against the specified SQLite database."""
     backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     alembic_bin = os.path.join(backend_dir, ".venv", "bin", "alembic")
     if not os.path.exists(alembic_bin):
@@ -27,12 +27,17 @@ def _run_alembic_upgrade_head(db_path: str) -> subprocess.CompletedProcess:
     env["DATABASE_URL"] = f"sqlite+aiosqlite:///{db_path}"
 
     return subprocess.run(
-        [alembic_bin, "upgrade", "head"],
+        [alembic_bin, "upgrade", revision],
         cwd=backend_dir,
         env=env,
         capture_output=True,
         text=True,
     )
+
+
+def _run_alembic_upgrade_head(db_path: str) -> subprocess.CompletedProcess:
+    """Run alembic upgrade head against the specified SQLite database."""
+    return _run_alembic_upgrade(db_path, "head")
 
 
 class TestFreshDBMigration:
@@ -372,6 +377,90 @@ class TestLegacy112aa6eMigration:
 
             con2.close()
 
+        finally:
+            if os.path.exists(db_path):
+                os.remove(db_path)
+
+
+class TestV03ToV04Migration:
+    """Test C: DB created at v0.3 head (c8927140f12a), populated with v0.3 data, upgrades to v0.4 (e1f2a3b4c5d6)."""
+
+    def test_v03_to_v04_migration(self):
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+
+        try:
+            # 1. Upgrade to v0.3 head
+            res1 = _run_alembic_upgrade(db_path, "c8927140f12a")
+            assert res1.returncode == 0, f"Upgrade to v0.3 failed: {res1.stderr}\n{res1.stdout}"
+
+            # 2. Insert representative v0.3 data
+            con = sqlite3.connect(db_path)
+            cur = con.cursor()
+            assert (
+                cur.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+                == "c8927140f12a"
+            )
+
+            cur.execute(
+                "INSERT INTO users (id, signal_id, display_name) VALUES (88, '+1234567890', 'Alice');"
+            )
+            cur.execute(
+                "INSERT INTO user_identities (id, user_id, identity_type, identity_value) VALUES (1, 88, 'phone', '+1234567890');"
+            )
+            cur.execute(
+                "INSERT INTO groups (id, group_id, name) VALUES (5, 'group-support', 'Customer Support');"
+            )
+            cur.execute(
+                "INSERT INTO group_members (id, group_id, external_identifier, user_id) VALUES (1, 'group-support', '+1234567890', 88);"
+            )
+            cur.execute(
+                "INSERT INTO conversations (id, type, signal_id, dm_user_id, mode) VALUES (20, 'dm', '+1234567890', 88, 'auto');"
+            )
+            cur.execute(
+                "INSERT INTO messages (id, conversation_id, content, direction, actor, role) VALUES (90, 20, 'Hello from v0.3', 'inbound', 'customer', 'customer');"
+            )
+            cur.execute(
+                "INSERT INTO bot_config (id, key, value) VALUES (10, 'is_ai_enabled', 'true');"
+            )
+            con.commit()
+            con.close()
+
+            # 3. Upgrade to v0.4 head (e1f2a3b4c5d6)
+            res2 = _run_alembic_upgrade(db_path, "head")
+            assert res2.returncode == 0, (
+                f"Upgrade from v0.3 to v0.4 head failed: {res2.stderr}\n{res2.stdout}"
+            )
+
+            # 4. Assert v0.4 state and data preservation
+            con2 = sqlite3.connect(db_path)
+            cur2 = con2.cursor()
+            assert (
+                cur2.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+                == "e1f2a3b4c5d6"
+            )
+
+            # Check pre-existing data preserved and origin column backfilled
+            assert cur2.execute("SELECT id, display_name FROM users WHERE id=88").fetchone() == (
+                88,
+                "Alice",
+            )
+            assert cur2.execute(
+                "SELECT id, content, origin FROM messages WHERE id=90"
+            ).fetchone() == (90, "Hello from v0.3", "customer")
+            assert cur2.execute(
+                "SELECT id, value FROM bot_config WHERE key='is_ai_enabled'"
+            ).fetchone() == (10, "true")
+
+            # Check new v0.4 AI platform tables exist and are queryable
+            cur2.execute("SELECT count(*) FROM ai_runs")
+            cur2.execute("SELECT count(*) FROM ai_suggestions")
+            cur2.execute("SELECT count(*) FROM knowledge_sources")
+            cur2.execute("SELECT count(*) FROM memory_items")
+            cur2.execute("SELECT count(*) FROM mcp_servers")
+            cur2.execute("SELECT count(*) FROM prompt_versions")
+
+            con2.close()
         finally:
             if os.path.exists(db_path):
                 os.remove(db_path)

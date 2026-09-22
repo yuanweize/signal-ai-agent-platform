@@ -112,15 +112,14 @@ class TestReactionOnlyEvent:
             mock_session_ctx.return_value.__aenter__.return_value = session
             mock_session_ctx.return_value.__aexit__.return_value = None
 
-            mock_ai = MagicMock()
-            mock_ai.is_enabled = True
-            mock_ai.generate_response = AsyncMock()
-            handler.set_ai_engine(mock_ai)
+            mock_runtime = MagicMock()
+            mock_runtime.run = AsyncMock()
+            handler.set_agent_runtime(mock_runtime)
 
             await handler.handle_message(envelope)
 
-            # AI must NOT be invoked for reaction-only event
-            mock_ai.generate_response.assert_not_called()
+            # AgentRuntime must NOT be invoked for reaction-only event
+            mock_runtime.run.assert_not_called()
 
         # Verify reaction row exists in DB
         rx_res = await session.execute(
@@ -164,15 +163,14 @@ class TestAttachmentOnlyEvent:
             mock_session_ctx.return_value.__aenter__.return_value = session
             mock_session_ctx.return_value.__aexit__.return_value = None
 
-            mock_ai = MagicMock()
-            mock_ai.is_enabled = True
-            mock_ai.generate_response = AsyncMock()
-            handler.set_ai_engine(mock_ai)
+            mock_runtime = MagicMock()
+            mock_runtime.run = AsyncMock()
+            handler.set_agent_runtime(mock_runtime)
 
             await handler.handle_message(envelope)
 
-            # AI should not generate normal text reply for attachment-only
-            mock_ai.generate_response.assert_not_called()
+            # AgentRuntime should not generate normal text reply for attachment-only
+            mock_runtime.run.assert_not_called()
 
         # Verify user, conversation, message, and attachment records
         u_res = await session.execute(select(User).where(User.signal_id == "+420777888999"))
@@ -265,18 +263,21 @@ class TestManualTakeoverRace:
             session.add(conv)
             await session.commit()
 
-            from app.services.ai_engine import AIResponse
+            from app.ai.runtime.agent_runtime import AgentResponse
+            from app.ai.runtime.decisions import AgentDecision
 
-            return AIResponse(text="AI generated answer that should NOT be sent")
+            return AgentResponse(
+                decision=AgentDecision.reply.value,
+                answer="AI generated answer that should NOT be sent",
+            )
 
         with patch("app.services.message_handler.async_session") as mock_session_ctx:
             mock_session_ctx.return_value.__aenter__.return_value = session
             mock_session_ctx.return_value.__aexit__.return_value = None
 
-            mock_ai = MagicMock()
-            mock_ai.is_enabled = True
-            mock_ai.generate_response = AsyncMock(side_effect=slow_ai_generate)
-            handler.set_ai_engine(mock_ai)
+            mock_runtime = MagicMock()
+            mock_runtime.run = AsyncMock(side_effect=slow_ai_generate)
+            handler.set_agent_runtime(mock_runtime)
 
             with patch("app.services.outbound_service.signal_client") as mock_client:
                 mock_client.send_message = AsyncMock(return_value=True)
