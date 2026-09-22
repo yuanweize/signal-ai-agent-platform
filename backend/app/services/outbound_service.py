@@ -39,12 +39,30 @@ class OutboundMessageService:
         sender_id: str | None = None,
         reply_to_id: int | None = None,
         tokens_used: int | None = None,
+        origin: str | None = None,
+        ai_run_id: int | None = None,
+        ai_suggestion_id: int | None = None,
+        admin_identity: str | None = None,
+        model: str | None = None,
+        prompt_version: str | None = None,
         client=None,
     ) -> Message:
         """
         Create a pending outbound message, attempt Signal send, and update status.
         """
         cli = client or signal_client
+
+        # Default origin based on actor if not explicitly passed
+        resolved_origin = origin
+        if resolved_origin is None:
+            if actor == MessageActor.bot.value:
+                resolved_origin = "ai_auto"
+            elif actor == MessageActor.admin.value:
+                resolved_origin = "human_manual"
+            elif actor == MessageActor.system.value:
+                resolved_origin = "system"
+            else:
+                resolved_origin = "customer"
 
         # 1. Create message in pending status
         msg = Message(
@@ -60,6 +78,12 @@ class OutboundMessageService:
             content=content,
             tokens_used=tokens_used,
             reply_to_id=reply_to_id,
+            origin=resolved_origin,
+            ai_run_id=ai_run_id,
+            ai_suggestion_id=ai_suggestion_id,
+            admin_identity=admin_identity,
+            model=model,
+            prompt_version=prompt_version,
             delivery_status=MessageDeliveryStatus.pending.value,
             delivery_error=None,
         )

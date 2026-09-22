@@ -39,6 +39,7 @@ from app.models.conversation import (
     MessageAttachment,
     MessageDeliveryStatus,
     MessageDirection,
+    MessageOrigin,
     MessageReaction,
 )
 from app.models.group import Group, GroupMember
@@ -264,6 +265,15 @@ class MessageHandler:
                     logger.info(f"⏸ Conversation #{conversation.id} paused — auto-reply suppressed")
                     return
 
+                if conversation.mode == ConversationMode.copilot.value:
+                    logger.info(
+                        f"🤖 Conversation #{conversation.id} in copilot mode — drafting suggestion"
+                    )
+                    await self._generate_copilot_draft(
+                        session, conversation, parsed, inbound_msg.id
+                    )
+                    return
+
                 # 7. Generate Reply
                 asyncio.create_task(signal_client.show_typing(parsed.reply_recipient))
                 reply_text = await self._generate_reply(session, conversation, parsed)
@@ -289,6 +299,7 @@ class MessageHandler:
                     content=reply_text,
                     recipient=parsed.reply_recipient,
                     actor=MessageActor.bot.value,
+                    origin=MessageOrigin.ai_auto.value,
                 )
 
             except Exception as e:
@@ -336,6 +347,7 @@ class MessageHandler:
             signal_timestamp_ms=parsed.timestamp or None,
             signal_event_id=signal_event_id,
             delivery_status=None,
+            origin=MessageOrigin.customer.value,
             occurred_at=datetime.fromtimestamp(parsed.timestamp / 1000)
             if parsed.timestamp
             else datetime.utcnow(),
@@ -514,6 +526,31 @@ class MessageHandler:
             "✅ Zpráva dorazila. AI asistent je momentálně vypnutý.\n"
             "Napište prosím *menu* pro zobrazení nabídky, nebo vyčkejte na manuální odpověď."
         )
+
+    async def _generate_copilot_draft(
+        self,
+        session: AsyncSession,
+        conversation: Conversation,
+        parsed: ParsedMessage,
+        inbound_message_id: int | None,
+    ) -> None:
+        """Generate an AI draft for operator review without dispatching to Signal."""
+        try:
+            from app.ai.runtime.agent_runtime import agent_runtime
+            from app.ai.runtime.context import AgentContext
+
+            context = AgentContext(
+                conversation_id=conversation.id,
+                message_id=inbound_message_id,
+                sender_id=parsed.sender_id,
+                text=parsed.text,
+                is_group=parsed.is_group,
+                group_id=parsed.group_id,
+                mode="copilot",
+            )
+            await agent_runtime.run(session, context)
+        except Exception as e:
+            logger.error(f"❌ Error generating copilot draft: {e}", exc_info=True)
 
     async def _generate_fallback_menu(self, session: AsyncSession) -> str:
         """Generate a simple text menu of active products when AI is disabled."""

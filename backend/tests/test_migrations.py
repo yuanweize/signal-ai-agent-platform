@@ -51,9 +51,9 @@ class TestFreshDBMigration:
 
             # Check alembic revision is at head
             ver = cur.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-            assert ver == "c8927140f12a", f"Expected revision c8927140f12a, got {ver}"
+            assert ver == "e1f2a3b4c5d6", f"Expected revision e1f2a3b4c5d6, got {ver}"
 
-            # Check all 16 tables exist
+            # Check all tables exist (16 base + 12 AI platform = 28 tables)
             tables = {
                 row[0]
                 for row in cur.execute(
@@ -77,6 +77,19 @@ class TestFreshDBMigration:
                 "bot_config",
                 "campaign_delivery_logs",
                 "audit_logs",
+                # AI Platform v0.4
+                "ai_runs",
+                "ai_suggestions",
+                "knowledge_sources",
+                "knowledge_documents",
+                "knowledge_chunks",
+                "memory_items",
+                "feedback_events",
+                "learning_candidates",
+                "training_examples",
+                "prompt_versions",
+                "mcp_servers",
+                "tool_invocations",
             }
             missing = expected_tables - tables
             assert not missing, f"Missing tables after fresh migration: {missing}"
@@ -88,6 +101,9 @@ class TestFreshDBMigration:
             assert "actor" in msg_cols
             assert "signal_event_id" in msg_cols
             assert "delivery_status" in msg_cols
+            assert "origin" in msg_cols
+            assert "ai_run_id" in msg_cols
+            assert "ai_suggestion_id" in msg_cols
 
             conv_cols = {
                 row[1] for row in cur.execute("PRAGMA table_info(conversations)").fetchall()
@@ -304,7 +320,7 @@ class TestLegacy112aa6eMigration:
             cur2 = con2.cursor()
 
             ver = cur2.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-            assert ver == "c8927140f12a"
+            assert ver == "e1f2a3b4c5d6"
 
             # Check rows and IDs preserved
             assert cur2.execute(
@@ -339,14 +355,14 @@ class TestLegacy112aa6eMigration:
 
             # Check messages backfilled
             m1 = cur2.execute(
-                "SELECT id, content, direction, actor FROM messages WHERE id=501"
+                "SELECT id, content, direction, actor, origin FROM messages WHERE id=501"
             ).fetchone()
-            assert m1 == (501, "I want to buy coffee", "inbound", "customer")
+            assert m1 == (501, "I want to buy coffee", "inbound", "customer", "customer")
 
             m2 = cur2.execute(
-                "SELECT id, content, direction, actor FROM messages WHERE id=502"
+                "SELECT id, content, direction, actor, origin FROM messages WHERE id=502"
             ).fetchone()
-            assert m2 == (502, "Coffee is in stock!", "outbound", "bot")
+            assert m2 == (502, "Coffee is in stock!", "outbound", "bot", "ai_auto")
 
             # Check user identities backfilled
             ident = cur2.execute(

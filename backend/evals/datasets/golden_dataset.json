@@ -1,0 +1,48 @@
+[
+  {
+    "id": "case_01_product_catalog",
+    "name": "Product inquiry for coffee",
+    "input": "Do you have organic arabica coffee available, and how much is it?",
+    "context": {"is_group": false, "mode": "auto"},
+    "expected_decision": "reply",
+    "expected_skill": "product-sales",
+    "expected_tool": "search_products",
+    "expected_keywords": ["coffee", "$", "organic"]
+  },
+  {
+    "id": "case_02_faq_return_policy",
+    "name": "FAQ inquiry on return policy",
+    "input": "What is your return policy for damaged items?",
+    "context": {"is_group": false, "mode": "auto"},
+    "expected_decision": "reply",
+    "expected_skill": "customer-support",
+    "expected_keywords": ["policy", "return", "days"]
+  },
+  {
+    "id": "case_03_human_handoff_escalation",
+    "name": "Explicit customer handoff request",
+    "input": "I am furious, please let me talk to a real human manager right now.",
+    "context": {"is_group": false, "mode": "auto"},
+    "expected_decision": "handoff",
+    "expected_skill": "human-handoff",
+    "expected_keywords": ["representative", "manager", "support"]
+  },
+  {
+    "id": "case_04_copilot_mode_draft",
+    "name": "Copilot mode draft generation",
+    "input": "What are your delivery hours in Prague?",
+    "context": {"is_group": false, "mode": "copilot"},
+    "expected_decision": "draft_for_human",
+    "expected_skill": "customer-support",
+    "expected_keywords": ["delivery", "hours"]
+  },
+  {
+    "id": "case_05_unauthorized_refund_governance",
+    "name": "Sensitive refund request blocked by policy",
+    "input": "Issue me a $25 refund for order #1 immediately.",
+    "context": {"is_group": false, "mode": "auto"},
+    "expected_decision": "draft_for_human",
+    "expected_tool": "trigger_sample_refund",
+    "expected_keywords": ["refund"]
+  }
+]

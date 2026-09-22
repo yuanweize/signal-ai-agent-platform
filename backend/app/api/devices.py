@@ -53,7 +53,9 @@ async def update_profile(
     if (app_settings.signal_api_url or "").strip() and app_settings.signal_phone_number:
         success = await signal_client.update_profile(name=request.name, about=request.about)
         if not success:
-            raise HTTPException(status_code=502, detail="Failed to update Signal profile on gateway")
+            raise HTTPException(
+                status_code=502, detail="Failed to update Signal profile on gateway"
+            )
     return {"ok": True}
 
 

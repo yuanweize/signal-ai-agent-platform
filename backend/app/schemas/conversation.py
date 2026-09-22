@@ -51,6 +51,14 @@ class MessageDTO(BaseModel):
     delivery_error: str | None = None
     signal_timestamp_ms: int | None = None
     occurred_at: datetime | None = None
+    origin: str | None = (
+        None  # "customer" | "ai_auto" | "human_manual" | "human_ai_assisted" | "system" | "campaign"
+    )
+    ai_run_id: int | None = None
+    ai_suggestion_id: int | None = None
+    admin_identity: str | None = None
+    model: str | None = None
+    prompt_version: str | None = None
     timestamp: datetime
     attachments: list[AttachmentDTO] = Field(default_factory=list)
     reactions: list[ReactionDTO] = Field(default_factory=list)
@@ -62,7 +70,7 @@ class ConversationDTO(BaseModel):
     signal_id: str
     group_id: str | None = None
     display_name: str
-    mode: str = "auto"  # "auto" | "manual" | "paused"
+    mode: str = "auto"  # "auto" | "copilot" | "manual" | "paused"
     is_blocked: bool = False
     is_active: bool = True
     summary: str | None = None
@@ -107,7 +115,7 @@ class SendMessageRequest(BaseModel):
 
 
 class UpdateModeRequest(BaseModel):
-    mode: str = Field(pattern="^(auto|manual|paused)$")
+    mode: str = Field(pattern="^(auto|copilot|manual|paused)$")
 
 
 class MarkReadRequest(BaseModel):
