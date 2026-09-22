@@ -43,31 +43,53 @@ class AgentRuntime:
         memory_provider: NativeMemoryProvider | None = None,
         vector_store: Any | None = None,
         embedding_provider: Any | None = None,
+        is_test: bool | None = None,
     ) -> None:
-        if os.environ.get("ENVIRONMENT", "").lower() in ("production", "prod"):
-            is_test = False
-        else:
-            is_test = (
-                os.getenv("TESTING", "").lower() in ("1", "true", "yes")
-                or os.getenv("ENVIRONMENT", "").lower() in ("test", "testing")
-                or bool(os.getenv("PYTEST_CURRENT_TEST"))
-                or "pytest" in sys.modules
-            )
+        if is_test is None:
+            if os.environ.get("ENVIRONMENT", "").lower() in ("production", "prod"):
+                is_test = False
+            else:
+                is_test = (
+                    os.getenv("TESTING", "").lower() in ("1", "true", "yes")
+                    or os.getenv("ENVIRONMENT", "").lower() in ("test", "testing")
+                    or bool(os.getenv("PYTEST_CURRENT_TEST"))
+                    or "pytest" in sys.modules
+                )
         if not is_test:
-            if isinstance(llm_provider, FakeLLMProvider):
+            if isinstance(llm_provider, FakeLLMProvider) or (
+                llm_provider is None and isinstance(self.llm, FakeLLMProvider)
+            ):
                 raise RuntimeError(
                     "FakeLLMProvider is prohibited in non-test environment. Configure real AI provider."
                 )
+            if isinstance(vector_store, FakeVectorStore) or isinstance(
+                getattr(retriever, "vector_store", None), FakeVectorStore
+            ):
+                raise RuntimeError(
+                    "FakeVectorStore is prohibited in non-test environment. Configure real vector store (e.g. Qdrant) or disable RAG."
+                )
+            if isinstance(embedding_provider, FakeEmbeddingProvider) or isinstance(
+                getattr(retriever, "embedding_provider", None), FakeEmbeddingProvider
+            ):
+                raise RuntimeError(
+                    "FakeEmbeddingProvider is prohibited in non-test environment. Configure real embedding provider."
+                )
 
-        self.llm = llm_provider or FakeLLMProvider()
+        self.llm = llm_provider or (FakeLLMProvider() if is_test else None)
         self.llm_provider = self.llm
         self.vector_store = vector_store or (
-            retriever.vector_store if retriever else FakeVectorStore()
+            retriever.vector_store if retriever else (FakeVectorStore() if is_test else None)
         )
         self.embedding_provider = embedding_provider or (
-            retriever.embedding_provider if retriever else FakeEmbeddingProvider()
+            retriever.embedding_provider
+            if retriever
+            else (FakeEmbeddingProvider() if is_test else None)
         )
-        self.retriever = retriever or KnowledgeRetriever(self.embedding_provider, self.vector_store)
+        self.retriever = retriever or (
+            KnowledgeRetriever(self.embedding_provider, self.vector_store)
+            if (self.embedding_provider and self.vector_store)
+            else None
+        )
         self.memory = memory_provider or NativeMemoryProvider()
         self.graph = build_agent_graph(self.llm, self.retriever)
 
@@ -158,6 +180,23 @@ class AgentRuntime:
                     {"id": m.id, "content": m.content, "type": m.memory_type} for m in user_mems
                 ]
 
+        # 3.5. Load active prompt version and conversation history
+        from app.ai.prompts.manager import prompt_manager
+        from app.ai.runtime.context_loader import context_loader
+        from app.services.runtime_config import get_runtime_settings
+
+        prompt_template, prompt_version = await prompt_manager.get_active_prompt(session)
+        runtime_settings = await get_runtime_settings(session)
+        max_context = int(runtime_settings.get("ai_context_messages") or 20)
+
+        history = await context_loader.load_history(
+            session=session,
+            conversation_id=context.conversation_id,
+            max_messages=max_context,
+            current_message_id=context.message_id,
+            is_group=context.is_group,
+        )
+
         # 4. Prepare initial state
         initial_state: AgentState = {
             "conversation_id": context.conversation_id,
@@ -175,6 +214,9 @@ class AgentRuntime:
             "skill_instructions": [],
             "tool_calls": [],
             "tool_results": [],
+            "history": history,
+            "prompt_template": prompt_template,
+            "prompt_version": prompt_version,
             "decision": AgentDecision.reply.value,
             "draft": None,
             "confidence": None,
@@ -231,7 +273,7 @@ class AgentRuntime:
             input_message_id=context.message_id,
             model=model_name,
             provider=provider_name,
-            prompt_version="v0.4",
+            prompt_version=prompt_version,
             skills_used=skills_used,
             retrieved_chunks=retrieved_chunks,
             memories_used=turn_memories,
@@ -295,7 +337,7 @@ class AgentRuntime:
             confidence=output_state.get("confidence"),
             model=model_name,
             provider=provider_name,
-            prompt_version="v0.4",
+            prompt_version=prompt_version,
             skills_used=skills_used,
             memories_used=turn_memories,
             knowledge_chunks=retrieved_chunks,

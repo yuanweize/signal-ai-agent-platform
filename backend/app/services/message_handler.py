@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -50,19 +50,18 @@ from app.services.metrics import runtime_metrics
 from app.services.outbound_service import outbound_service
 from app.services.signal_client import signal_client
 
-logger = logging.getLogger("signal.handler")
+logger = logging.getLogger("services.message_handler")
+
+
+def utc_now() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class MessageHandler:
     """Processes incoming Signal messages through the full pipeline."""
 
     def __init__(self) -> None:
-        self._ai_engine = None
         self._agent_runtime = None
-
-    def set_ai_engine(self, engine) -> None:
-        """Inject AI engine (called during startup or legacy tests)."""
-        self._ai_engine = engine
 
     def set_agent_runtime(self, runtime) -> None:
         """Inject AgentRuntime (for testing or runtime override)."""
@@ -71,6 +70,8 @@ class MessageHandler:
     async def handle_message(self, incoming: SignalIncomingMessage) -> None:
         """Alias for handle."""
         await self.handle(incoming)
+
+    handle_envelope = handle_message
 
     async def handle(self, incoming: SignalIncomingMessage) -> None:
         """Main entry point — called for each incoming message."""
@@ -126,7 +127,7 @@ class MessageHandler:
                             is_removed=reaction.is_remove,
                             occurred_at=datetime.fromtimestamp(parsed.timestamp / 1000)
                             if parsed.timestamp
-                            else datetime.utcnow(),
+                            else utc_now(),
                         )
                         session.add(rx)
                         await session.commit()
@@ -176,7 +177,7 @@ class MessageHandler:
                     )
                     self._store_attachments(session, msg, envelope)
                     conversation.message_count += 1
-                    conversation.last_message_at = datetime.utcnow()
+                    conversation.last_message_at = utc_now()
                     await session.commit()
                 except IntegrityError:
                     logger.debug(f"Duplicate attachment event suppressed: {signal_event_id}")
@@ -238,11 +239,11 @@ class MessageHandler:
                         self._store_attachments(session, inbound_msg, envelope)
 
                     conversation.message_count += 1
-                    conversation.last_message_at = datetime.utcnow()
-                    conversation.updated_at = datetime.utcnow()
+                    conversation.last_message_at = utc_now()
+                    conversation.updated_at = utc_now()
                     if group:
                         group.total_messages += 1
-                        group.last_activity = datetime.utcnow()
+                        group.last_activity = utc_now()
                     await session.commit()
                 except IntegrityError:
                     logger.debug(f"Duplicate inbound event suppressed: {signal_event_id}")
@@ -274,31 +275,45 @@ class MessageHandler:
                 from app.ai.runtime.context import AgentContext
                 from app.ai.runtime.decisions import AgentDecision
                 from app.ai.runtime.factory import get_production_agent_runtime
+                from app.services.runtime_config import get_runtime_settings
 
-                if self._agent_runtime:
-                    runtime = self._agent_runtime
-                elif self._ai_engine and hasattr(self._ai_engine, "generate_response"):
+                runtime_settings = await get_runtime_settings(session)
+                is_ai_enabled = bool(runtime_settings.get("is_ai_enabled"))
 
-                    class _LegacyEngineAdapter:
-                        def __init__(self, engine):
-                            self.engine = engine
-
-                        async def run(self, session, context):
-                            from app.ai.runtime.agent_runtime import AgentResponse
-                            from app.ai.runtime.decisions import AgentDecision
-
-                            resp = await self.engine.generate_response(
-                                session, context.conversation_id, context.text, context.is_group
+                # In non-injected runtime, respect explicit AI-disabled toggle
+                if not is_ai_enabled and not self._agent_runtime:
+                    if conversation.mode == ConversationMode.auto.value:
+                        text_lower = (parsed.text or "").lower().strip()
+                        keywords = [
+                            "menu",
+                            "produkty",
+                            "ceník",
+                            "nabídka",
+                            "products",
+                            "help",
+                            "pomoc",
+                            "/menu",
+                            "/start",
+                        ]
+                        if any(text_lower == k for k in keywords) or any(
+                            k in text_lower.split() for k in keywords
+                        ):
+                            menu_reply = await self._generate_fallback_menu(session)
+                            await outbound_service.send_message(
+                                session=session,
+                                conversation_id=conversation.id,
+                                content=menu_reply,
+                                recipient=parsed.reply_recipient,
+                                actor=MessageActor.bot.value,
+                                origin=MessageOrigin.rule_keyword.value,
                             )
-                            if resp and getattr(resp, "text", None):
-                                return AgentResponse(
-                                    decision=AgentDecision.reply.value, answer=resp.text
-                                )
-                            return AgentResponse(decision=AgentDecision.no_reply.value)
+                        else:
+                            logger.info(
+                                f"AI disabled in Settings — auto reply suppressed for conv #{conversation.id}"
+                            )
+                    return
 
-                    runtime = _LegacyEngineAdapter(self._ai_engine)
-                else:
-                    runtime = await get_production_agent_runtime(session)
+                runtime = self._agent_runtime or await get_production_agent_runtime(session)
 
                 context = AgentContext(
                     conversation_id=conversation.id,
@@ -425,8 +440,8 @@ class MessageHandler:
             origin=MessageOrigin.customer.value,
             occurred_at=datetime.fromtimestamp(parsed.timestamp / 1000)
             if parsed.timestamp
-            else datetime.utcnow(),
-            timestamp=datetime.utcnow(),
+            else utc_now(),
+            timestamp=utc_now(),
         )
         session.add(msg)
         await session.flush()
@@ -468,7 +483,7 @@ class MessageHandler:
             await session.flush()
             logger.info(f"👤 New user created: {parsed.sender_name} ({parsed.sender_id})")
         else:
-            user.last_seen = datetime.utcnow()
+            user.last_seen = utc_now()
             if parsed.sender_name and parsed.sender_name != user.display_name:
                 user.display_name = parsed.sender_name
 
@@ -491,7 +506,7 @@ class MessageHandler:
             await session.flush()
             logger.info(f"👥 New group registered: {group.group_id}")
         else:
-            group.last_activity = datetime.utcnow()
+            group.last_activity = utc_now()
 
         # Update or create GroupMember
         res_m = await session.execute(
@@ -508,12 +523,12 @@ class MessageHandler:
                 external_identifier=parsed.sender_id,
                 is_admin=False,
                 role="member",
-                last_seen_at=datetime.utcnow(),
+                last_seen_at=utc_now(),
             )
             session.add(member)
             await session.flush()
         else:
-            member.last_seen_at = datetime.utcnow()
+            member.last_seen_at = utc_now()
             if member.user_id is None and user.id:
                 member.user_id = user.id
 
@@ -559,75 +574,6 @@ class MessageHandler:
 
         return conversation
 
-    async def _generate_reply(
-        self,
-        session: AsyncSession,
-        conversation: Conversation,
-        parsed: ParsedMessage,
-    ) -> str | None:
-        """Generate a reply via AI engine or fallback catalog."""
-        if self._ai_engine is not None:
-            try:
-                reply = await self._ai_engine.generate_response(
-                    session=session,
-                    conversation=conversation,
-                    user_message=parsed.text,
-                    sender_name=parsed.sender_name,
-                    group_id=parsed.group_id,
-                    current_signal_timestamp_ms=parsed.timestamp,
-                )
-                if reply:
-                    return reply
-            except Exception as e:
-                logger.error(f"❌ AI engine error: {e}", exc_info=True)
-
-        # Fallback command handling
-        text_lower = parsed.text.lower().strip()
-        keywords = [
-            "menu",
-            "produkty",
-            "ceník",
-            "nabídka",
-            "products",
-            "help",
-            "pomoc",
-            "/menu",
-            "/start",
-        ]
-        if any(text_lower == k for k in keywords) or any(k in text_lower.split() for k in keywords):
-            return await self._generate_fallback_menu(session)
-
-        return (
-            "✅ Zpráva dorazila. AI asistent je momentálně vypnutý.\n"
-            "Napište prosím *menu* pro zobrazení nabídky, nebo vyčkejte na manuální odpověď."
-        )
-
-    async def _generate_copilot_draft(
-        self,
-        session: AsyncSession,
-        conversation: Conversation,
-        parsed: ParsedMessage,
-        inbound_message_id: int | None,
-    ) -> None:
-        """Generate an AI draft for operator review without dispatching to Signal."""
-        try:
-            from app.ai.runtime.context import AgentContext
-            from app.ai.runtime.factory import get_production_agent_runtime
-
-            runtime = self._agent_runtime or await get_production_agent_runtime(session)
-            context = AgentContext(
-                conversation_id=conversation.id,
-                message_id=inbound_message_id,
-                sender_id=parsed.sender_id,
-                text=parsed.text,
-                is_group=parsed.is_group,
-                group_id=parsed.group_id,
-                mode="copilot",
-            )
-            await runtime.run(session, context)
-        except Exception as e:
-            logger.error(f"❌ Error generating copilot draft: {e}", exc_info=True)
-
     async def _generate_fallback_menu(self, session: AsyncSession) -> str:
         """Generate a simple text menu of active products when AI is disabled."""
         result = await session.execute(select(Product).where(Product.is_active == True))  # noqa: E712
@@ -672,7 +618,7 @@ class MessageHandler:
         await session.flush()
 
         conversation.message_count = (conversation.message_count or 0) + 1
-        conversation.last_message_at = datetime.utcnow()
+        conversation.last_message_at = utc_now()
 
         success = False
         try:

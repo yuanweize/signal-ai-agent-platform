@@ -23,6 +23,7 @@ from app.ai.providers.embeddings import (
     OpenAICompatibleEmbeddingProvider,
 )
 from app.ai.providers.llm import (
+    DisabledLLMProvider,
     FakeLLMProvider,
     LLMProvider,
     OpenAICompatibleProvider,
@@ -58,7 +59,7 @@ def create_agent_runtime(
     Rules:
     - If is_test=True, allows Fake providers.
     - If in production (is_test=False), strictly requires real providers or disabled state.
-      Silent fallback to FakeLLMProvider is strictly forbidden.
+      Silent fallback to FakeLLMProvider or FakeVectorStore is strictly forbidden.
     - If is_test=None, auto-detects test environment.
     """
     settings = settings or {}
@@ -72,21 +73,17 @@ def create_agent_runtime(
         ai_base_url = (settings.get("ai_api_base_url") or "").strip()
         ai_api_key = (settings.get("ai_api_key") or "").strip()
         ai_model = (settings.get("ai_model") or "gpt-4o-mini").strip()
-        ai_enabled = bool(settings.get("is_ai_enabled"))
-
-        # Verify whether API key is provided or optional for this base_url (e.g. Ollama/vLLM)
+        ai_enabled = bool(settings.get("is_ai_enabled", True))
         has_valid_auth = bool(ai_api_key) or is_ai_api_key_optional(ai_base_url)
 
-        if not ai_enabled or not has_valid_auth:
+        if not ai_enabled:
+            logger.info("Production AI is disabled in Settings. Initializing DisabledLLMProvider.")
+            llm = DisabledLLMProvider(reason="AI is disabled in Settings")
+        elif not has_valid_auth:
             logger.warning(
-                "Production AI is not configured or disabled. Initializing unconfigured provider."
+                "Production AI has no valid credentials. Initializing DisabledLLMProvider."
             )
-            # Create a provider that safely fails or reports unconfigured rather than silently faking replies
-            llm = OpenAICompatibleProvider(
-                base_url=ai_base_url or "https://api.openai.com/v1",
-                api_key="__UNCONFIGURED__",
-                default_model=ai_model,
-            )
+            llm = DisabledLLMProvider(reason="Missing API key for AI provider")
         else:
             llm = OpenAICompatibleProvider(
                 base_url=ai_base_url,
@@ -97,60 +94,65 @@ def create_agent_runtime(
             )
 
     # 2. Embedding Provider & Vector Store instantiation
-    embed_provider: EmbeddingProvider
-    vector_store: VectorStore
+    embed_provider: EmbeddingProvider | None = None
+    vector_store: VectorStore | None = None
 
     if test_mode:
         embed_provider = FakeEmbeddingProvider()
         vector_store = FakeVectorStore()
     else:
-        # Production embedding & vector store
-        embed_base_url = (
-            settings.get("embedding_base_url") or settings.get("ai_api_base_url") or ""
-        ).strip()
-        embed_api_key = (
-            settings.get("embedding_api_key") or settings.get("ai_api_key") or ""
-        ).strip()
-        embed_model = (settings.get("embedding_model") or "text-embedding-3-small").strip()
-
-        if embed_api_key or is_ai_api_key_optional(embed_base_url):
-            embed_provider = OpenAICompatibleEmbeddingProvider(
-                base_url=embed_base_url or "https://api.openai.com/v1",
-                api_key=embed_api_key or "__NO_KEY__",
-                model=embed_model,
-            )
-        else:
-            logger.warning(
-                "No embedding credentials configured; RAG embedding initialized in degraded mode."
-            )
-            embed_provider = OpenAICompatibleEmbeddingProvider(
-                base_url="https://api.openai.com/v1",
-                api_key="__UNCONFIGURED__",
-                model=embed_model,
-            )
-
+        rag_enabled = bool(settings.get("rag_enabled", True))
         vector_backend = (
             settings.get("vector_store_provider")
-            or os.getenv("AI_VECTOR_STORE_BACKEND", "in_memory")
+            or os.getenv("AI_VECTOR_STORE_BACKEND")
+            or "qdrant"
         ).lower()
 
-        if vector_backend == "qdrant":
+        if not rag_enabled:
+            embed_provider = None
+            vector_store = None
+        elif vector_backend == "qdrant":
+            embed_base_url = (
+                settings.get("embedding_base_url") or settings.get("ai_api_base_url") or ""
+            ).strip()
+            embed_api_key = (
+                settings.get("embedding_api_key") or settings.get("ai_api_key") or ""
+            ).strip()
+            embed_model = (settings.get("embedding_model") or "text-embedding-3-small").strip()
+
+            if embed_api_key or is_ai_api_key_optional(embed_base_url):
+                embed_provider = OpenAICompatibleEmbeddingProvider(
+                    base_url=embed_base_url or "https://api.openai.com/v1",
+                    api_key=embed_api_key or "__NO_KEY__",
+                    model=embed_model,
+                )
+            else:
+                embed_provider = None
+
             qdrant_url = (
                 settings.get("qdrant_url") or os.getenv("QDRANT_URL") or "http://localhost:6333"
             )
             qdrant_key = settings.get("qdrant_api_key") or os.getenv("QDRANT_API_KEY")
             vector_store = QdrantVectorStore(url=qdrant_url, api_key=qdrant_key)
         else:
-            # Fallback in-memory vector store for lightweight single-node instances without sidecar
-            vector_store = FakeVectorStore()
+            raise RuntimeError(
+                f"Production runtime requires 'qdrant' vector store or explicit rag_enabled=False. "
+                f"Unknown or test-only provider '{vector_backend}' is prohibited in production."
+            )
 
-    retriever = KnowledgeRetriever(embed_provider, vector_store)
+    retriever = (
+        KnowledgeRetriever(embed_provider, vector_store)
+        if (embed_provider is not None and vector_store is not None)
+        else None
+    )
     memory_provider = NativeMemoryProvider()
 
     runtime = AgentRuntime(
         llm_provider=llm,
         retriever=retriever,
         memory_provider=memory_provider,
+        vector_store=vector_store,
+        embedding_provider=embed_provider,
     )
     return runtime
 

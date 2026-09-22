@@ -69,6 +69,8 @@ class SkillRegistry:
         logger.info(f"Discovered {len(self._skills)} skills in {self.skills_dir}")
         return self._skills
 
+    discover_skills = discover
+
     def _parse_skill_file(self, file_path: Path) -> Skill:
         raw = file_path.read_text(encoding="utf-8")
         if raw.startswith("---"):
@@ -127,6 +129,47 @@ class SkillRegistry:
             skill.is_enabled = enabled
             return True
         return False
+
+    async def sync_persisted_states(self, session: Any) -> None:
+        """Load persisted skill enabled/disabled states from BotConfig."""
+        from sqlalchemy import select
+
+        from app.models.config import BotConfig
+
+        stmt = select(BotConfig).where(BotConfig.key.like("skill_enabled:%"))
+        res = await session.execute(stmt)
+        for cfg in res.scalars().all():
+            skill_name = cfg.key.split("skill_enabled:", 1)[1]
+            if skill_name in self._skills:
+                self._skills[skill_name].is_enabled = cfg.value.lower() in ("true", "1", "yes")
+
+    async def set_enabled_persisted(self, session: Any, name: str, enabled: bool) -> bool:
+        """Set skill enabled state and persist to BotConfig table."""
+        from sqlalchemy import select
+
+        from app.models.config import BotConfig
+
+        if not self.set_enabled(name, enabled):
+            return False
+
+        key = f"skill_enabled:{name}"
+        stmt = select(BotConfig).where(BotConfig.key == key)
+        res = await session.execute(stmt)
+        row = res.scalar_one_or_none()
+        val_str = "true" if enabled else "false"
+        if row:
+            row.value = val_str
+        else:
+            session.add(
+                BotConfig(
+                    key=key,
+                    value=val_str,
+                    category="skills",
+                    description=f"Persistent enabled toggle for skill: {name}",
+                )
+            )
+        await session.commit()
+        return True
 
 
 skill_registry = SkillRegistry()

@@ -72,7 +72,8 @@ async def lifespan(app: FastAPI):
         )
 
     # Wire up Signal message pipeline
-    from app.services.ai_engine import ai_engine
+    from app.ai.mcp.client import mcp_manager
+    from app.ai.skills.registry import skill_registry
     from app.services.event_pipeline import event_pipeline
     from app.services.message_handler import message_handler
 
@@ -87,21 +88,20 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("⚠️  SIGNAL config incomplete (url/phone) — listener disabled")
 
-    # Initialize AI engine (only if feature is enabled)
-    ai_ok = await ai_engine.initialize()
-    message_handler.set_ai_engine(ai_engine)
-    if ai_ok:
-        logger.info(f"✅ AI engine active — model: {settings.ai_model}")
-    else:
-        logger.info(
-            "ℹ️  AI warmup skipped at startup. "
-            "Runtime key from Settings can still activate AI on next incoming message."
-        )
+    # Initialize AI platform & MCP runtime lifecycle
+    try:
+        async with async_session() as startup_session:
+            await skill_registry.sync_persisted_states(startup_session)
+            await mcp_manager.connect_enabled_servers(startup_session)
+        logger.info("✅ Unified AgentRuntime & MCP lifecycle active")
+    except Exception as e:
+        logger.warning(f"⚠️  AI lifecycle warmup partial: {e}")
 
     yield
 
     # Shutdown
     logger.info("🛑 Shutting down...")
+    await mcp_manager.disconnect_all()
     await signal_client.stop()
     await event_pipeline.stop()
     await close_db()
