@@ -65,15 +65,26 @@ export interface AIRunExplainabilityDTO {
 }
 
 export interface AIOverviewMetricsDTO {
+  total_ai_runs?: number;
   total_runs: number;
-  avg_latency_ms: number;
-  total_tokens: number;
-  copilot_suggestions_count: number;
+  automation_rate?: number;
+  copilot_rate?: number;
+  human_takeover_rate?: number;
+  suggestion_acceptance_rate?: number;
   copilot_acceptance_rate: number;
-  copilot_avg_edit_ratio: number;
-  knowledge_sources_count: number;
-  knowledge_chunks_count: number;
+  copilot_suggestions_count?: number;
+  suggestion_edit_rate?: number;
+  copilot_avg_edit_ratio?: number;
+  suggestion_rejection_rate?: number;
+  rag_hit_rate?: number;
+  knowledge_documents_count?: number;
+  knowledge_sources_count?: number;
+  knowledge_chunks_count?: number;
   memory_items_count: number;
+  average_latency_ms?: number;
+  avg_latency_ms: number;
+  total_tokens_used?: number;
+  total_tokens: number;
 }
 
 export interface KnowledgeSourceDTO {
@@ -86,7 +97,9 @@ export interface KnowledgeSourceDTO {
   trust_level: string;
   version: number;
   document_count?: number;
+  documents_count?: number;
   chunk_count?: number;
+  chunks_count?: number;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -98,10 +111,14 @@ export interface MemoryItemDTO {
   scope_id: string;
   content: string;
   memory_type: string;
+  confidence?: number;
   importance: number;
-  is_pii_redacted: boolean;
+  sensitivity?: string;
+  status?: string;
+  is_pii_redacted?: boolean;
   created_by: string;
   created_at: string;
+  updated_at?: string | null;
 }
 
 export interface SkillDTO {
@@ -111,18 +128,24 @@ export interface SkillDTO {
   scope: string;
   is_enabled: boolean;
   instructions_preview?: string;
+  body?: string | null;
 }
 
 export interface MCPServerDTO {
   id: number;
   name: string;
-  transport_type: string;
+  transport?: string;
+  transport_type?: string;
+  command_or_url?: string;
   endpoint_url?: string | null;
   command?: string | null;
   status: string;
   is_enabled: boolean;
+  tools_count?: number;
   tool_count?: number;
+  last_connected_at?: string | null;
   last_health_check?: string | null;
+  error_message?: string | null;
 }
 
 export interface LearningCandidateDTO {
@@ -159,3 +182,27 @@ export interface EvaluationSummaryDTO {
   total_tokens: number;
   results: EvaluationResultCaseDTO[];
 }
+
+export interface PromptVersionDTO {
+  id: number;
+  version: string;
+  name: string;
+  template: string;
+  is_active: boolean;
+  created_by: string;
+  created_at: string;
+  activated_at?: string | null;
+}
+
+export interface AIDiagnosticsDTO {
+  llm: { name?: string; model?: string; status: string };
+  llm_provider?: { name?: string; model?: string; status: string };
+  embedding: { name?: string; model?: string; status: string };
+  embedding_provider?: { name?: string; model?: string; status: string };
+  vector_store: { provider: string; status: string };
+  rag_index: { documents_count: number; chunks_count: number; status: string };
+  mcp: { active_servers: number; total_servers: number; status: string };
+  signal_gateway: { status: string; api_url?: string; phone_number?: string };
+}
+
+

@@ -209,6 +209,7 @@ class MCPClientManager:
 
             def make_handler(tool_name: str, active_session: Any | None):
                 async def handler(**kwargs):
+                    kwargs.pop("session", None)
                     if active_session:
                         res = await asyncio.wait_for(
                             active_session.call_tool(tool_name, arguments=kwargs),

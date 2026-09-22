@@ -357,10 +357,21 @@ class MessageHandler:
                             f"✋ Admin switched conversation #{conversation.id} to mode '{conversation.mode}' "
                             f"during AI generation — discarding outbound reply!"
                         )
+                        if agent_response.ai_suggestion_id:
+                            from app.models.ai import AISuggestion, AISuggestionStatus
+
+                            sug_to_expire = await session.get(
+                                AISuggestion, agent_response.ai_suggestion_id
+                            )
+                            if sug_to_expire:
+                                sug_to_expire.status = AISuggestionStatus.expired.value
+                                await session.commit()
                         return
 
                     # 9. Deliver Outbound Reply via OutboundMessageService with Provenance
-                    await outbound_service.send_message(
+                    from app.models.ai import AIRun, AISuggestion, AISuggestionStatus
+
+                    outbound_msg = await outbound_service.send_message(
                         session=session,
                         conversation_id=conversation.id,
                         content=agent_response.answer,
@@ -369,7 +380,34 @@ class MessageHandler:
                         origin=MessageOrigin.ai_auto.value,
                         ai_run_id=agent_response.ai_run_id,
                         ai_suggestion_id=agent_response.ai_suggestion_id,
+                        tokens_used=agent_response.tokens,
+                        model=agent_response.model,
+                        prompt_version=agent_response.prompt_version,
                     )
+
+                    # Update suggestion & run finalization based on real network send outcome
+                    if outbound_msg.delivery_status == MessageDeliveryStatus.sent.value:
+                        if agent_response.ai_suggestion_id:
+                            sug_to_update = await session.get(
+                                AISuggestion, agent_response.ai_suggestion_id
+                            )
+                            if sug_to_update:
+                                sug_to_update.status = AISuggestionStatus.auto_sent.value
+                                sug_to_update.final_message_id = outbound_msg.id
+                        if agent_response.ai_run_id:
+                            run_to_update = await session.get(AIRun, agent_response.ai_run_id)
+                            if run_to_update:
+                                run_to_update.final_message_id = outbound_msg.id
+                        await session.commit()
+                    else:
+                        if agent_response.ai_suggestion_id:
+                            sug_to_update = await session.get(
+                                AISuggestion, agent_response.ai_suggestion_id
+                            )
+                            if sug_to_update:
+                                sug_to_update.status = AISuggestionStatus.send_failed.value
+                                sug_to_update.final_message_id = outbound_msg.id
+                        await session.commit()
                 elif agent_response.decision == AgentDecision.draft_for_human.value:
                     logger.info(
                         f"⚠️ AI requested human review for conversation #{conversation.id} "
@@ -390,6 +428,9 @@ class MessageHandler:
                             actor=MessageActor.bot.value,
                             origin=MessageOrigin.ai_auto.value,
                             ai_run_id=agent_response.ai_run_id,
+                            tokens_used=agent_response.tokens,
+                            model=agent_response.model,
+                            prompt_version=agent_response.prompt_version,
                         )
 
             except Exception as e:

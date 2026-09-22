@@ -35,8 +35,22 @@ def evaluate_case_result(case: dict[str, Any], response: Any) -> CaseEvalResult:
     skill_correct = (expected_skill in response.skills_used) if expected_skill else True
 
     expected_tool = case.get("expected_tool")
-    tool_names = [t.get("name") for t in response.tools_called]
-    tool_correct = (expected_tool in tool_names) if expected_tool else True
+    if expected_tool:
+        matching_calls = [t for t in response.tools_called if t.get("name") == expected_tool]
+        if not matching_calls:
+            tool_correct = False
+        else:
+            # P0 Invariant: A tool eval passes only if selected AND executed successfully (not status == "error")
+            tool_correct = all(
+                t.get("status") != "error"
+                and (
+                    not isinstance(t.get("output"), dict)
+                    or t.get("output", {}).get("status") != "error"
+                )
+                for t in matching_calls
+            )
+    else:
+        tool_correct = True
 
     expected_kw = case.get("expected_keywords", [])
     ans_lower = response.answer.lower()

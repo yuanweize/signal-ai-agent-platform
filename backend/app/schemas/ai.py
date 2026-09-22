@@ -28,12 +28,18 @@ class AISuggestionDTO(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class AcceptSuggestionRequest(BaseModel):
+    suggestion_id: int | None = None
+
+
 class EditSuggestionRequest(BaseModel):
     edited_text: str = Field(min_length=1, max_length=10000)
+    suggestion_id: int | None = None
 
 
 class RejectSuggestionRequest(BaseModel):
     reason: str | None = None
+    suggestion_id: int | None = None
 
 
 # --- AI Runs & Traces ---
@@ -142,13 +148,14 @@ class MemoryItemDTO(BaseModel):
     scope_id: str
     memory_type: str  # preference | fact | case | constraint
     content: str
-    confidence: float
-    importance: int
-    sensitivity: str
-    status: str
-    created_by: str
+    confidence: float = 1.0
+    importance: int = 3
+    sensitivity: str = "standard"
+    status: str = "active"
+    created_by: str = "ai_extraction"
     created_at: datetime
-    updated_at: datetime
+    updated_at: datetime | None = None
+    is_pii_redacted: bool = False
 
 
 class CreateMemoryRequest(BaseModel):
@@ -188,6 +195,12 @@ class MCPServerDTO(BaseModel):
     last_connected_at: datetime | None = None
     error_message: str | None = None
     tools_count: int = 0
+    # Backward compatibility aliases
+    transport_type: str | None = None
+    command: str | None = None
+    endpoint_url: str | None = None
+    tool_count: int | None = None
+    last_health_check: datetime | None = None
 
 
 class CreateMCPServerRequest(BaseModel):
@@ -218,6 +231,7 @@ class LearningCandidateDTO(BaseModel):
 
 
 class PromoteCandidateRequest(BaseModel):
+    action: str | None = None
     faq_question: str | None = None
     faq_answer: str | None = None
     category: str = "general"
@@ -240,15 +254,23 @@ class EvaluationSuiteResultDTO(BaseModel):
 
 
 class AIOverviewMetricsDTO(BaseModel):
-    total_ai_runs: int
-    automation_rate: float
-    copilot_rate: float
-    human_takeover_rate: float
-    suggestion_acceptance_rate: float
-    suggestion_edit_rate: float
-    suggestion_rejection_rate: float
-    rag_hit_rate: float
-    memory_items_count: int
-    knowledge_documents_count: int
-    average_latency_ms: float
-    total_tokens_used: int
+    total_ai_runs: int = 0
+    total_runs: int = 0
+    automation_rate: float = 0.0
+    copilot_rate: float = 0.0
+    human_takeover_rate: float = 0.0
+    suggestion_acceptance_rate: float = 0.0
+    copilot_acceptance_rate: float = 0.0
+    copilot_suggestions_count: int = 0
+    suggestion_edit_rate: float = 0.0
+    copilot_avg_edit_ratio: float = 0.0
+    suggestion_rejection_rate: float = 0.0
+    rag_hit_rate: float = 0.0
+    memory_items_count: int = 0
+    knowledge_documents_count: int = 0
+    knowledge_sources_count: int = 0
+    knowledge_chunks_count: int = 0
+    average_latency_ms: float = 0.0
+    avg_latency_ms: float = 0.0
+    total_tokens_used: int = 0
+    total_tokens: int = 0

@@ -14,10 +14,9 @@ services:
       - DATABASE_URL=sqlite+aiosqlite:///./data/bot.db
       - LOG_LEVEL=INFO
       - ALLOWED_ORIGINS=http://localhost:3000
-      - AI_VECTOR_STORE_BACKEND=${AI_VECTOR_STORE_BACKEND:-in_memory}
       - QDRANT_URL=http://qdrant:6333
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
       interval: 30s
       timeout: 10s
       retries: 3

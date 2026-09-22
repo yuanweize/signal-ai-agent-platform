@@ -36,11 +36,7 @@ class ConversationContextLoader:
         Returns messages ordered oldest -> newest.
         Excludes the current inbound message (by current_message_id) so it is not duplicated.
         """
-        query = (
-            select(Message)
-            .where(Message.conversation_id == conversation_id)
-            .where(Message.role.in_(["user", "customer", "assistant", "bot", "human", "admin"]))
-        )
+        query = select(Message).where(Message.conversation_id == conversation_id)
         if current_message_id is not None:
             query = query.where(Message.id != current_message_id)
 
@@ -59,19 +55,41 @@ class ConversationContextLoader:
             if not content:
                 continue
 
-            # Format role & sender attribution
-            role = "assistant" if msg.role in ("assistant", "bot", "system") else "user"
+            # Robust classification using direction, actor, origin, and admin_identity (Section 19)
+            is_outbound = msg.direction == "outbound"
+            is_admin = (
+                msg.actor in ("admin", "human")
+                or msg.origin in ("human_manual", "human_ai_assisted")
+                or bool(msg.admin_identity)
+                or msg.role in ("admin", "human")
+            )
+            is_ai = (
+                msg.actor in ("bot", "ai")
+                or msg.origin == "ai_auto"
+                or msg.role in ("assistant", "bot")
+            )
+            is_system = msg.actor == "system" or msg.role == "system"
+
+            if is_system:
+                role = "system"
+            elif is_outbound or is_admin or is_ai:
+                role = "assistant"
+            else:
+                role = "user"
+
+            # Sender attribution presentation (Section 19)
             if is_group:
-                if msg.role in ("assistant", "bot"):
-                    attribution = "AI: "
-                elif msg.role in ("human", "admin"):
-                    name = msg.admin_identity or msg.sender_name or msg.sender_id or "Staff"
+                if is_admin:
+                    name = msg.admin_identity or msg.sender_name or msg.sender_id or "Support"
                     attribution = f"Human Support ({name}): "
+                elif is_ai:
+                    attribution = "AI: "
                 else:
-                    attribution = f"{msg.sender_name or msg.sender_id or 'User'}: "
+                    name = msg.sender_name or msg.sender_id or "User"
+                    attribution = f"{name}: "
                 final_content = f"{attribution}{content}"
             else:
-                if msg.role in ("human", "admin"):
+                if is_admin:
                     final_content = f"Human Support: {content}"
                 else:
                     final_content = content

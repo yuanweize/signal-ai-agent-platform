@@ -153,6 +153,21 @@ class FakeLLMProvider:
         if self.fixed_reply is not None:
             return self.fixed_reply, 42
 
+        # Inspect messages for tool results
+        for m in messages:
+            content_str = m.get("content", "")
+            if "Business Tool Results:" in content_str:
+                tool_data = content_str.replace("Business Tool Results:", "").strip()
+                if (
+                    "search_products" in tool_data.lower()
+                    or "organic arabica coffee" in tool_data.lower()
+                ):
+                    return (
+                        "Here are our current featured products: Organic Arabica Coffee ($15.00).",
+                        35,
+                    )
+                return f"According to warehouse and inventory records: {tool_data}", 35
+
         # Inspect last message for deterministic behaviors
         last_msg = messages[-1]["content"] if messages else ""
         lower = last_msg.lower()
@@ -190,7 +205,44 @@ class FakeLLMProvider:
             }
         )
         last_msg = messages[-1]["content"] if messages else ""
-        if "search" in last_msg.lower() or "price" in last_msg.lower():
+        lower = last_msg.lower()
+        if "inventory" in lower or "sku" in lower:
+            tool_name = "warehouse_check_inventory"
+            if tools:
+                matched = next(
+                    (
+                        t["function"]["name"]
+                        for t in tools
+                        if "inventory" in t["function"]["name"].lower()
+                    ),
+                    None,
+                )
+                if matched:
+                    tool_name = matched
+            return (
+                None,
+                [{"id": "call_inv_1", "name": tool_name, "arguments": {"sku": "SKU-COFFEE-01"}}],
+                30,
+            )
+        if "dispatch" in lower or "ship order" in lower or "ship it" in lower:
+            tool_name = "warehouse_dispatch_order"
+            if tools:
+                matched = next(
+                    (
+                        t["function"]["name"]
+                        for t in tools
+                        if "dispatch" in t["function"]["name"].lower()
+                    ),
+                    None,
+                )
+                if matched:
+                    tool_name = matched
+            return (
+                None,
+                [{"id": "call_disp_1", "name": tool_name, "arguments": {"order_id": 101}}],
+                30,
+            )
+        if "search" in lower or "price" in lower:
             return (
                 None,
                 [{"id": "call_1", "name": "search_products", "arguments": {"query": "coffee"}}],

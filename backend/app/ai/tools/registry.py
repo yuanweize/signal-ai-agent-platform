@@ -77,6 +77,9 @@ class ToolRegistry:
     def get_tool(self, name: str) -> RegisteredTool | None:
         return self._tools.get(name)
 
+    def unregister(self, name: str) -> None:
+        self._tools.pop(name, None)
+
     def list_tools(self) -> list[RegisteredTool]:
         return list(self._tools.values())
 
@@ -111,13 +114,18 @@ class ToolRegistry:
             }
 
         try:
+            from app.ai.tools.context import current_tool_session
+
             func = tool.func
             sig = inspect.signature(func)
             has_var_keyword = any(
                 p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
             )
+            ctx_session = current_tool_session.get()
             if has_var_keyword:
                 kwargs = {**arguments, **extra_kwargs}
+                if not tool.is_mcp and "session" not in kwargs and ctx_session is not None:
+                    kwargs["session"] = ctx_session
             else:
                 kwargs = {}
                 for param in sig.parameters.values():
@@ -125,6 +133,8 @@ class ToolRegistry:
                         kwargs[param.name] = arguments[param.name]
                     elif param.name in extra_kwargs:
                         kwargs[param.name] = extra_kwargs[param.name]
+                    elif param.name == "session" and ctx_session is not None and not tool.is_mcp:
+                        kwargs["session"] = ctx_session
 
             if inspect.iscoroutinefunction(func):
                 result = await func(**kwargs)

@@ -14,13 +14,14 @@ import {
   Trash2,
   Undo2,
   AlertCircle,
+  BookOpen,
 } from 'lucide-react';
 import { api } from './api';
 import SidebarLayout from './SidebarLayout';
 import { Card } from './components/ui/Card';
 import { Button } from './components/ui/Button';
 
-type SettingsTab = 'general' | 'signal' | 'ai' | 'campaign' | 'security' | 'retention' | 'diagnostics';
+type SettingsTab = 'general' | 'signal' | 'ai' | 'rag' | 'campaign' | 'security' | 'retention' | 'diagnostics';
 
 function inferProvider(model: string): string {
   const value = (model || '').trim();
@@ -96,6 +97,35 @@ export default function SettingsPage() {
     models?: string[];
   } | null>(null);
 
+  // RAG & Vector Store settings
+  const [ragEnabled, setRagEnabled] = useState(true);
+  const [embeddingBaseUrl, setEmbeddingBaseUrl] = useState('');
+  const [embeddingModel, setEmbeddingModel] = useState('text-embedding-3-small');
+  const [embeddingApiKey, setEmbeddingApiKey] = useState('');
+  const [embeddingApiKeyMasked, setEmbeddingApiKeyMasked] = useState('');
+  const [vectorStoreProvider, setVectorStoreProvider] = useState('qdrant');
+  const [qdrantUrl, setQdrantUrl] = useState('http://localhost:6333');
+  const [qdrantApiKey, setQdrantApiKey] = useState('');
+  const [qdrantApiKeyMasked, setQdrantApiKeyMasked] = useState('');
+  const [testingEmbedding, setTestingEmbedding] = useState(false);
+  const [embeddingTestResult, setEmbeddingTestResult] = useState<{
+    ok: boolean;
+    configured: boolean;
+    connected: boolean;
+    latency_ms: number;
+    message: string;
+    error?: string | null;
+  } | null>(null);
+  const [testingVectorStore, setTestingVectorStore] = useState(false);
+  const [vectorStoreTestResult, setVectorStoreTestResult] = useState<{
+    ok: boolean;
+    configured: boolean;
+    connected: boolean;
+    latency_ms: number;
+    message: string;
+    error?: string | null;
+  } | null>(null);
+
   // Campaign settings
   const [adAutomationEnabled, setAdAutomationEnabled] = useState(true);
   const [adMinIntervalMinutes, setAdMinIntervalMinutes] = useState(180);
@@ -124,6 +154,16 @@ export default function SettingsPage() {
       setSignalApiToken('');
       setPrompt(data.ai_prompt || '');
       setApiKeyMasked(data.ai_api_key_masked || '');
+
+      setRagEnabled(data.rag_enabled ?? true);
+      setEmbeddingBaseUrl(data.embedding_base_url || '');
+      setEmbeddingModel(data.embedding_model || 'text-embedding-3-small');
+      setEmbeddingApiKeyMasked(data.embedding_api_key_masked || '');
+      setEmbeddingApiKey('');
+      setVectorStoreProvider(data.vector_store_provider || 'qdrant');
+      setQdrantUrl(data.qdrant_url || 'http://localhost:6333');
+      setQdrantApiKeyMasked(data.qdrant_api_key_masked || '');
+      setQdrantApiKey('');
 
       setAiBaseUrl(data.ai_api_base_url || 'https://api.openai.com/v1');
       setAiProviderDetected(data.ai_provider_detected || 'unknown');
@@ -192,6 +232,11 @@ export default function SettingsPage() {
           .split(',')
           .map(item => item.trim())
           .filter(Boolean),
+        rag_enabled: ragEnabled,
+        embedding_base_url: embeddingBaseUrl.trim(),
+        embedding_model: embeddingModel.trim(),
+        vector_store_provider: vectorStoreProvider.trim(),
+        qdrant_url: qdrantUrl.trim(),
       };
 
       if (apiKey.trim()) {
@@ -200,12 +245,22 @@ export default function SettingsPage() {
       if (signalApiToken.trim()) {
         payload.signal_api_token = signalApiToken.trim();
       }
+      if (embeddingApiKey.trim()) {
+        payload.embedding_api_key = embeddingApiKey.trim();
+      }
+      if (qdrantApiKey.trim()) {
+        payload.qdrant_api_key = qdrantApiKey.trim();
+      }
 
       const updated = await api.updateSettings(payload);
       setSignalApiTokenMasked(updated.signal_api_token_masked || '');
       setSignalApiToken('');
       setApiKeyMasked(updated.ai_api_key_masked || '');
       setApiKey('');
+      setEmbeddingApiKeyMasked(updated.embedding_api_key_masked || '');
+      setEmbeddingApiKey('');
+      setQdrantApiKeyMasked(updated.qdrant_api_key_masked || '');
+      setQdrantApiKey('');
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (e) {
@@ -229,6 +284,39 @@ export default function SettingsPage() {
       setError(e instanceof Error ? e.message : 'Signal connection test failed');
     } finally {
       setTestingSignal(false);
+    }
+  };
+
+  const handleTestEmbedding = async () => {
+    try {
+      setTestingEmbedding(true);
+      setError(null);
+      const res = await api.testEmbedding({
+        embedding_base_url: embeddingBaseUrl.trim() || undefined,
+        embedding_model: embeddingModel.trim() || undefined,
+        embedding_api_key: embeddingApiKey.trim() || undefined,
+      });
+      setEmbeddingTestResult(res as any);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Embedding connection test failed');
+    } finally {
+      setTestingEmbedding(false);
+    }
+  };
+
+  const handleTestVectorStore = async () => {
+    try {
+      setTestingVectorStore(true);
+      setError(null);
+      const res = await api.testVectorStore({
+        qdrant_url: qdrantUrl.trim() || undefined,
+        qdrant_api_key: qdrantApiKey.trim() || undefined,
+      });
+      setVectorStoreTestResult(res as any);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Vector store connection test failed');
+    } finally {
+      setTestingVectorStore(false);
     }
   };
 
@@ -309,6 +397,7 @@ export default function SettingsPage() {
     { id: 'general' as const, label: 'General', icon: Sliders },
     { id: 'signal' as const, label: 'Signal Gateway', icon: Radio },
     { id: 'ai' as const, label: 'AI Engine', icon: Bot },
+    { id: 'rag' as const, label: 'RAG & Vectors', icon: BookOpen },
     { id: 'campaign' as const, label: 'Campaigns', icon: Megaphone },
     { id: 'security' as const, label: 'Security & Audit', icon: ShieldCheck },
     { id: 'retention' as const, label: 'Data & Retention', icon: Database },
@@ -674,6 +763,209 @@ export default function SettingsPage() {
                         className="w-full px-3 py-2 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
                         value={aiContextMessages}
                         onChange={e => setAiContextMessages(parseInt(e.target.value, 10) || 20)}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            )}
+
+            {/* TAB: RAG & Vectors */}
+            {activeTab === 'rag' && (
+              <Card
+                title="RAG & Vector Store Configuration"
+                subtitle="Manage embedding endpoint, vector database, and retrieval pipeline"
+                headerAction={
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="xs"
+                      loading={testingEmbedding}
+                      onClick={handleTestEmbedding}
+                      className="gap-1.5"
+                    >
+                      <Zap className="w-3 h-3" />
+                      <span>Test Embedding</span>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="xs"
+                      loading={testingVectorStore}
+                      onClick={handleTestVectorStore}
+                      className="gap-1.5"
+                    >
+                      <Database className="w-3 h-3" />
+                      <span>Test Vector Store</span>
+                    </Button>
+                  </div>
+                }
+              >
+                {embeddingTestResult && (
+                  <div
+                    className={`p-3.5 rounded-xl text-xs mb-4 border ${
+                      embeddingTestResult.connected
+                        ? 'bg-[rgba(0,214,143,0.12)] border-[rgba(0,214,143,0.3)] text-[var(--success)]'
+                        : 'bg-[rgba(255,107,107,0.12)] border-[rgba(255,107,107,0.3)] text-[var(--danger)]'
+                    }`}
+                  >
+                    <div className="font-bold">
+                      Embedding Service: {embeddingTestResult.connected ? 'CONNECTED' : 'FAILED'} (Latency: {embeddingTestResult.latency_ms}ms)
+                    </div>
+                    <div className="text-[11px] mt-1">{embeddingTestResult.message}</div>
+                    {embeddingTestResult.error && (
+                      <div className="text-[11px] font-mono mt-1 text-[var(--text-muted)]">
+                        Error: {embeddingTestResult.error}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {vectorStoreTestResult && (
+                  <div
+                    className={`p-3.5 rounded-xl text-xs mb-4 border ${
+                      vectorStoreTestResult.connected
+                        ? 'bg-[rgba(0,214,143,0.12)] border-[rgba(0,214,143,0.3)] text-[var(--success)]'
+                        : 'bg-[rgba(255,107,107,0.12)] border-[rgba(255,107,107,0.3)] text-[var(--danger)]'
+                    }`}
+                  >
+                    <div className="font-bold">
+                      Vector Store: {vectorStoreTestResult.connected ? 'CONNECTED' : 'FAILED'} (Latency: {vectorStoreTestResult.latency_ms}ms)
+                    </div>
+                    <div className="text-[11px] mt-1">{vectorStoreTestResult.message}</div>
+                    {vectorStoreTestResult.error && (
+                      <div className="text-[11px] font-mono mt-1 text-[var(--text-muted)]">
+                        Error: {vectorStoreTestResult.error}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="space-y-6">
+                  {/* Pipeline toggle */}
+                  <div className="flex items-center justify-between p-3.5 bg-[rgba(255,255,255,0.02)] rounded-xl border border-[var(--border)]">
+                    <div>
+                      <div className="font-semibold text-xs text-[var(--text-primary)]">
+                        RAG Knowledge Retrieval Enabled
+                      </div>
+                      <div className="text-[11px] text-[var(--text-muted)] mt-0.5">
+                        Enable semantic search and context injection from knowledge documents
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 accent-[var(--accent)] cursor-pointer"
+                      checked={ragEnabled}
+                      onChange={e => setRagEnabled(e.target.checked)}
+                    />
+                  </div>
+
+                  {/* Embedding settings */}
+                  <div className="border-t border-[var(--border)] pt-4 space-y-4">
+                    <h4 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">
+                      Embedding Model Settings
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
+                          Embedding Endpoint Base URL
+                        </label>
+                        <input
+                          type="text"
+                          className="w-full px-3 py-2 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg text-xs font-mono text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]"
+                          value={embeddingBaseUrl}
+                          onChange={e => setEmbeddingBaseUrl(e.target.value)}
+                          placeholder="Defaults to AI Base URL (e.g. https://api.openai.com/v1)"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
+                          Embedding Model Name
+                        </label>
+                        <input
+                          type="text"
+                          className="w-full px-3 py-2 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg text-xs font-mono text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]"
+                          value={embeddingModel}
+                          onChange={e => setEmbeddingModel(e.target.value)}
+                          placeholder="text-embedding-3-small"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-xs font-semibold text-[var(--text-secondary)]">
+                          Embedding API Key
+                        </label>
+                        {embeddingApiKeyMasked && (
+                          <span className="text-[11px] text-[var(--text-muted)] font-mono">
+                            Current: {embeddingApiKeyMasked}
+                          </span>
+                        )}
+                      </div>
+                      <input
+                        type="password"
+                        className="w-full px-3 py-2 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg text-xs font-mono text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]"
+                        value={embeddingApiKey}
+                        onChange={e => setEmbeddingApiKey(e.target.value)}
+                        placeholder="Leave blank to use main AI API key or existing value"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Vector Store settings */}
+                  <div className="border-t border-[var(--border)] pt-4 space-y-4">
+                    <h4 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">
+                      Vector Database (Qdrant)
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
+                          Vector Backend Provider
+                        </label>
+                        <select
+                          className="w-full px-3 py-2 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+                          value={vectorStoreProvider}
+                          onChange={e => setVectorStoreProvider(e.target.value)}
+                        >
+                          <option value="qdrant">Qdrant Vector Database</option>
+                          <option value="in_memory">In-Memory (Ephemeral / Dev)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
+                          Qdrant URL
+                        </label>
+                        <input
+                          type="text"
+                          className="w-full px-3 py-2 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg text-xs font-mono text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]"
+                          value={qdrantUrl}
+                          onChange={e => setQdrantUrl(e.target.value)}
+                          placeholder="http://localhost:6333"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-xs font-semibold text-[var(--text-secondary)]">
+                          Qdrant API Key
+                        </label>
+                        {qdrantApiKeyMasked && (
+                          <span className="text-[11px] text-[var(--text-muted)] font-mono">
+                            Current: {qdrantApiKeyMasked}
+                          </span>
+                        )}
+                      </div>
+                      <input
+                        type="password"
+                        className="w-full px-3 py-2 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg text-xs font-mono text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]"
+                        value={qdrantApiKey}
+                        onChange={e => setQdrantApiKey(e.target.value)}
+                        placeholder="Leave blank if no auth required or to keep existing key"
                       />
                     </div>
                   </div>

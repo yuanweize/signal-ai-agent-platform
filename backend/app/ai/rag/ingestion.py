@@ -112,7 +112,13 @@ class KnowledgeIngestionService:
             }
             for kc, vec in zip(db_chunks, vectors)
         ]
-        await self.vector_store.upsert(KNOWLEDGE_COLLECTION, points)
+        try:
+            await self.vector_store.upsert(KNOWLEDGE_COLLECTION, points)
+        except Exception as e:
+            logger.error(f"Vector store upsert failed for doc #{doc.id}: {e}")
+            await session.rollback()
+            raise
+
         await session.commit()
         await session.refresh(doc)
         logger.info(
@@ -132,7 +138,12 @@ class KnowledgeIngestionService:
         vector_ids = [c.vector_id for c in chunks if c.vector_id]
 
         if vector_ids:
-            await self.vector_store.delete(KNOWLEDGE_COLLECTION, vector_ids)
+            try:
+                await self.vector_store.delete(KNOWLEDGE_COLLECTION, vector_ids)
+            except Exception as e:
+                logger.error(f"Vector store delete failed for doc #{document_id}: {e}")
+                await session.rollback()
+                raise
 
         await session.execute(delete(KnowledgeDocument).where(KnowledgeDocument.id == document_id))
         await session.commit()
@@ -151,7 +162,12 @@ class KnowledgeIngestionService:
         vector_ids = [c.vector_id for c in chunks if c.vector_id]
 
         if vector_ids:
-            await self.vector_store.delete(KNOWLEDGE_COLLECTION, vector_ids)
+            try:
+                await self.vector_store.delete(KNOWLEDGE_COLLECTION, vector_ids)
+            except Exception as e:
+                logger.error(f"Vector store delete failed for source #{source_id}: {e}")
+                await session.rollback()
+                raise
 
         await session.execute(delete(KnowledgeSource).where(KnowledgeSource.id == source_id))
         await session.commit()
@@ -174,7 +190,14 @@ class KnowledgeIngestionService:
         old_chunks = list(res.scalars().all())
         old_vector_ids = [c.vector_id for c in old_chunks if c.vector_id]
         if old_vector_ids:
-            await self.vector_store.delete(KNOWLEDGE_COLLECTION, old_vector_ids)
+            try:
+                await self.vector_store.delete(KNOWLEDGE_COLLECTION, old_vector_ids)
+            except Exception as e:
+                logger.error(
+                    f"Vector store delete old vectors failed during reindex for doc #{doc.id}: {e}"
+                )
+                await session.rollback()
+                raise
 
         await session.execute(
             delete(KnowledgeChunk).where(KnowledgeChunk.document_id == document_id)
@@ -231,7 +254,13 @@ class KnowledgeIngestionService:
             }
             for kc, vec in zip(db_chunks, vectors)
         ]
-        await self.vector_store.upsert(KNOWLEDGE_COLLECTION, points)
+        try:
+            await self.vector_store.upsert(KNOWLEDGE_COLLECTION, points)
+        except Exception as e:
+            logger.error(f"Vector store upsert failed during reindex for doc #{doc.id}: {e}")
+            await session.rollback()
+            raise
+
         await session.commit()
         logger.info(f"Reindexed document #{doc.id} with {len(chunks)} chunks into vector store")
         return len(chunks)

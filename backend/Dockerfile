@@ -40,10 +40,11 @@ COPY --from=deps /usr/local/bin /usr/local/bin
 # Copy application code
 COPY . .
 
-# Create data directory
-RUN mkdir -p /app/data
+# Create data directory and ensure entrypoint script permissions
+RUN mkdir -p /app/data && chmod +x /app/entrypoint.sh
 
 EXPOSE 8000
 
-# Run with uvicorn
+# Run migrations then start uvicorn
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

@@ -92,6 +92,27 @@ class SignalProbeResponse(BaseModel):
     listener_connected: bool
 
 
+class ComponentTestResponse(BaseModel):
+    ok: bool = True
+    configured: bool = True
+    connected: bool = True
+    latency_ms: int = 0
+    message: str = ""
+    error: str | None = None
+
+
+class EmbeddingTestRequest(BaseModel):
+    embedding_base_url: str | None = Field(default=None, max_length=500)
+    embedding_model: str | None = Field(default=None, max_length=120)
+    embedding_api_key: str | None = None
+
+
+class VectorStoreTestRequest(BaseModel):
+    vector_store_provider: str | None = Field(default=None, max_length=50)
+    qdrant_url: str | None = Field(default=None, max_length=500)
+    qdrant_api_key: str | None = None
+
+
 class AiProbeRequest(BaseModel):
     ai_api_base_url: str | None = Field(default=None, max_length=500)
     ai_model: str | None = Field(default=None, max_length=120)

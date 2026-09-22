@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.tools.context import current_tool_session
 from app.ai.tools.permissions import ToolPermission
 from app.ai.tools.registry import tool_registry
 from app.models.group import Group
@@ -16,12 +17,20 @@ from app.models.product import Product
 from app.models.user import User
 
 
+def _resolve_session(session: AsyncSession | None) -> AsyncSession:
+    resolved = session or current_tool_session.get()
+    if resolved is None:
+        raise RuntimeError("No database session provided or active in ToolExecutionContext")
+    return resolved
+
+
 async def search_products(
-    query: str, session: AsyncSession, limit: int = 5
+    query: str, session: AsyncSession | None = None, limit: int = 5
 ) -> list[dict[str, Any]]:
     """Search products in the catalog by name or description."""
+    db_session = _resolve_session(session)
     stmt = select(Product).where(Product.is_active.is_(True)).limit(limit)
-    res = await session.execute(stmt)
+    res = await db_session.execute(stmt)
     products = list(res.scalars().all())
 
     matched = []
@@ -52,9 +61,12 @@ async def search_products(
     return matched[:limit]
 
 
-async def get_product(product_id: int, session: AsyncSession) -> dict[str, Any] | None:
+async def get_product(
+    product_id: int, session: AsyncSession | None = None
+) -> dict[str, Any] | None:
     """Retrieve detailed information about a specific product."""
-    product = await session.get(Product, product_id)
+    db_session = _resolve_session(session)
+    product = await db_session.get(Product, product_id)
     if not product:
         return None
     return {
@@ -67,25 +79,31 @@ async def get_product(product_id: int, session: AsyncSession) -> dict[str, Any] 
     }
 
 
-async def get_customer_profile(signal_id: str, session: AsyncSession) -> dict[str, Any] | None:
+async def get_customer_profile(
+    signal_id: str, session: AsyncSession | None = None
+) -> dict[str, Any] | None:
     """Get customer profile information for a Signal identifier."""
+    db_session = _resolve_session(session)
     stmt = select(User).where(User.signal_id == signal_id)
-    res = await session.execute(stmt)
+    res = await db_session.execute(stmt)
     user = res.scalar_one_or_none()
     if not user:
         return None
     return {
         "id": user.id,
         "signal_id": user.signal_id,
-        "name": user.name,
+        "name": user.display_name,
         "is_blocked": user.is_blocked,
     }
 
 
-async def get_group_info(group_id: str, session: AsyncSession) -> dict[str, Any] | None:
+async def get_group_info(
+    group_id: str, session: AsyncSession | None = None
+) -> dict[str, Any] | None:
     """Get group title and status."""
+    db_session = _resolve_session(session)
     stmt = select(Group).where(Group.group_id == group_id)
-    res = await session.execute(stmt)
+    res = await db_session.execute(stmt)
     grp = res.scalar_one_or_none()
     if not grp:
         return None
@@ -93,7 +111,7 @@ async def get_group_info(group_id: str, session: AsyncSession) -> dict[str, Any]
         "id": grp.id,
         "group_id": grp.group_id,
         "name": grp.name,
-        "member_count": grp.member_count,
+        "member_count": len(grp.members) if grp.members else 0,
     }
 
 

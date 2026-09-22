@@ -9,6 +9,10 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 
+class VectorStoreError(RuntimeError):
+    """Raised when vector store upsert, search, or deletion fails."""
+
+
 @dataclass
 class VectorSearchResult:
     """Result of a vector similarity search."""

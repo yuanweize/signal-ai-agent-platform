@@ -26,6 +26,8 @@ import type {
   MCPServerDTO,
   LearningCandidateDTO,
   EvaluationSummaryDTO,
+  PromptVersionDTO,
+  AIDiagnosticsDTO,
 } from './types/ai';
 
 interface ApiOptions {
@@ -256,6 +258,20 @@ class ApiClient {
 
   async testSignalConnection(payload: SignalProbeRequest) {
     return this.request<SignalProbeResponse>('/settings/signal/test', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async testEmbedding(payload: { embedding_base_url?: string; embedding_model?: string; embedding_api_key?: string }) {
+    return this.request<{ ok: boolean; message: string; latency_ms: number; configured: boolean }>('/settings/embedding/test', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async testVectorStore(payload: { qdrant_url?: string; qdrant_api_key?: string }) {
+    return this.request<{ ok: boolean; message: string; latency_ms: number; configured: boolean }>('/settings/vector-store/test', {
       method: 'POST',
       body: payload,
     });
@@ -498,7 +514,7 @@ class ApiClient {
       faq_question?: string;
     }
   ) {
-    return this.request<{ ok: boolean; document_id: number; chunks_count: number }>(
+    return this.request<{ ok: boolean; document_id: number; chunks_created: number; chunks_count?: number }>(
       `/ai-studio/knowledge/sources/${sourceId}/documents`,
       {
         method: 'POST',
@@ -512,11 +528,11 @@ class ApiClient {
     if (scopeType) q.append('scope_type', scopeType);
     if (scopeId) q.append('scope_id', scopeId);
     const qs = q.toString() ? `?${q.toString()}` : '';
-    return this.request<MemoryItemDTO[]>(`/ai-studio/memory/items${qs}`);
+    return this.request<MemoryItemDTO[]>(`/ai-studio/memory${qs}`);
   }
 
   async deleteMemory(memoryId: number) {
-    return this.request<{ ok: boolean }>(`/ai-studio/memory/items/${memoryId}`, {
+    return this.request<{ ok: boolean }>(`/ai-studio/memory/${memoryId}`, {
       method: 'DELETE',
     });
   }
@@ -527,9 +543,9 @@ class ApiClient {
 
   async toggleSkill(skillName: string, isEnabled: boolean) {
     return this.request<{ ok: boolean; skill_name: string; is_enabled: boolean }>(
-      `/ai-studio/skills/${encodeURIComponent(skillName)}/toggle`,
+      `/ai-studio/skills/${encodeURIComponent(skillName)}`,
       {
-        method: 'POST',
+        method: 'PATCH',
         body: { is_enabled: isEnabled },
       }
     );
@@ -541,7 +557,7 @@ class ApiClient {
 
   async testMCPServer(serverId: number) {
     return this.request<{ ok: boolean; status: string; latency_ms?: number }>(
-      `/ai-studio/mcp/servers/${serverId}/test`,
+      `/ai-studio/mcp/servers/${serverId}/connect`,
       { method: 'POST' }
     );
   }
@@ -555,26 +571,49 @@ class ApiClient {
     candidateId: number,
     action: 'knowledge' | 'training',
     faqQ?: string,
-    faqA?: string
+    faqA?: string,
+    scopeType = 'global',
+    confirmGlobalPrivacy = true
   ) {
-    return this.request<{ ok: boolean; status: string }>(
+    return this.request<{ ok: boolean; status?: string; promoted_candidate_id?: number }>(
       `/ai-studio/learning/candidates/${candidateId}/promote`,
       {
         method: 'POST',
-        body: { action, faq_question: faqQ, faq_answer: faqA },
+        body: {
+          action,
+          faq_question: faqQ,
+          faq_answer: faqA,
+          scope_type: scopeType,
+          confirm_global_privacy: confirmGlobalPrivacy,
+        },
       }
     );
   }
 
   async exportTrainingJSONL() {
-    return this.request<{ jsonl: string; count: number }>('/ai-studio/learning/export-jsonl');
+    return this.request<{ jsonl: string; count: number } | string>('/ai-studio/learning/training-export');
   }
 
   async runEvaluation(limit?: number) {
     const qs = limit ? `?limit=${limit}` : '';
-    return this.request<EvaluationSummaryDTO>(`/ai-studio/evaluation/run${qs}`, {
+    return this.request<EvaluationSummaryDTO>(`/ai-studio/evals/run${qs}`, {
       method: 'POST',
     });
+  }
+
+  async getPromptVersions() {
+    return this.request<PromptVersionDTO[]>('/ai-studio/prompts/versions');
+  }
+
+  async activatePromptVersion(version: string) {
+    return this.request<{ ok: boolean; activated_version: string }>(
+      `/ai-studio/prompts/versions/${encodeURIComponent(version)}/activate`,
+      { method: 'POST' }
+    );
+  }
+
+  async getAIDiagnostics() {
+    return this.request<AIDiagnosticsDTO>('/ai-studio/diagnostics');
   }
 }
 
@@ -660,6 +699,16 @@ export interface RuntimeSettings {
   ad_quiet_hour_start: number;
   ad_quiet_hour_end: number;
   ad_group_blacklist: string[];
+  // RAG & Embedding settings
+  rag_enabled: boolean;
+  embedding_base_url: string;
+  embedding_model: string;
+  has_embedding_api_key: boolean;
+  embedding_api_key_masked: string;
+  vector_store_provider: string;
+  qdrant_url: string;
+  has_qdrant_api_key: boolean;
+  qdrant_api_key_masked: string;
 }
 
 export interface RuntimeSettingsUpdate {
@@ -683,6 +732,14 @@ export interface RuntimeSettingsUpdate {
   ad_quiet_hour_start?: number;
   ad_quiet_hour_end?: number;
   ad_group_blacklist?: string[];
+  // RAG & Embedding updates
+  rag_enabled?: boolean;
+  embedding_base_url?: string;
+  embedding_model?: string;
+  embedding_api_key?: string;
+  vector_store_provider?: string;
+  qdrant_url?: string;
+  qdrant_api_key?: string;
 }
 
 export interface SignalProbeRequest {

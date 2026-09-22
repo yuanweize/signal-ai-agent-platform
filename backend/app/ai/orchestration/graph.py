@@ -15,6 +15,7 @@ from app.ai.providers.llm import LLMProvider
 from app.ai.rag.retrieval import KnowledgeRetriever
 from app.ai.runtime.decisions import AgentDecision
 from app.ai.skills.registry import skill_registry
+from app.ai.tools import builtin as _builtin_tools  # noqa: F401
 from app.ai.tools.registry import tool_registry
 
 logger = logging.getLogger("ai.orchestration.graph")
@@ -110,53 +111,156 @@ def build_agent_graph(
         }
 
     async def plan_tools_node(state: AgentState) -> dict[str, Any]:
-        """Check if product tools or actions should be invoked."""
+        """Check if tools or actions should be invoked with bounded execution & permission gating."""
+        import asyncio
+        import re
+
         text = (state.get("text") or "").lower()
         results: list[dict[str, Any]] = []
-        calls: list[dict[str, Any]] = []
+        proposed_calls: list[dict[str, Any]] = []
 
-        # Built-in heuristic or LLM tool selection
-        if any(w in text for w in ["coffee", "product", "catalog", "item", "available", "stock"]):
-            tool_name = "search_products"
-            query_arg = "coffee" if "coffee" in text else ""
-            calls.append({"name": tool_name, "arguments": {"query": query_arg}})
-            res = await tool_registry.execute(tool_name, {"query": query_arg})
-            results.append({"tool": tool_name, "output": res})
+        allowed_schemas = tool_registry.get_openai_tools()
 
-        if "refund" in text:
-            # Sensitive financial action: extract validated parameters from text instead of hardcoding dummy values
-            import re
-
-            order_m = re.search(r"order\s*#?\s*(\d+)", text)
-            amount_m = re.search(r"\$?\s*(\d+(?:\.\d+)?)\s*(?:usd|eur|czk|\$)?", text)
-
-            if order_m and amount_m:
-                refund_args = {
-                    "order_id": int(order_m.group(1)),
-                    "amount": float(amount_m.group(1)),
-                    "reason": "customer_request",
-                }
-                calls.append({"name": "trigger_sample_refund", "arguments": refund_args})
-                res = await tool_registry.execute(
-                    "trigger_sample_refund",
-                    refund_args,
-                    user_approved=False,
+        # 1. Attempt model/tool planner selection via native tool calling if supported (Section 8, 11)
+        if hasattr(llm, "tool_generate") and allowed_schemas:
+            try:
+                user_msg = [{"role": "user", "content": state.get("text") or ""}]
+                _, model_calls, _ = await asyncio.wait_for(
+                    llm.tool_generate(user_msg, allowed_schemas),
+                    timeout=8.0,
                 )
-                results.append({"tool": "trigger_sample_refund", "output": res})
-            else:
-                calls.append({"name": "trigger_sample_refund", "arguments": {}})
+                if model_calls:
+                    for mc in model_calls:
+                        proposed_calls.append(
+                            {
+                                "name": mc.get("name"),
+                                "arguments": mc.get("arguments", {}),
+                            }
+                        )
+            except Exception as e:
+                logger.debug(
+                    f"Model tool calling unavailable or failed ({e}); falling back to deterministic intent routing."
+                )
+
+        # 2. Fallback deterministic business routing for critical built-in & MCP flows (Section 11)
+        if not proposed_calls:
+            # Built-in search_products
+            is_policy = any(w in text for w in ["policy", "terms", "rules", "faq", "return"])
+            if not is_policy and any(
+                w in text for w in ["coffee", "product", "catalog", "item", "available", "stock"]
+            ):
+                if not any(c["name"] == "search_products" for c in proposed_calls):
+                    query_arg = "coffee" if "coffee" in text else ""
+                    proposed_calls.append(
+                        {"name": "search_products", "arguments": {"query": query_arg}}
+                    )
+            elif is_policy and any(w in text for w in ["coffee", "buy", "price"]):
+                if not any(c["name"] == "search_products" for c in proposed_calls):
+                    query_arg = "coffee" if "coffee" in text else ""
+                    proposed_calls.append(
+                        {"name": "search_products", "arguments": {"query": query_arg}}
+                    )
+
+            # MCP / Warehouse inventory check (read-only)
+            if any(w in text for w in ["inventory", "sku"]):
+                inv_tool = next(
+                    (t.name for t in tool_registry.list_tools() if "inventory" in t.name.lower()),
+                    None,
+                )
+                if inv_tool and not any(c["name"] == inv_tool for c in proposed_calls):
+                    sku_m = re.search(r"(?:sku|item)[:\s#-]*([a-zA-Z0-9_-]+)", text, re.IGNORECASE)
+                    sku_val = sku_m.group(1) if sku_m else "SKU-COFFEE-01"
+                    proposed_calls.append({"name": inv_tool, "arguments": {"sku": sku_val}})
+
+            # MCP / Warehouse dispatch order (write/destructive - sensitive)
+            if any(w in text for w in ["dispatch", "ship order", "ship it", "dispatch order"]):
+                disp_tool = next(
+                    (t.name for t in tool_registry.list_tools() if "dispatch" in t.name.lower()),
+                    None,
+                )
+                if disp_tool and not any(c["name"] == disp_tool for c in proposed_calls):
+                    ord_m = re.search(r"order[:\s#-]*(\d+)", text, re.IGNORECASE)
+                    ord_val = int(ord_m.group(1)) if ord_m else 101
+                    proposed_calls.append({"name": disp_tool, "arguments": {"order_id": ord_val}})
+
+            # Built-in refund governance
+            if "refund" in text:
+                order_m = re.search(r"order\s*#?\s*(\d+)", text)
+                amount_m = re.search(r"\$?\s*(\d+(?:\.\d+)?)\s*(?:usd|eur|czk|\$)?", text)
+                if order_m and amount_m:
+                    refund_args = {
+                        "order_id": int(order_m.group(1)),
+                        "amount": float(amount_m.group(1)),
+                        "reason": "customer_request",
+                    }
+                else:
+                    refund_args = {}
+                proposed_calls.append({"name": "trigger_sample_refund", "arguments": refund_args})
+
+        # 3. Bounded Tool Execution with Deterministic Permission Gate (Section 8, 9)
+        # Bounded limits: max 5 tool calls per turn, per-call timeout 10.0s
+        max_tool_calls = 5
+        executed_calls: list[dict[str, Any]] = []
+
+        for call in proposed_calls[:max_tool_calls]:
+            tool_name = call.get("name")
+            tool_args = call.get("arguments", {})
+            if not tool_name:
+                continue
+
+            tool_obj = tool_registry.get_tool(tool_name)
+            if not tool_obj:
                 results.append(
                     {
-                        "tool": "trigger_sample_refund",
+                        "tool": tool_name,
+                        "output": {"status": "error", "error": f"Tool '{tool_name}' not found"},
+                    }
+                )
+                executed_calls.append(call)
+                continue
+
+            # Deterministic permission gate: sensitive/write tools NEVER execute automatically
+            if tool_obj.permission.requires_human_approval:
+                logger.info(
+                    f"🛡️ Sensitive tool '{tool_name}' blocked by autonomous permission gate. Producing approval-required state."
+                )
+                results.append(
+                    {
+                        "tool": tool_name,
                         "output": {
                             "status": "requires_approval",
-                            "error": "Missing validated order_id and amount for refund action.",
+                            "error": f"Tool '{tool_name}' requires human operator approval.",
+                            "tool_name": tool_name,
+                            "arguments": tool_args,
                         },
                     }
                 )
+                executed_calls.append(call)
+                continue
+
+            # Read-only allowed tool executes with per-call timeout
+            try:
+                res = await asyncio.wait_for(
+                    tool_registry.execute(tool_name, tool_args, user_approved=False),
+                    timeout=10.0,
+                )
+                results.append({"tool": tool_name, "output": res})
+            except TimeoutError:
+                logger.error(f"Tool '{tool_name}' execution timed out (10s limit)")
+                results.append(
+                    {
+                        "tool": tool_name,
+                        "output": {"status": "error", "error": "Execution timed out"},
+                    }
+                )
+            except Exception as e:
+                logger.error(f"Tool '{tool_name}' execution failed safely: {e}")
+                results.append({"tool": tool_name, "output": {"status": "error", "error": str(e)}})
+
+            executed_calls.append(call)
 
         return {
-            "tool_calls": calls,
+            "tool_calls": executed_calls,
             "tool_results": results,
         }
 
@@ -194,7 +298,10 @@ def build_agent_graph(
         # Inject customer memory
         memories = state.get("memories") or []
         if memories:
-            mem_text = "\n".join(f"- {m.get('content')}" for m in memories)
+            mem_text = "\n".join(
+                f"- {m.content if hasattr(m, 'content') else (m.get('content') if isinstance(m, dict) else str(m))}"
+                for m in memories
+            )
             messages.append(
                 {"role": "system", "content": f"Customer Profile & Memory:\n{mem_text}"}
             )

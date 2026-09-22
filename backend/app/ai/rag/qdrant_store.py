@@ -11,7 +11,7 @@ from typing import Any
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http import models as qmodels
 
-from app.ai.rag.vector_store import VectorSearchResult
+from app.ai.rag.vector_store import VectorSearchResult, VectorStoreError
 
 logger = logging.getLogger("ai.rag.qdrant")
 
@@ -105,7 +105,7 @@ class QdrantVectorStore:
             return True
         except Exception as e:
             logger.error(f"Qdrant upsert failed: {e}")
-            return False
+            raise VectorStoreError(f"Qdrant upsert failed: {e}") from e
 
     async def search(
         self,
@@ -173,7 +173,7 @@ class QdrantVectorStore:
             return True
         except Exception as e:
             logger.error(f"Qdrant delete error: {e}")
-            return False
+            raise VectorStoreError(f"Qdrant delete failed: {e}") from e
 
     async def delete_collection(self, collection: str) -> bool:
         client = self._get_client()
@@ -183,4 +183,4 @@ class QdrantVectorStore:
             return True
         except Exception as e:
             logger.error(f"Qdrant delete collection error: {e}")
-            return False
+            raise VectorStoreError(f"Qdrant delete collection error: {e}") from e

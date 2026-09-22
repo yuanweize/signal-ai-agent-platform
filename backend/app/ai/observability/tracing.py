@@ -42,6 +42,37 @@ class AITracer(Protocol):
     ) -> AIRun: ...
 
 
+def _safe_json_dumps(val: Any) -> str:
+    if val is None:
+        return "[]"
+    if isinstance(val, str):
+        return val
+    if isinstance(val, (list, tuple)):
+        clean = []
+        for item in val:
+            if hasattr(item, "to_dict") and callable(item.to_dict):
+                clean.append(item.to_dict())
+            elif hasattr(item, "content"):
+                clean.append(
+                    {
+                        "id": getattr(item, "id", None),
+                        "scope_type": getattr(item, "scope_type", None),
+                        "scope_id": getattr(item, "scope_id", None),
+                        "content": getattr(item, "content", ""),
+                        "key": getattr(item, "key", None),
+                    }
+                )
+            elif isinstance(item, dict):
+                clean.append(item)
+            else:
+                clean.append(str(item))
+        return json.dumps(clean, default=str)
+    try:
+        return json.dumps(val, default=str)
+    except Exception:
+        return str(val)
+
+
 class LocalTracer:
     """Standard database tracer recording to the ai_runs table."""
 
@@ -72,10 +103,10 @@ class LocalTracer:
             model=model,
             provider=provider,
             prompt_version=prompt_version,
-            skills=json.dumps(skills_used),
-            retrieval=json.dumps(retrieved_chunks),
-            memory=json.dumps(memories_used),
-            tool_calls=json.dumps(tool_calls),
+            skills=_safe_json_dumps(skills_used),
+            retrieval=_safe_json_dumps(retrieved_chunks),
+            memory=_safe_json_dumps(memories_used),
+            tool_calls=_safe_json_dumps(tool_calls),
             decision=decision,
             confidence=confidence,
             latency_ms=latency_ms,

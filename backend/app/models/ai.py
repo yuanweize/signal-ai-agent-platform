@@ -34,11 +34,14 @@ from app.database import Base
 
 class AISuggestionStatus(str, Enum):  # noqa: UP042
     pending = "pending"
+    processing = "processing"
     accepted = "accepted"
     edited = "edited"
     rejected = "rejected"
     expired = "expired"
+    auto_pending = "auto_pending"
     auto_sent = "auto_sent"
+    send_failed = "send_failed"
 
 
 class AIDecisionType(str, Enum):  # noqa: UP042
@@ -281,6 +284,22 @@ class MemoryItem(Base):
 
     def __repr__(self) -> str:
         return f"<MemoryItem(id={self.id}, scope='{self.scope_type}:{self.scope_id}', status='{self.status}')>"
+
+    def __getitem__(self, key: str) -> Any:
+        return getattr(self, key)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "scope_type": self.scope_type,
+            "scope_id": self.scope_id,
+            "memory_type": self.memory_type,
+            "content": self.content,
+            "confidence": self.confidence,
+            "importance": self.importance,
+            "sensitivity": self.sensitivity,
+            "status": self.status,
+        }
 
 
 class FeedbackEvent(Base):

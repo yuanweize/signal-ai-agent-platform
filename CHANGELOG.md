@@ -2,20 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [v0.4.0] - 2026-09-23
 
-### AI Customer Service Platform (v0.4 Release Candidate)
+### AI Customer Service & Conversational Commerce Platform (v0.4.0 Final Release)
 
 #### Highlights
 - **Unified AgentRuntime**: Unified both Auto and Copilot modes on a single LangGraph-based `AgentRuntime` engine.
 - **Production Runtime Factory**: Eliminates silent fallback to fake providers in production; instantiates live OpenAI-compatible LLM/Embedding adapters and Qdrant vector store.
+- **Signal Zero-Env Dynamic Configuration**: Signal listener dynamically starts and stops based solely on runtime database configuration (`KEY_SIGNAL_API_URL`, `KEY_SIGNAL_PHONE_NUMBER`), requiring zero restart and zero environment variables.
 - **Strict Group Privacy Invariant (P0)**: Group chat conversations are strictly forbidden from retrieving private user documents or loading private user memories.
+- **Canonical Privacy Erasure (Fail-Closed)**: Purges all private user artifacts (memory items, knowledge documents, chunks, vectors, identities, and message history) mapped to canonical user ID. Fails closed and rolls back on vector deletion errors.
+- **Master Encryption Key Hardening**: Persistent key stored in `./data/.master_key` with strict `0600` permissions. Automatic, transparent migration of legacy fallback ciphertext on startup.
 - **Qdrant Vector Database Integration**: Native vector storage with point UUID mapping, `query_points` search, and full relational-to-vector reindexing (`/api/ai-studio/knowledge/reindex`).
 - **Official Model Context Protocol (MCP) SDK Integration**: Dynamic discovery and execution of external tools over stdio sessions using the official Python `mcp` SDK.
+- **Deterministic Tool Permission Governance**: Sensitive tools (e.g. refunds) trigger supervisor drafts (`draft_for_human`) rather than autonomous execution.
+- **API Contract Drift Elimination**: Zero contract drift across FastAPI backend routes, OpenAPI schema, and frontend client DTOs, verified by automated HTTP integration smoke tests.
 - **Human-in-the-Loop Copilot**: Inbound messages in copilot mode generate pending `AISuggestion` drafts linked to underlying `AIRun` traces for human operator review and provenance tracking.
 - **Deterministic Agent Contract Evaluation**: 32-case deterministic evaluation suite covering prompt injection, human handoff, refund approval gates, multi-language support, and privacy boundaries with 100% accuracy in CI.
-- **No Hardcoded Metrics**: Dynamic RAG hit rate calculation from persisted `AIRun` records and real-time observability diagnostics endpoint (`GET /api/ai-studio/diagnostics`).
-- **Linear Alembic Revision Chain**: Single linear migration chain from `<base>` to `e1f2a3b4c5d6` (head).
+- **Full Quality Gates**: 109 pytest backend tests (100% pass), 18 Vitest frontend tests (100% pass), and 32 deterministic AI eval cases (100% pass).
 
 #### Security & Privacy Hardening
 - Reject user-scoped knowledge retrieval when `is_group=True`.
@@ -23,6 +27,7 @@ All notable changes to this project will be documented in this file.
 - Enforce canonical user identity mapping across telephone numbers and Signal UUIDs.
 - Bound financial or destructive tool actions (e.g. refunds) behind administrative approval gates.
 - Tag retrieved knowledge chunks as untrusted data context to mitigate prompt injection.
+- Fail closed and rollback on vector deletion errors during privacy erasure.
 
 ---
 

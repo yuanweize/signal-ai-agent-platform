@@ -40,6 +40,28 @@ async def main() -> int:
 
     async_session = async_sessionmaker(engine, expire_on_commit=False)
 
+    from app.models.product import Product
+
+    async with async_session() as seed_session:
+        coffee = Product(
+            name="Organic Arabica Coffee",
+            price=15.0,
+            currency="USD",
+            stock=25,
+            is_active=True,
+            description="Organic arabica coffee beans, fresh roasted.",
+        )
+        dark_roast = Product(
+            name="Dark Roast Coffee",
+            price=14.0,
+            currency="USD",
+            stock=10,
+            is_active=True,
+            description="Intense dark roast coffee item.",
+        )
+        seed_session.add_all([coffee, dark_roast])
+        await seed_session.commit()
+
     dataset_path = backend_dir / "evals" / "datasets" / "golden_dataset.json"
     print(f"Loading golden dataset from: {dataset_path}")
 

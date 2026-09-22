@@ -179,14 +179,19 @@ export default function AIStudioPage() {
   const handleExportJSONL = async () => {
     try {
       const res = await api.exportTrainingJSONL();
-      const blob = new Blob([res.jsonl], { type: 'application/json' });
+      const content = typeof res === 'string' ? res : (res?.jsonl ?? '');
+      const count =
+        typeof res === 'object' && res !== null && 'count' in res && typeof res.count === 'number'
+          ? res.count
+          : content.split('\n').filter(Boolean).length;
+      const blob = new Blob([content], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = `ai_training_dataset_${Date.now()}.jsonl`;
       a.click();
       URL.revokeObjectURL(url);
-      setSuccessMsg(`Exported ${res.count} fine-tuning examples to JSONL.`);
+      setSuccessMsg(`Exported ${count} fine-tuning examples to JSONL.`);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Failed to export training dataset');
     }

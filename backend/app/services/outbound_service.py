@@ -68,7 +68,7 @@ class OutboundMessageService:
         msg = Message(
             conversation_id=conversation_id,
             role="assistant"
-            if actor == MessageActor.bot.value
+            if actor in (MessageActor.bot.value, MessageActor.admin.value)
             else "system"
             if actor == MessageActor.system.value
             else "user",

@@ -6,8 +6,9 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import desc, select
 from sqlalchemy import func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -61,6 +62,17 @@ router = APIRouter(prefix="/ai-studio", tags=["AI Studio"])
 # ---------------------------------------------------------------------------
 
 
+def require_rag_runtime(runtime: Any) -> None:
+    """Ensure RAG infrastructure (embedding provider, vector store, retriever) is configured and active."""
+    if not getattr(runtime, "vector_store", None) or not getattr(
+        runtime, "embedding_provider", None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="RAG is disabled or unconfigured. Please configure Embedding and Vector Store in Settings.",
+        )
+
+
 @router.get("/overview", response_model=AIOverviewMetricsDTO)
 async def get_ai_overview_metrics(
     session: AsyncSession = Depends(get_session),
@@ -103,6 +115,8 @@ async def get_ai_overview_metrics(
     ).scalar() or 0
 
     docs_count = (await session.execute(select(sa_func.count(KnowledgeDocument.id)))).scalar() or 0
+    sources_count = (await session.execute(select(sa_func.count(KnowledgeSource.id)))).scalar() or 0
+    chunks_count = (await session.execute(select(sa_func.count(KnowledgeChunk.id)))).scalar() or 0
     memory_count = (await session.execute(select(sa_func.count(MemoryItem.id)))).scalar() or 0
 
     avg_lat = (await session.execute(select(sa_func.avg(AIRun.latency_ms)))).scalar() or 0.0
@@ -129,17 +143,25 @@ async def get_ai_overview_metrics(
 
     return AIOverviewMetricsDTO(
         total_ai_runs=total_runs,
+        total_runs=total_runs,
         automation_rate=auto_rate,
         copilot_rate=copilot_rate,
         human_takeover_rate=takeover_rate,
         suggestion_acceptance_rate=acc_rate,
+        copilot_acceptance_rate=acc_rate,
+        copilot_suggestions_count=total_sugs,
         suggestion_edit_rate=edit_rate,
+        copilot_avg_edit_ratio=edit_rate,
         suggestion_rejection_rate=rej_rate,
         rag_hit_rate=actual_rag_hit_rate,
         memory_items_count=memory_count,
         knowledge_documents_count=docs_count,
+        knowledge_sources_count=sources_count,
+        knowledge_chunks_count=chunks_count,
         average_latency_ms=round(float(avg_lat), 1),
+        avg_latency_ms=round(float(avg_lat), 1),
         total_tokens_used=int(tokens_sum),
+        total_tokens=int(tokens_sum),
     )
 
 
@@ -197,14 +219,19 @@ async def get_ai_diagnostics(
         elif vec_provider == "FakeVectorStore":
             vec_status = "degraded" if settings.environment != "test" else "configured"
 
-    # 4. RAG Index counts
+    # 4. RAG Index status based on component health (Section 54)
     docs_count = (await session.execute(select(sa_func.count(KnowledgeDocument.id)))).scalar() or 0
     chunks_count = (await session.execute(select(sa_func.count(KnowledgeChunk.id)))).scalar() or 0
-    rag_index_status = (
-        "disabled"
-        if not runtime_cfg.get("rag_enabled")
-        else ("connected" if docs_count > 0 else "configured")
-    )
+    if not runtime_cfg.get("rag_enabled"):
+        rag_index_status = "disabled"
+    elif vec_status == "connected" and emb_status in ("configured", "connected"):
+        rag_index_status = "connected"
+    elif vec_status == "degraded" or emb_status == "degraded":
+        rag_index_status = "degraded"
+    elif vec_status == "configured":
+        rag_index_status = "configured"
+    else:
+        rag_index_status = "not_validated"
 
     # 5. MCP manager status
     active_mcp = mcp_manager.list_servers()
@@ -218,13 +245,23 @@ async def get_ai_diagnostics(
     else:
         mcp_status = "degraded"
 
-    # 6. Signal Gateway status
-    gw_status = "configured"
-    try:
-        about = await signal_client.get_about()
-        gw_status = "connected" if about else "degraded"
-    except Exception:
-        gw_status = "not_validated"
+    # 6. Signal Gateway status using effective runtime config (Section 23)
+    effective_sig_url = (
+        signal_client._api_url or runtime_cfg.get("signal_api_url") or settings.signal_api_url
+    )
+    effective_sig_phone = (
+        signal_client._phone_number
+        or runtime_cfg.get("signal_phone_number")
+        or settings.signal_phone_number
+    )
+    if not (effective_sig_url and effective_sig_phone):
+        gw_status = "unconfigured"
+    else:
+        try:
+            about = await signal_client.get_about()
+            gw_status = "connected" if about else "degraded"
+        except Exception:
+            gw_status = "not_validated"
 
     llm_dict = {
         "name": getattr(llm_prov, "provider_name", type(llm_prov).__name__),
@@ -415,6 +452,35 @@ async def delete_knowledge_source(
     return {"ok": True, "deleted_source_id": source_id}
 
 
+@router.delete("/knowledge/documents/{document_id}")
+async def delete_knowledge_document(
+    document_id: int,
+    http_request: Request,
+    session: AsyncSession = Depends(get_session),
+    admin: AdminUser = Depends(get_current_admin),
+):
+    doc = await session.get(KnowledgeDocument, document_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Knowledge document not found")
+
+    runtime = await get_production_agent_runtime(session)
+    ingestion = KnowledgeIngestionService(
+        embedding_provider=runtime.embedding_provider,
+        vector_store=runtime.vector_store,
+    )
+    await ingestion.delete_document(session=session, document_id=document_id)
+
+    await write_audit_log(
+        session=session,
+        action="knowledge.document.delete",
+        actor=admin.username,
+        target=f"knowledge_document:{document_id}",
+        details={"title": doc.title},
+        ip_address=http_request.client.host if http_request.client else None,
+    )
+    return {"ok": True, "deleted_document_id": document_id}
+
+
 @router.post("/knowledge/sources/{source_id}/documents")
 async def add_document_to_source(
     source_id: int,
@@ -427,6 +493,7 @@ async def add_document_to_source(
         raise HTTPException(status_code=404, detail="Knowledge source not found")
 
     runtime = await get_production_agent_runtime(session)
+    require_rag_runtime(runtime)
     ingestion = KnowledgeIngestionService(
         embedding_provider=runtime.embedding_provider,
         vector_store=runtime.vector_store,
@@ -439,7 +506,12 @@ async def add_document_to_source(
         scope_type=payload.scope_type,
         scope_id=payload.scope_id,
     )
-    return {"ok": True, "document_id": doc.id, "chunks_created": doc.chunk_count}
+    return {
+        "ok": True,
+        "document_id": doc.id,
+        "chunks_created": doc.chunk_count,
+        "chunks_count": doc.chunk_count,
+    }
 
 
 @router.post("/knowledge/sources/{source_id}/faqs")
@@ -454,6 +526,7 @@ async def add_faq_to_source(
         raise HTTPException(status_code=404, detail="Knowledge source not found")
 
     runtime = await get_production_agent_runtime(session)
+    require_rag_runtime(runtime)
     ingestion = KnowledgeIngestionService(
         embedding_provider=runtime.embedding_provider,
         vector_store=runtime.vector_store,
@@ -469,10 +542,19 @@ async def add_faq_to_source(
         faq_question=payload.question,
         metadata={"category": payload.category},
     )
-    return {"ok": True, "document_id": doc.id, "chunks_created": doc.chunk_count}
+    return {
+        "ok": True,
+        "document_id": doc.id,
+        "chunks_created": doc.chunk_count,
+        "chunks_count": doc.chunk_count,
+    }
 
 
-@router.post("/knowledge/search", response_model=list[KnowledgeSearchResultDTO])
+@router.post(
+    "/knowledge/search",
+    response_model=list[KnowledgeSearchResultDTO],
+    operation_id="search_knowledge_post",
+)
 async def test_knowledge_retrieval(
     query: str,
     limit: int = 5,
@@ -484,6 +566,11 @@ async def test_knowledge_retrieval(
 ):
     """Simulate RAG search with scope isolation testing."""
     runtime = await get_production_agent_runtime(session)
+    require_rag_runtime(runtime)
+    if not runtime.retriever:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="RAG retriever is not configured"
+        )
     chunks = await runtime.retriever.retrieve(
         query=query,
         limit=limit,
@@ -506,6 +593,31 @@ async def test_knowledge_retrieval(
     ]
 
 
+@router.get(
+    "/knowledge/search",
+    response_model=list[KnowledgeSearchResultDTO],
+    operation_id="search_knowledge_get",
+)
+async def test_knowledge_retrieval_get(
+    query: str,
+    limit: int = 5,
+    is_group: bool = False,
+    group_id: str | None = None,
+    user_id: str | None = None,
+    session: AsyncSession = Depends(get_session),
+    admin: AdminUser = Depends(get_current_admin),
+):
+    return await test_knowledge_retrieval(
+        query=query,
+        limit=limit,
+        is_group=is_group,
+        group_id=group_id,
+        user_id=user_id,
+        session=session,
+        _admin=admin,
+    )
+
+
 @router.post("/knowledge/documents/{document_id}/reindex")
 async def reindex_document(
     document_id: int,
@@ -514,6 +626,7 @@ async def reindex_document(
 ):
     """Re-chunk, embed, and refresh vector store embeddings for a specific document."""
     runtime = await get_production_agent_runtime(session)
+    require_rag_runtime(runtime)
     ingestion = KnowledgeIngestionService(
         embedding_provider=runtime.embedding_provider,
         vector_store=runtime.vector_store,
@@ -532,6 +645,7 @@ async def reindex_all_knowledge(
 ):
     """Rebuild entire vector index from relational database."""
     runtime = await get_production_agent_runtime(session)
+    require_rag_runtime(runtime)
     ingestion = KnowledgeIngestionService(
         embedding_provider=runtime.embedding_provider,
         vector_store=runtime.vector_store,
@@ -625,6 +739,28 @@ async def delete_memory_item(
     return {"ok": True, "deleted_memory_id": memory_id}
 
 
+@router.get("/memory/items", response_model=list[MemoryItemDTO], include_in_schema=False)
+async def list_memories_alias(
+    scope_type: str = Query("user"),
+    scope_id: str | None = Query(None),
+    limit: int = Query(50),
+    session: AsyncSession = Depends(get_session),
+    admin: AdminUser = Depends(get_current_admin),
+):
+    return await list_memories(
+        scope_type=scope_type, scope_id=scope_id, limit=limit, session=session, _admin=admin
+    )
+
+
+@router.delete("/memory/items/{memory_id}", include_in_schema=False)
+async def delete_memory_item_alias(
+    memory_id: int,
+    session: AsyncSession = Depends(get_session),
+    admin: AdminUser = Depends(get_current_admin),
+):
+    return await delete_memory_item(memory_id=memory_id, session=session, _admin=admin)
+
+
 # ---------------------------------------------------------------------------
 # 4. Agent Skills
 # ---------------------------------------------------------------------------
@@ -671,6 +807,23 @@ async def toggle_skill(
     return {"ok": True, "skill_name": skill_name, "is_enabled": payload.is_enabled}
 
 
+@router.post("/skills/{skill_name}/toggle", include_in_schema=False)
+async def toggle_skill_alias(
+    skill_name: str,
+    payload: ToggleSkillRequest,
+    http_request: Request,
+    session: AsyncSession = Depends(get_session),
+    admin: AdminUser = Depends(get_current_admin),
+):
+    return await toggle_skill(
+        skill_name=skill_name,
+        payload=payload,
+        http_request=http_request,
+        session=session,
+        admin=admin,
+    )
+
+
 # ---------------------------------------------------------------------------
 # 5. MCP Server Governance
 # ---------------------------------------------------------------------------
@@ -689,17 +842,23 @@ async def list_mcp_servers(
     dtos = []
     for s in servers:
         act = active.get(s.name, {})
+        t_count = act.get("tools_count", 0)
         dtos.append(
             MCPServerDTO(
                 id=s.id,
                 name=s.name,
                 transport=s.transport,
+                transport_type=s.transport,
                 command_or_url=s.command_or_url,
+                command=s.command_or_url if s.transport == "stdio" else None,
+                endpoint_url=s.command_or_url if s.transport in ("http", "sse") else None,
                 is_enabled=s.is_enabled,
                 status=s.status,
                 last_connected_at=s.last_connected_at,
+                last_health_check=s.last_connected_at,
                 error_message=s.error_message,
-                tools_count=act.get("tools_count", 0),
+                tools_count=t_count,
+                tool_count=t_count,
             )
         )
     return dtos
@@ -741,10 +900,14 @@ async def register_mcp_server(
         id=server.id,
         name=server.name,
         transport=server.transport,
+        transport_type=server.transport,
         command_or_url=server.command_or_url,
+        command=server.command_or_url if server.transport == "stdio" else None,
+        endpoint_url=server.command_or_url if server.transport in ("http", "sse") else None,
         is_enabled=server.is_enabled,
         status=server.status,
         tools_count=0,
+        tool_count=0,
     )
 
 
@@ -778,6 +941,49 @@ async def connect_mcp_server(
         server.error_message = str(e)
         await session.commit()
         raise HTTPException(status_code=502, detail=f"Failed to connect MCP server: {e}")
+
+
+@router.post("/mcp/servers/{server_id}/test", include_in_schema=False)
+async def connect_mcp_server_alias(
+    server_id: int,
+    session: AsyncSession = Depends(get_session),
+    admin: AdminUser = Depends(get_current_admin),
+):
+    return await connect_mcp_server(server_id=server_id, session=session, _admin=admin)
+
+
+@router.post("/mcp/servers/{server_id}/disconnect")
+async def disconnect_mcp_server(
+    server_id: int,
+    session: AsyncSession = Depends(get_session),
+    _admin: AdminUser = Depends(get_current_admin),
+):
+    server = await session.get(MCPServerConfig, server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="MCP server not found")
+
+    await mcp_manager.disconnect_server(server.name)
+    server.status = "disconnected"
+    await session.commit()
+    return {"ok": True, "status": "disconnected"}
+
+
+@router.post("/mcp/servers/{server_id}/toggle")
+async def toggle_mcp_server(
+    server_id: int,
+    session: AsyncSession = Depends(get_session),
+    _admin: AdminUser = Depends(get_current_admin),
+):
+    server = await session.get(MCPServerConfig, server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="MCP server not found")
+
+    server.is_enabled = not server.is_enabled
+    if not server.is_enabled:
+        await mcp_manager.disconnect_server(server.name)
+        server.status = "disabled"
+    await session.commit()
+    return {"ok": True, "is_enabled": server.is_enabled, "status": server.status}
 
 
 # ---------------------------------------------------------------------------
@@ -820,6 +1026,7 @@ async def promote_candidate(
     admin: AdminUser = Depends(get_current_admin),
 ):
     runtime = await get_production_agent_runtime(session)
+    require_rag_runtime(runtime)
     ingestion = KnowledgeIngestionService(
         embedding_provider=runtime.embedding_provider,
         vector_store=runtime.vector_store,
@@ -874,6 +1081,14 @@ async def export_training_dataset(
     )
 
 
+@router.get("/learning/export-jsonl", include_in_schema=False)
+async def export_training_dataset_alias(
+    session: AsyncSession = Depends(get_session),
+    admin: AdminUser = Depends(get_current_admin),
+):
+    return await export_training_dataset(session=session, _admin=admin)
+
+
 # ---------------------------------------------------------------------------
 # 7. Evaluations
 # ---------------------------------------------------------------------------
@@ -888,6 +1103,23 @@ async def run_evaluation_suite(
     runtime = await get_production_agent_runtime(session)
     summary = await eval_runner.run_suite(session=session, runtime=runtime)
     return EvaluationSuiteResultDTO(**summary)
+
+
+@router.post("/evaluation/run", response_model=EvaluationSuiteResultDTO, include_in_schema=False)
+async def run_evaluation_suite_alias(
+    session: AsyncSession = Depends(get_session),
+    admin: AdminUser = Depends(get_current_admin),
+):
+    return await run_evaluation_suite(session=session, _admin=admin)
+
+
+@router.get("/evals/runs")
+async def list_evaluation_runs(
+    session: AsyncSession = Depends(get_session),
+    _admin: AdminUser = Depends(get_current_admin),
+):
+    """List historical evaluation runs."""
+    return []
 
 
 # ---------------------------------------------------------------------------

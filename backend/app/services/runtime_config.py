@@ -10,6 +10,7 @@ import base64
 import hashlib
 import ipaddress
 import json
+import logging
 import os
 from datetime import UTC, datetime
 from urllib.parse import urlparse
@@ -207,23 +208,132 @@ def mask_secret(secret: str) -> str:
     return f"{secret[:4]}{'*' * max(6, len(secret) - 8)}{secret[-4:]}"
 
 
-def _get_fernet() -> Fernet:
-    seed = settings.config_encryption_key or settings.jwt_secret_key or "runtime-config-fallback"
+logger = logging.getLogger("services.runtime_config")
+
+_MASTER_KEY_CACHE: str | None = None
+
+
+def _get_master_key_filepath() -> str:
+    data_dir = os.environ.get("DATA_DIR", "./data")
+    return os.path.join(data_dir, ".master_key")
+
+
+def _get_or_create_persistent_master_key() -> str:
+    global _MASTER_KEY_CACHE
+    if _MASTER_KEY_CACHE:
+        return _MASTER_KEY_CACHE
+
+    path = _get_master_key_filepath()
+    if os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                key = f.read().strip()
+                if key:
+                    _MASTER_KEY_CACHE = key
+                    return key
+        except Exception as e:
+            logger.warning(f"Could not read master key file at {path}: {e}")
+
+    # Generate new random 32-byte urlsafe base64 key
+    new_key = Fernet.generate_key().decode("utf-8")
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        # Create with file permissions 0600 (owner read/write only)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(new_key)
+        logger.info(f"Generated new persistent encryption master key at {path} (mode 0600)")
+    except Exception as e:
+        logger.warning(f"Could not persist master key file at {path}: {e}")
+
+    _MASTER_KEY_CACHE = new_key
+    return new_key
+
+
+def _get_fernet_for_seed(seed: str) -> Fernet:
     digest = hashlib.sha256(seed.encode("utf-8")).digest()
     key = base64.urlsafe_b64encode(digest)
     return Fernet(key)
 
 
+def _get_active_fernet() -> Fernet:
+    seed = (getattr(settings, "config_encryption_key", "") or "").strip() or os.environ.get(
+        "CONFIG_ENCRYPTION_KEY", ""
+    ).strip()
+    if not seed:
+        seed = _get_or_create_persistent_master_key()
+    return _get_fernet_for_seed(seed)
+
+
+def _get_legacy_fallback_fernet() -> Fernet:
+    return _get_fernet_for_seed("runtime-config-fallback")
+
+
+def _get_fernet() -> Fernet:
+    return _get_active_fernet()
+
+
 def encrypt_value(value: str) -> str:
     if not value:
         return ""
-    return _get_fernet().encrypt(value.encode("utf-8")).decode("utf-8")
+    return _get_active_fernet().encrypt(value.encode("utf-8")).decode("utf-8")
 
 
 def decrypt_value(value: str) -> str:
     if not value:
         return ""
-    return _get_fernet().decrypt(value.encode("utf-8")).decode("utf-8")
+    active_fernet = _get_active_fernet()
+    try:
+        return active_fernet.decrypt(value.encode("utf-8")).decode("utf-8")
+    except Exception:
+        # Fallback migration check for ciphertexts encrypted under legacy fallback key
+        try:
+            legacy_fernet = _get_legacy_fallback_fernet()
+            decrypted = legacy_fernet.decrypt(value.encode("utf-8")).decode("utf-8")
+            logger.info("Decrypted secret using legacy fallback key for seamless migration")
+            return decrypted
+        except Exception:
+            raise
+
+
+async def migrate_legacy_encrypted_settings(session: AsyncSession) -> int:
+    """Migrate any legacy-fallback encrypted configuration values to active master key."""
+    encrypted_keys = [
+        KEY_AI_API_KEY_ENC,
+        KEY_SIGNAL_API_TOKEN_ENC,
+        KEY_EMBEDDING_API_KEY_ENC,
+        KEY_QDRANT_API_KEY_ENC,
+    ]
+    stmt = select(BotConfig).where(BotConfig.key.in_(encrypted_keys))
+    rows = (await session.execute(stmt)).scalars().all()
+    migrated_count = 0
+
+    active_fernet = _get_active_fernet()
+    legacy_fernet = _get_legacy_fallback_fernet()
+
+    for config in rows:
+        if not config.value:
+            continue
+        try:
+            # Check if already decryptable by active fernet
+            active_fernet.decrypt(config.value.encode("utf-8"))
+        except Exception:
+            # Try legacy fernet
+            try:
+                plaintext = legacy_fernet.decrypt(config.value.encode("utf-8")).decode("utf-8")
+                # Re-encrypt with active fernet
+                config.value = encrypt_value(plaintext)
+                migrated_count += 1
+                logger.info(f"Re-encrypted configuration key '{config.key}' with active master key")
+            except Exception as e:
+                logger.warning(f"Could not migrate legacy key '{config.key}': {e}")
+
+    if migrated_count > 0:
+        await session.commit()
+        logger.info(
+            f"Successfully migrated {migrated_count} legacy encrypted settings to active master key"
+        )
+    return migrated_count
 
 
 async def get_config_map(session: AsyncSession) -> dict[str, str]:

@@ -97,21 +97,21 @@ def create_agent_runtime(
     embed_provider: EmbeddingProvider | None = None
     vector_store: VectorStore | None = None
 
-    if test_mode:
+    rag_enabled = bool(settings.get("rag_enabled", True))
+    if not rag_enabled:
+        embed_provider = None
+        vector_store = None
+    elif test_mode:
         embed_provider = FakeEmbeddingProvider()
         vector_store = FakeVectorStore()
     else:
-        rag_enabled = bool(settings.get("rag_enabled", True))
         vector_backend = (
             settings.get("vector_store_provider")
             or os.getenv("AI_VECTOR_STORE_BACKEND")
             or "qdrant"
         ).lower()
 
-        if not rag_enabled:
-            embed_provider = None
-            vector_store = None
-        elif vector_backend == "qdrant":
+        if vector_backend == "qdrant":
             embed_base_url = (
                 settings.get("embedding_base_url") or settings.get("ai_api_base_url") or ""
             ).strip()
@@ -153,6 +153,8 @@ def create_agent_runtime(
         memory_provider=memory_provider,
         vector_store=vector_store,
         embedding_provider=embed_provider,
+        is_test=test_mode,
+        rag_enabled=rag_enabled,
     )
     return runtime
 
