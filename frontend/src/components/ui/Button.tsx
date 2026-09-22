@@ -18,7 +18,7 @@ export const Button: React.FC<ButtonProps> = ({
   const baseClasses = 'inline-flex items-center justify-center font-medium transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed select-none focus:outline-none';
 
   const variantClasses = {
-    primary: 'bg-gradient-to-r from-[var(--accent)] to-[#5a4bd1] text-white hover:brightness-110 shadow-[0_4px_14px_var(--accent-glow)] active:scale-[0.98] border border-transparent',
+    primary: 'bg-gradient-to-r from-[var(--accent)] to-[#5a4bd1] text-white hover:brightness-110 shadow-sm hover:shadow active:scale-[0.98] border border-[rgba(255,255,255,0.12)]',
     secondary: 'bg-[var(--bg-input)] hover:bg-[var(--bg-card-hover)] text-[var(--text-primary)] border border-[var(--border)] hover:border-[rgba(255,255,255,0.18)] shadow-sm active:scale-[0.98]',
     danger: 'bg-[rgba(255,107,107,0.12)] hover:bg-[rgba(255,107,107,0.22)] text-[var(--danger)] border border-[rgba(255,107,107,0.3)] active:scale-[0.98]',
     ghost: 'bg-transparent hover:bg-[rgba(255,255,255,0.06)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-transparent',

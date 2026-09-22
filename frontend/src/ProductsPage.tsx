@@ -1,4 +1,13 @@
 import { useEffect, useState, FormEvent } from 'react';
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  CheckCircle2,
+  Circle,
+  ChevronLeft,
+  ChevronRight,
+} from 'lucide-react';
 import { api, Product, ProductInput } from './api';
 import SidebarLayout from './SidebarLayout';
 
@@ -109,8 +118,9 @@ export default function ProductsPage() {
         <div>
           <span className="count-badge" style={{ fontSize: '0.9rem', padding: '0.3rem 0.8rem' }}>Total: {total}</span>
         </div>
-        <button onClick={openCreate} className="btn-primary-sm">
-          + New Product
+        <button onClick={openCreate} className="btn-primary-sm inline-flex items-center gap-1.5 cursor-pointer">
+          <Plus className="w-4 h-4" />
+          <span>New Product</span>
         </button>
       </div>
 
@@ -165,17 +175,25 @@ export default function ProductsPage() {
                     </td>
                     <td>
                       <button
-                        className={`toggle-btn ${p.is_active ? 'active' : 'inactive'}`}
+                        className={`toggle-btn ${p.is_active ? 'active' : 'inactive'} inline-flex items-center justify-center cursor-pointer`}
                         onClick={() => handleToggle(p)}
                         title={p.is_active ? 'Deactivate' : 'Activate'}
                       >
-                        {p.is_active ? '✅' : '⬜'}
+                        {p.is_active ? (
+                          <CheckCircle2 className="w-4 h-4 text-[var(--success)]" />
+                        ) : (
+                          <Circle className="w-4 h-4 text-[var(--text-muted)]" />
+                        )}
                       </button>
                     </td>
                     <td>
-                      <div className="action-btns">
-                        <button onClick={() => openEdit(p)} className="btn-icon" title="Edit">✏️</button>
-                        <button onClick={() => handleDelete(p.id, p.name)} className="btn-icon btn-danger" title="Delete">🗑️</button>
+                      <div className="action-btns flex items-center gap-1">
+                        <button onClick={() => openEdit(p)} className="btn-icon text-[var(--text-secondary)] hover:text-white" title="Edit">
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => handleDelete(p.id, p.name)} className="btn-icon btn-danger text-[var(--danger)]" title="Delete">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -187,10 +205,14 @@ export default function ProductsPage() {
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="pagination">
-            <button disabled={page <= 1} onClick={() => loadProducts(page - 1)}>←</button>
+          <div className="pagination flex items-center gap-2">
+            <button disabled={page <= 1} onClick={() => loadProducts(page - 1)} className="p-1 cursor-pointer">
+              <ChevronLeft className="w-4 h-4" />
+            </button>
             <span>{page} / {totalPages}</span>
-            <button disabled={page >= totalPages} onClick={() => loadProducts(page + 1)}>→</button>
+            <button disabled={page >= totalPages} onClick={() => loadProducts(page + 1)} className="p-1 cursor-pointer">
+              <ChevronRight className="w-4 h-4" />
+            </button>
           </div>
         )}      {/* Create/Edit Modal */}
       {showForm && (

@@ -1,5 +1,6 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Lock, Shield, AlertTriangle } from 'lucide-react';
 import { api } from './api';
 
 export default function LoginPage() {
@@ -73,7 +74,11 @@ export default function LoginPage() {
   return (
     <div className="login-page">
       <div className="login-card">
-        <div className="login-logo">🔐</div>
+        <div className="login-logo flex items-center justify-center mb-4">
+          <div className="w-16 h-16 rounded-2xl bg-[rgba(108,92,231,0.12)] border border-[rgba(108,92,231,0.3)] flex items-center justify-center shadow-[0_0_24px_rgba(108,92,231,0.2)]">
+            <Lock className="w-7 h-7 text-[var(--accent)]" />
+          </div>
+        </div>
         <h1>Signal Market Bot</h1>
         <p className="login-subtitle">{bootstrapRequired ? 'First-time setup' : 'Admin Access'}</p>
 
@@ -193,8 +198,18 @@ export default function LoginPage() {
         )}
 
         {!bootstrapRequired && requires2fa !== null && (
-          <div className={`security-badge ${requires2fa ? 'secure' : 'basic'}`}>
-            {requires2fa ? '🛡️ 2FA Enabled' : '⚠️ Password Only'}
+          <div className={`security-badge ${requires2fa ? 'secure' : 'basic'} inline-flex items-center gap-1.5`}>
+            {requires2fa ? (
+              <>
+                <Shield className="w-3.5 h-3.5" />
+                <span>2FA Enabled</span>
+              </>
+            ) : (
+              <>
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span>Password Only</span>
+              </>
+            )}
           </div>
         )}
       </div>

@@ -1,4 +1,22 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import {
+  Search,
+  RefreshCw,
+  MessageSquare,
+  User,
+  Users,
+  BellDot,
+  Bot,
+  ShieldCheck,
+  Send,
+  Info,
+  X,
+  ArrowLeft,
+  Paperclip,
+  RotateCw,
+  SlidersHorizontal,
+  Inbox,
+} from 'lucide-react';
 import SidebarLayout from './SidebarLayout';
 import {
   api,
@@ -113,28 +131,26 @@ export default function InboxPage() {
     }
   }, [activeConvId, fetchActiveMessages]);
 
-  // Real-time polling of active conversation messages (every 3s)
+  // Real-time polling of active conversation messages (every 5s)
   useEffect(() => {
-    if (!activeConvId) return;
+    if (activeConvId === null) return;
     const timer = setInterval(() => {
       fetchActiveMessages(activeConvId, true);
-    }, 3000);
+    }, 5000);
     return () => clearInterval(timer);
   }, [activeConvId, fetchActiveMessages]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
-    if (!loadingOlder && messagesEndRef.current) {
-      messagesEndRef.current?.scrollIntoView?.({ behavior: 'smooth' });
-    }
-  }, [messages, loadingOlder]);
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   // Load older messages (cursor pagination)
   const handleLoadOlder = async () => {
     if (!activeConvId || messages.length === 0 || loadingOlder) return;
-    const oldestId = messages[0].id;
     setLoadingOlder(true);
     try {
+      const oldestId = messages[0].id;
       const res = await api.getConversationMessages(activeConvId, {
         limit: 50,
         before_id: oldestId,
@@ -153,15 +169,14 @@ export default function InboxPage() {
     if (e) e.preventDefault();
     if (!inputText.trim() || !activeConvId || sending) return;
 
-    const textToSend = inputText.trim();
+    const content = inputText.trim();
     setSending(true);
     setErrorMsg(null);
 
     try {
-      const sentMsg = await api.sendConversationMessage(activeConvId, textToSend);
+      const newMsg = await api.sendConversationMessage(activeConvId, content);
+      setMessages(prev => [...prev, newMsg]);
       setInputText('');
-      setMessages(prev => [...prev, sentMsg]);
-      // Refresh list to update snippet
       fetchConversations(true);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Failed to send message');
@@ -179,16 +194,16 @@ export default function InboxPage() {
   };
 
   // Update conversation mode
-  const handleModeChange = async (newMode: 'auto' | 'manual' | 'paused') => {
-    if (!activeConvId || !activeConv) return;
+  const handleModeChange = async (newMode: ConversationMode) => {
+    if (!activeConvId) return;
     try {
       const updated = await api.updateConversationMode(activeConvId, newMode);
       setActiveConv(prev => (prev ? { ...prev, mode: updated.mode } : null));
       setConversations(prev =>
-        prev.map(c => (c.id === activeConvId ? { ...c, mode: updated.mode } : c))
+        prev.map(c => (c.id === activeConvId ? { ...c, mode: newMode } : c))
       );
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to update conversation mode');
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to change mode');
     }
   };
 
@@ -228,12 +243,14 @@ export default function InboxPage() {
                 onClick={() => fetchConversations()}
                 title="Refresh conversations"
               >
-                🔄
+                <RefreshCw className="w-3.5 h-3.5" />
               </button>
             </div>
 
             <div className="inbox-search-wrap">
-              <span className="inbox-search-icon">🔍</span>
+              <span className="inbox-search-icon">
+                <Search className="w-3.5 h-3.5" />
+              </span>
               <input
                 type="text"
                 placeholder="Search conversations..."
@@ -243,50 +260,85 @@ export default function InboxPage() {
               />
             </div>
 
-            {/* Filter Chips */}
-            <div className="flex items-center justify-between gap-1 text-[11px]">
-              <div className="flex items-center gap-0.5 p-0.5 bg-[var(--bg-input)] rounded-lg border border-[var(--border)]">
-                {(['all', 'dm', 'group'] as const).map(t => (
-                  <button
-                    key={t}
-                    type="button"
-                    className={`px-2 py-0.5 rounded-md font-medium transition-all cursor-pointer ${
-                      typeFilter === t
-                        ? 'bg-[var(--accent)] text-white shadow-sm'
-                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                    }`}
-                    onClick={() => setTypeFilter(t)}
-                  >
-                    {t === 'all' ? 'All' : t === 'dm' ? 'DMs' : 'Groups'}
-                  </button>
-                ))}
-              </div>
+            {/* Filter Segmented Control */}
+            <div className="grid grid-cols-4 gap-1 p-1 bg-[var(--bg-input)] rounded-xl border border-[var(--border)]">
+              <button
+                type="button"
+                className={`flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                  typeFilter === 'all' && !unreadOnly
+                    ? 'bg-[var(--accent)] text-white shadow-[0_2px_8px_var(--accent-glow)] font-semibold'
+                    : 'text-[var(--text-secondary)] hover:text-white hover:bg-[rgba(255,255,255,0.04)]'
+                }`}
+                onClick={() => {
+                  setTypeFilter('all');
+                  setUnreadOnly(false);
+                }}
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                <span>All</span>
+              </button>
 
               <button
                 type="button"
-                className={`px-2.5 py-0.5 rounded-md font-medium border transition-all cursor-pointer ${
+                className={`flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                  typeFilter === 'dm' && !unreadOnly
+                    ? 'bg-[var(--accent)] text-white shadow-[0_2px_8px_var(--accent-glow)] font-semibold'
+                    : 'text-[var(--text-secondary)] hover:text-white hover:bg-[rgba(255,255,255,0.04)]'
+                }`}
+                onClick={() => {
+                  setTypeFilter('dm');
+                  setUnreadOnly(false);
+                }}
+              >
+                <User className="w-3.5 h-3.5" />
+                <span>DMs</span>
+              </button>
+
+              <button
+                type="button"
+                className={`flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                  typeFilter === 'group' && !unreadOnly
+                    ? 'bg-[var(--accent)] text-white shadow-[0_2px_8px_var(--accent-glow)] font-semibold'
+                    : 'text-[var(--text-secondary)] hover:text-white hover:bg-[rgba(255,255,255,0.04)]'
+                }`}
+                onClick={() => {
+                  setTypeFilter('group');
+                  setUnreadOnly(false);
+                }}
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>Groups</span>
+              </button>
+
+              <button
+                type="button"
+                className={`flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
                   unreadOnly
-                    ? 'bg-[var(--accent)] border-transparent text-white shadow-sm'
-                    : 'border-[var(--border)] text-[var(--text-secondary)] hover:text-white bg-[var(--bg-input)]'
+                    ? 'bg-[rgba(108,92,231,0.3)] text-[#d9d2ff] border border-[rgba(108,92,231,0.5)] shadow-[0_2px_8px_var(--accent-glow)] font-semibold'
+                    : 'text-[var(--text-secondary)] hover:text-white hover:bg-[rgba(255,255,255,0.04)]'
                 }`}
                 onClick={() => setUnreadOnly(!unreadOnly)}
               >
-                Unread
+                <BellDot className="w-3.5 h-3.5" />
+                <span>Unread</span>
               </button>
             </div>
 
             {/* Mode Filter Selector */}
-            <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-              <span>Mode:</span>
+            <div className="flex items-center justify-between text-xs text-[var(--text-secondary)] pt-0.5">
+              <div className="flex items-center gap-1.5">
+                <SlidersHorizontal className="w-3 h-3 text-[var(--text-muted)]" />
+                <span>Mode:</span>
+              </div>
               <select
-                className="px-2 py-1 rounded-md bg-[var(--bg-input)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] cursor-pointer"
+                className="px-2 py-1 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] cursor-pointer"
                 value={modeFilter}
                 onChange={e => setModeFilter(e.target.value as 'all' | ConversationMode)}
               >
                 <option value="all" className="bg-[#1a1a2e]">Any Mode</option>
-                <option value="auto" className="bg-[#1a1a2e]">Auto 🤖</option>
-                <option value="manual" className="bg-[#1a1a2e]">Manual ✋</option>
-                <option value="paused" className="bg-[#1a1a2e]">Paused ⏸</option>
+                <option value="auto" className="bg-[#1a1a2e]">Auto</option>
+                <option value="manual" className="bg-[#1a1a2e]">Manual</option>
+                <option value="paused" className="bg-[#1a1a2e]">Paused</option>
               </select>
             </div>
           </div>
@@ -303,7 +355,7 @@ export default function InboxPage() {
               </div>
             ) : conversations.length === 0 ? (
               <div className="p-8 text-center text-sm text-[var(--text-muted)]">
-                <span className="text-3xl block mb-2 opacity-60">📭</span>
+                <Inbox className="w-8 h-8 mx-auto mb-2 opacity-40 text-[var(--text-muted)]" />
                 <p>No conversations found</p>
               </div>
             ) : (
@@ -319,7 +371,13 @@ export default function InboxPage() {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-2.5 min-w-0">
-                        <span className="text-xl flex-shrink-0">{isGroup ? '👥' : '👤'}</span>
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
+                          isGroup
+                            ? 'bg-[rgba(0,214,143,0.12)] border-[rgba(0,214,143,0.25)] text-[#00d68f]'
+                            : 'bg-[rgba(108,92,231,0.14)] border-[rgba(108,92,231,0.3)] text-[#a29bfe]'
+                        }`}>
+                          {isGroup ? <Users className="w-4 h-4" /> : <User className="w-4 h-4" />}
+                        </div>
                         <div className="min-w-0">
                           <p className="font-semibold text-sm truncate text-[var(--text-primary)]">
                             {conv.display_name}
@@ -380,8 +438,8 @@ export default function InboxPage() {
         <section className={`${activeConvId ? 'flex' : 'hidden md:flex'} inbox-chat-main`}>
           {activeConvId === null || activeConv === null ? (
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-[var(--text-muted)]">
-              <div className="w-16 h-16 rounded-2xl bg-[rgba(108,92,231,0.08)] flex items-center justify-center text-3xl mb-4 border border-[rgba(108,92,231,0.2)] shadow-[0_4px_20px_rgba(108,92,231,0.1)]">
-                💬
+              <div className="w-16 h-16 rounded-2xl bg-[rgba(108,92,231,0.08)] flex items-center justify-center mb-4 border border-[rgba(108,92,231,0.2)] shadow-[0_4px_20px_rgba(108,92,231,0.1)]">
+                <MessageSquare className="w-8 h-8 text-[var(--accent)] opacity-80" />
               </div>
               <h3 className="text-lg font-semibold text-[var(--text-primary)]">No Conversation Selected</h3>
               <p className="text-sm max-w-sm mt-1.5 text-[var(--text-secondary)] leading-relaxed">
@@ -402,9 +460,15 @@ export default function InboxPage() {
                     }}
                     title="Back to conversations"
                   >
-                    ←
+                    <ArrowLeft className="w-4 h-4" />
                   </button>
-                  <span className="text-2xl shrink-0">{activeConv.type === 'group' ? '👥' : '👤'}</span>
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
+                    activeConv.type === 'group'
+                      ? 'bg-[rgba(0,214,143,0.12)] border-[rgba(0,214,143,0.25)] text-[#00d68f]'
+                      : 'bg-[rgba(108,92,231,0.14)] border-[rgba(108,92,231,0.3)] text-[#a29bfe]'
+                  }`}>
+                    {activeConv.type === 'group' ? <Users className="w-5 h-5" /> : <User className="w-5 h-5" />}
+                  </div>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <h3 className="font-bold text-base text-[var(--text-primary)] truncate">
@@ -430,9 +494,9 @@ export default function InboxPage() {
                       value={activeConv.mode}
                       onChange={e => handleModeChange(e.target.value as ConversationMode)}
                     >
-                      <option value="auto" className="bg-[#1a1a2e] text-white">🤖 Auto (AI)</option>
-                      <option value="manual" className="bg-[#1a1a2e] text-white">✋ Manual (Human)</option>
-                      <option value="paused" className="bg-[#1a1a2e] text-white">⏸ Paused (Mute)</option>
+                      <option value="auto" className="bg-[#1a1a2e] text-white">Auto (AI)</option>
+                      <option value="manual" className="bg-[#1a1a2e] text-white">Manual (Human)</option>
+                      <option value="paused" className="bg-[#1a1a2e] text-white">Paused (Mute)</option>
                     </select>
                   </div>
 
@@ -441,7 +505,8 @@ export default function InboxPage() {
                     className="px-3 py-1.5 text-xs font-medium rounded-lg text-[var(--text-secondary)] hover:text-white bg-[var(--bg-input)] hover:bg-[var(--bg-card-hover)] border border-[var(--border)] transition-all cursor-pointer flex items-center gap-1.5"
                     onClick={() => setShowDrawer(true)}
                   >
-                    ℹ️ Details
+                    <Info className="w-3.5 h-3.5 text-[var(--accent)]" />
+                    <span>Details</span>
                   </button>
                 </div>
               </div>
@@ -450,8 +515,8 @@ export default function InboxPage() {
               {errorMsg && (
                 <div className="bg-[rgba(255,107,107,0.12)] border-b border-[rgba(255,107,107,0.25)] text-[var(--danger)] px-4 py-2 text-xs flex justify-between items-center">
                   <span>{errorMsg}</span>
-                  <button type="button" onClick={() => setErrorMsg(null)} className="font-bold hover:opacity-80">
-                    ✕
+                  <button type="button" onClick={() => setErrorMsg(null)} className="font-bold hover:opacity-80 cursor-pointer">
+                    <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
               )}
@@ -459,7 +524,7 @@ export default function InboxPage() {
               {/* Blocked warning */}
               {activeConv.is_blocked && (
                 <div className="bg-[rgba(255,217,61,0.08)] border-b border-[rgba(255,217,61,0.2)] text-[#ffe680] px-6 py-2.5 text-xs font-medium flex items-center gap-2">
-                  <span>🚫</span>
+                  <ShieldCheck className="w-4 h-4 text-[#ffd93d]" />
                   <span>
                     This customer is blocked. Incoming messages are recorded, but AI auto-responses are suppressed.
                   </span>
@@ -509,12 +574,25 @@ export default function InboxPage() {
                         className={`flex flex-col ${isOutbound ? 'items-end' : 'items-start'}`}
                       >
                         <div className="text-xs text-[var(--text-secondary)] mb-1 flex items-center gap-2 px-1">
-                          <span className="font-semibold">
-                            {isOutbound
-                              ? isAdmin
-                                ? '👤 Admin'
-                                : '🤖 AI Bot'
-                              : msg.sender_name || 'Customer'}
+                          <span className="font-semibold inline-flex items-center gap-1.5">
+                            {isOutbound ? (
+                              isAdmin ? (
+                                <>
+                                  <ShieldCheck className="w-3.5 h-3.5 text-[var(--danger)]" />
+                                  <span>Admin</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Bot className="w-3.5 h-3.5 text-[var(--accent)]" />
+                                  <span>AI Bot</span>
+                                </>
+                              )
+                            ) : (
+                              <>
+                                <User className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+                                <span>{msg.sender_name || 'Customer'}</span>
+                              </>
+                            )}
                           </span>
                           <time className="text-[10px] text-[var(--text-muted)]">
                             {new Date(msg.timestamp).toLocaleTimeString([], {
@@ -546,7 +624,7 @@ export default function InboxPage() {
                                   key={att.id}
                                   className="flex items-center gap-2 p-2 bg-[rgba(0,0,0,0.25)] rounded-lg text-xs border border-[rgba(255,255,255,0.06)]"
                                 >
-                                  <span>📎</span>
+                                  <Paperclip className="w-3.5 h-3.5 text-[var(--text-muted)]" />
                                   <span className="font-medium truncate">
                                     {att.filename || 'attachment'}
                                   </span>
@@ -582,10 +660,11 @@ export default function InboxPage() {
                           {isFailed && (
                             <button
                               type="button"
-                              className="text-xs text-[var(--danger)] font-bold underline cursor-pointer hover:brightness-125"
+                              className="text-xs text-[var(--danger)] font-bold underline cursor-pointer hover:brightness-125 inline-flex items-center gap-1"
                               onClick={() => handleRetry(msg.id)}
                             >
-                              Retry Now
+                              <RotateCw className="w-3 h-3" />
+                              <span>Retry Now</span>
                             </button>
                           )}
                         </div>
@@ -616,8 +695,10 @@ export default function InboxPage() {
                         size="sm"
                         disabled={!inputText.trim() || sending}
                         loading={sending}
+                        className="gap-1.5"
                       >
-                        Send 🚀
+                        <Send className="w-3.5 h-3.5" />
+                        <span>Send</span>
                       </Button>
                     </div>
                   </div>
@@ -646,7 +727,7 @@ export default function InboxPage() {
                   className="w-7 h-7 flex items-center justify-center rounded-lg text-xs bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-muted)] hover:text-white hover:border-[rgba(255,255,255,0.2)] transition-all cursor-pointer"
                   onClick={() => setShowDrawer(false)}
                 >
-                  ✕
+                  <X className="w-3.5 h-3.5" />
                 </button>
               </div>
 

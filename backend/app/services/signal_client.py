@@ -92,12 +92,14 @@ class SignalClient:
 
     def _get_http_client(self) -> httpx.AsyncClient:
         """Lazily create or return the shared HTTP client."""
+        raw_url = (settings.signal_api_url or "").strip()
+        base_url = raw_url if raw_url else "http://localhost:8080"
         if self._http_client is None or self._http_client.is_closed:
             headers = {"Content-Type": "application/json"}
             if settings.signal_api_token:
                 headers["Authorization"] = f"Bearer {settings.signal_api_token}"
             self._http_client = httpx.AsyncClient(
-                base_url=settings.signal_api_url,
+                base_url=base_url,
                 headers=headers,
                 timeout=30.0,
             )
@@ -602,6 +604,8 @@ class SignalClient:
     ) -> bool:
         """Update the Signal profile name and about text."""
         phone = number or settings.signal_phone_number
+        if not (settings.signal_api_url or "").strip() or not phone:
+            return False
         try:
             payload = {}
             if name is not None:
@@ -612,7 +616,7 @@ class SignalClient:
             client = self._get_http_client()
             response = await client.put(f"/v1/profiles/{phone}", json=payload)
             return response.status_code in {200, 201, 204}
-        except httpx.HTTPError as e:
+        except (httpx.HTTPError, Exception) as e:
             logger.error(f"Update profile failed: {e}")
             return False
 
@@ -622,13 +626,16 @@ class SignalClient:
     ) -> list[dict]:
         """List all devices linked to this Signal account."""
         phone = number or settings.signal_phone_number
+        if not (settings.signal_api_url or "").strip() or not phone:
+            return []
         try:
             client = self._get_http_client()
             response = await client.get(f"/v1/devices/{phone}")
             if response.status_code == 200:
-                return response.json()
+                data = response.json()
+                return data if isinstance(data, list) else []
             return []
-        except httpx.HTTPError as e:
+        except (httpx.HTTPError, Exception) as e:
             logger.error(f"List devices failed: {e}")
             return []
 
@@ -639,11 +646,13 @@ class SignalClient:
     ) -> bool:
         """Unlink a specific device."""
         phone = number or settings.signal_phone_number
+        if not (settings.signal_api_url or "").strip() or not phone:
+            return False
         try:
             client = self._get_http_client()
             response = await client.delete(f"/v1/devices/{phone}/{device_id}")
             return response.status_code in {200, 201, 204}
-        except httpx.HTTPError as e:
+        except (httpx.HTTPError, Exception) as e:
             logger.error(f"Remove device failed: {e}")
             return False
 

@@ -1,4 +1,5 @@
 import React from 'react';
+import { Bot, Hand, PauseCircle, Check, CheckCheck, Clock, AlertCircle } from 'lucide-react';
 
 export interface BadgeProps {
   children: React.ReactNode;
@@ -41,27 +42,67 @@ export const Badge: React.FC<BadgeProps> = ({
 
 export const ModeBadge: React.FC<{ mode: 'auto' | 'manual' | 'paused' }> = ({ mode }) => {
   if (mode === 'auto') {
-    return <Badge variant="primary" size="xs">🤖 Auto</Badge>;
+    return (
+      <Badge variant="primary" size="xs" className="gap-1">
+        <Bot className="w-3 h-3" />
+        <span>Auto</span>
+      </Badge>
+    );
   }
   if (mode === 'manual') {
-    return <Badge variant="warning" size="xs">✋ Manual</Badge>;
+    return (
+      <Badge variant="warning" size="xs" className="gap-1">
+        <Hand className="w-3 h-3" />
+        <span>Manual</span>
+      </Badge>
+    );
   }
-  return <Badge variant="neutral" size="xs">⏸ Paused</Badge>;
+  return (
+    <Badge variant="neutral" size="xs" className="gap-1">
+      <PauseCircle className="w-3 h-3" />
+      <span>Paused</span>
+    </Badge>
+  );
 };
 
 export const DeliveryBadge: React.FC<{ status?: string | null }> = ({ status }) => {
   if (!status) return null;
   switch (status) {
     case 'sent':
-      return <span className="text-xs text-blue-400 font-medium" title="Sent to Signal">✓ Sent</span>;
+      return (
+        <span className="text-xs text-blue-400 font-medium inline-flex items-center gap-1" title="Sent to Signal">
+          <Check className="w-3 h-3" />
+          <span>Sent</span>
+        </span>
+      );
     case 'delivered':
-      return <span className="text-xs text-emerald-400 font-medium" title="Delivered to recipient">✓✓ Delivered</span>;
+      return (
+        <span className="text-xs text-emerald-400 font-medium inline-flex items-center gap-1" title="Delivered to recipient">
+          <CheckCheck className="w-3.5 h-3.5" />
+          <span>Delivered</span>
+        </span>
+      );
     case 'read':
-      return <span className="text-xs text-cyan-400 font-medium" title="Read by recipient">✓✓ Read</span>;
+      return (
+        <span className="text-xs text-cyan-400 font-medium inline-flex items-center gap-1" title="Read by recipient">
+          <CheckCheck className="w-3.5 h-3.5" />
+          <span>Read</span>
+        </span>
+      );
     case 'pending':
-      return <span className="text-xs text-amber-400 animate-pulse font-medium" title="Sending...">⏳ Sending</span>;
+      return (
+        <span className="text-xs text-amber-400 animate-pulse font-medium inline-flex items-center gap-1" title="Sending...">
+          <Clock className="w-3 h-3" />
+          <span>Sending...</span>
+        </span>
+      );
     case 'failed':
-      return <span className="text-xs text-red-400 font-semibold" title="Delivery failed">✗ Failed</span>;
+      return (
+        <span className="text-xs text-red-400 font-semibold inline-flex items-center gap-1" title="Delivery failed">
+          <AlertCircle className="w-3 h-3" />
+          <span>Failed</span>
+        </span>
+      );
     default:
       return null;
   }

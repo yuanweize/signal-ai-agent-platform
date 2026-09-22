@@ -20,24 +20,21 @@ class UpdateProfileRequest(BaseModel):
 async def get_profile(
     admin: AdminUser = Depends(get_current_admin),
 ):
-    """Get the bot's Signal profile info.
-
-    Note: signal-cli-rest-api does not expose a GET /v1/profiles endpoint.
-    We return the profile from the contacts list (own number) if available,
-    otherwise return the configured phone number.
-    """
-    phone = None
+    """Get the bot's Signal profile info."""
+    phone = ""
+    name = ""
     try:
         from app.config import settings as app_settings
 
-        phone = app_settings.signal_phone_number
+        phone = app_settings.signal_phone_number or ""
+        name = app_settings.bot_name or ""
     except Exception:
         pass
 
     return {
-        "number": phone or "",
-        "name": None,
-        "about": None,
+        "number": phone,
+        "name": name,
+        "about": "",
         "note": "Signal CLI REST API does not provide a GET profile endpoint. Use PUT to update.",
     }
 
@@ -48,9 +45,15 @@ async def update_profile(
     admin: AdminUser = Depends(get_current_admin),
 ):
     """Update the Signal profile name and about text."""
-    success = await signal_client.update_profile(name=request.name, about=request.about)
-    if not success:
-        raise HTTPException(status_code=502, detail="Failed to update profile")
+    from app.config import settings as app_settings
+
+    if request.name:
+        app_settings.bot_name = request.name.strip()
+
+    if (app_settings.signal_api_url or "").strip() and app_settings.signal_phone_number:
+        success = await signal_client.update_profile(name=request.name, about=request.about)
+        if not success:
+            raise HTTPException(status_code=502, detail="Failed to update Signal profile on gateway")
     return {"ok": True}
 
 

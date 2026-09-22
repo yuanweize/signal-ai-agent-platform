@@ -26,9 +26,9 @@ function contactKey(c: ChatConversation): string {
 
 function modeBadge(mode: string): string {
   switch (mode) {
-    case 'manual': return '✋ Manual';
-    case 'paused': return '⏸ Paused';
-    default: return '🤖 AI';
+    case 'manual': return 'Manual';
+    case 'paused': return 'Paused';
+    default: return 'AI';
   }
 }
 
@@ -43,8 +43,8 @@ function modeBadgeClass(mode: string): string {
 function deliveryIcon(status?: string | null): string {
   switch (status) {
     case 'sent': return '✓';
-    case 'failed': return '✗';
-    case 'pending': return '⏳';
+    case 'failed': return '✕';
+    case 'pending': return '...';
     default: return '';
   }
 }
@@ -255,7 +255,6 @@ export default function ChatLogsPage() {
               const key = contactKey(contact);
               const unread = unreadMap[key] || 0;
               const isActive = activeKey === key;
-              const isGroup = !!contact.group_id;
 
               return (
                 <button
@@ -269,9 +268,6 @@ export default function ChatLogsPage() {
                 >
                   <div className="chat-contact-head">
                     <div className="contact-name">
-                      <span style={{ marginRight: '0.35rem', fontSize: '0.9rem' }}>
-                        {isGroup ? '👥' : '💬'}
-                      </span>
                       {contact.display_name || contact.signal_id}
                     </div>
                     <div className="contact-time">{formatListTime(contact.last_message_at)}</div>
@@ -299,9 +295,6 @@ export default function ChatLogsPage() {
               <div className="chat-header">
                 <div style={{ flex: 1 }}>
                   <div className="chat-header-title">
-                    <span style={{ marginRight: '0.4rem' }}>
-                      {isGroupChat ? '👥' : '💬'}
-                    </span>
                     {currentContact.display_name || currentContact.signal_id}
                     <span className={`mode-badge ${modeBadgeClass(activeMode)}`} style={{ marginLeft: '0.6rem', fontSize: '0.8rem' }}>
                       {modeBadge(activeMode)}
@@ -329,7 +322,7 @@ export default function ChatLogsPage() {
                         'No auto-reply; messages recorded only'
                       }
                     >
-                      {m === 'auto' ? '🤖 Auto' : m === 'manual' ? '✋ Manual' : '⏸ Pause'}
+                      {m === 'auto' ? 'Auto' : m === 'manual' ? 'Manual' : 'Pause'}
                     </button>
                   ))}
                 </div>
@@ -358,7 +351,7 @@ export default function ChatLogsPage() {
                             {deliveryIcon(msg.delivery_status)}
                           </span>
                         )}
-                        {isUser ? '' : ' 🤖'}
+                        {isUser ? '' : ' [Bot]'}
                       </div>
                       {isFailed && msg.delivery_error && (
                         <div style={{ color: '#e53e3e', fontSize: '0.7rem', marginTop: '0.2rem' }}>
@@ -414,10 +407,10 @@ export default function ChatLogsPage() {
                 </div>
                 <div className="chat-composer-hint" style={{ color: activeMode === 'manual' ? '#2d9748' : undefined }}>
                   {activeMode === 'manual'
-                    ? '✋ Manual mode active — AI is suppressed'
+                    ? 'Manual mode active — AI is suppressed'
                     : activeMode === 'paused'
-                    ? '⏸ Paused — no auto-reply'
-                    : '🤖 AI auto-reply is active'}
+                    ? 'Paused — no auto-reply'
+                    : 'AI auto-reply is active'}
                   {' · '}
                   <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>Shift+Enter for newline</span>
                 </div>

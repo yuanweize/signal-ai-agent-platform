@@ -1,4 +1,13 @@
 import { useEffect, useState } from 'react';
+import {
+  Smartphone,
+  RefreshCw,
+  Save,
+  Trash2,
+  AlertCircle,
+  CheckCircle2,
+  AlertTriangle,
+} from 'lucide-react';
 import { api, SignalDevice } from './api';
 import SidebarLayout from './SidebarLayout';
 import { Card } from './components/ui/Card';
@@ -103,51 +112,56 @@ export default function DevicesPage() {
             headerAction={
               <button
                 type="button"
-                className="btn btn-ghost btn-xs"
+                className="w-7 h-7 flex items-center justify-center rounded-lg text-xs bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-muted)] hover:text-white hover:border-[rgba(255,255,255,0.2)] transition-all cursor-pointer"
                 onClick={loadProfile}
                 disabled={loadingProfile}
+                title="Refresh profile"
               >
-                ↻ Refresh
+                <RefreshCw className="w-3.5 h-3.5" />
               </button>
             }
           >
             {profileError && (
-              <div className="alert alert-error text-xs mb-4">
+              <div className="bg-[rgba(255,107,107,0.12)] border border-[rgba(255,107,107,0.3)] text-[var(--danger)] px-3.5 py-2.5 rounded-xl text-xs flex items-center gap-2 mb-4">
+                <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>{profileError}</span>
               </div>
             )}
             {profileSuccess && (
-              <div className="alert alert-success text-xs mb-4">
+              <div className="bg-[rgba(0,214,143,0.12)] border border-[rgba(0,214,143,0.3)] text-[var(--success)] px-3.5 py-2.5 rounded-xl text-xs flex items-center gap-2 mb-4">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
                 <span>{profileSuccess}</span>
               </div>
             )}
 
             {loadingProfile ? (
-              <div className="py-8 text-center text-sm text-base-content/50">
-                <span className="loading loading-spinner loading-sm mr-2" />
-                Loading profile...
+              <div className="py-12 text-center text-sm text-[var(--text-muted)] flex flex-col items-center justify-center gap-2">
+                <div className="w-5 h-5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+                <span>Loading profile...</span>
               </div>
             ) : (
               <form onSubmit={handleUpdateProfile} className="space-y-4">
                 <div>
-                  <label className="label">
-                    <span className="label-text font-medium text-xs">Profile Display Name</span>
+                  <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
+                    Profile Display Name
                   </label>
-                  <input
-                    type="text"
-                    className="input input-bordered input-sm w-full"
-                    value={profileName}
-                    onChange={e => setProfileName(e.target.value)}
-                    placeholder="e.g. Signal Market Bot"
-                  />
+                  <div className="relative">
+                    <input
+                      type="text"
+                      className="w-full px-3 py-2 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)] transition-all"
+                      value={profileName}
+                      onChange={e => setProfileName(e.target.value)}
+                      placeholder="e.g. Signal Market Bot"
+                    />
+                  </div>
                 </div>
 
                 <div>
-                  <label className="label">
-                    <span className="label-text font-medium text-xs">About / Bio</span>
+                  <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
+                    About / Bio
                   </label>
                   <textarea
-                    className="textarea textarea-bordered textarea-sm w-full"
+                    className="w-full px-3 py-2 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)] transition-all resize-none"
                     rows={3}
                     value={profileAbout}
                     onChange={e => setProfileAbout(e.target.value)}
@@ -162,8 +176,10 @@ export default function DevicesPage() {
                     size="sm"
                     loading={savingProfile}
                     disabled={loadingProfile}
+                    className="gap-1.5"
                   >
-                    Save Profile
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Save Profile</span>
                   </Button>
                 </div>
               </form>
@@ -177,55 +193,64 @@ export default function DevicesPage() {
             headerAction={
               <button
                 type="button"
-                className="btn btn-ghost btn-xs"
+                className="w-7 h-7 flex items-center justify-center rounded-lg text-xs bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-muted)] hover:text-white hover:border-[rgba(255,255,255,0.2)] transition-all cursor-pointer"
                 onClick={loadDevices}
                 disabled={loadingDevices}
+                title="Refresh devices"
               >
-                ↻ Refresh
+                <RefreshCw className="w-3.5 h-3.5" />
               </button>
             }
           >
             {devicesError && (
-              <div className="alert alert-warning text-xs mb-4">
+              <div className="bg-[rgba(255,217,61,0.12)] border border-[rgba(255,217,61,0.3)] text-[#ffd93d] px-3.5 py-2.5 rounded-xl text-xs flex items-center gap-2 mb-4">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
                 <span>{devicesError}</span>
               </div>
             )}
 
             {loadingDevices ? (
-              <div className="py-8 text-center text-sm text-base-content/50">
-                <span className="loading loading-spinner loading-sm mr-2" />
-                Loading linked devices...
+              <div className="py-12 text-center text-sm text-[var(--text-muted)] flex flex-col items-center justify-center gap-2">
+                <div className="w-5 h-5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+                <span>Loading linked devices...</span>
               </div>
             ) : devices.length === 0 ? (
-              <div className="py-8 text-center text-sm text-base-content/50">
-                No linked devices found.
+              <div className="py-12 text-center text-sm text-[var(--text-muted)]">
+                <Smartphone className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                <span>No linked devices found.</span>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="table table-sm w-full">
+              <div className="border border-[var(--border)] rounded-xl overflow-hidden bg-[rgba(255,255,255,0.01)]">
+                <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="text-xs text-base-content/70">
-                      <th>ID</th>
-                      <th>Device Name</th>
-                      <th>Created</th>
-                      <th>Last Seen</th>
-                      <th>Action</th>
+                    <tr className="border-b border-[var(--border)] bg-[rgba(255,255,255,0.03)] text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
+                      <th className="px-3.5 py-2.5">ID</th>
+                      <th className="px-3.5 py-2.5">Device Name</th>
+                      <th className="px-3.5 py-2.5">Created</th>
+                      <th className="px-3.5 py-2.5">Last Seen</th>
+                      <th className="px-3.5 py-2.5 text-right">Action</th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody className="divide-y divide-[var(--border)]">
                     {devices.map(device => (
-                      <tr key={device.id} className="hover">
-                        <td className="font-mono text-xs">#{device.id}</td>
-                        <td className="font-medium text-xs">{device.name || 'Primary / Unknown'}</td>
-                        <td className="text-xs text-base-content/70">{formatDate(device.created)}</td>
-                        <td className="text-xs text-base-content/70">{formatDate(device.lastSeen)}</td>
-                        <td>
+                      <tr key={device.id} className="hover:bg-[rgba(255,255,255,0.02)] transition-colors">
+                        <td className="px-3.5 py-3 font-mono text-[var(--accent)] font-semibold">#{device.id}</td>
+                        <td className="px-3.5 py-3 font-medium text-[var(--text-primary)]">
+                          <div className="flex items-center gap-2">
+                            <Smartphone className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+                            <span>{device.name || 'Primary / Unknown'}</span>
+                          </div>
+                        </td>
+                        <td className="px-3.5 py-3 text-[var(--text-secondary)]">{formatDate(device.created)}</td>
+                        <td className="px-3.5 py-3 text-[var(--text-secondary)]">{formatDate(device.lastSeen)}</td>
+                        <td className="px-3.5 py-3 text-right">
                           <button
                             type="button"
-                            className="btn btn-ghost btn-xs text-error"
+                            className="px-2.5 py-1 rounded-lg text-xs font-medium text-[var(--danger)] hover:bg-[rgba(255,107,107,0.15)] border border-transparent hover:border-[rgba(255,107,107,0.3)] transition-all cursor-pointer inline-flex items-center gap-1"
                             onClick={() => handleRemoveDevice(device.id)}
                           >
-                            Unlink
+                            <Trash2 className="w-3 h-3" />
+                            <span>Unlink</span>
                           </button>
                         </td>
                       </tr>
