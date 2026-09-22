@@ -5,7 +5,7 @@ Learning candidate generation, PII cleaning, and knowledge/training curation.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -69,13 +69,12 @@ class LearningCandidateService:
         session: AsyncSession,
         status: str = "pending",
         limit: int = 50,
+        conversation_id: int | None = None,
     ) -> list[LearningCandidate]:
-        stmt = (
-            select(LearningCandidate)
-            .where(LearningCandidate.status == status)
-            .order_by(desc(LearningCandidate.created_at))
-            .limit(limit)
-        )
+        stmt = select(LearningCandidate).where(LearningCandidate.status == status)
+        if conversation_id is not None:
+            stmt = stmt.where(LearningCandidate.conversation_id == conversation_id)
+        stmt = stmt.order_by(desc(LearningCandidate.created_at)).limit(limit)
         res = await session.execute(stmt)
         return list(res.scalars().all())
 
@@ -87,11 +86,21 @@ class LearningCandidateService:
         reviewer_name: str = "admin",
         faq_question: str | None = None,
         faq_answer: str | None = None,
+        scope_type: str = "global",
+        scope_id: str | None = None,
+        confirm_global_privacy: bool = False,
     ) -> bool:
         """Promote an approved candidate into the active RAG Knowledge Base."""
         cand = await session.get(LearningCandidate, candidate_id)
         if not cand:
             return False
+
+        if scope_type == "global" and not confirm_global_privacy:
+            raise ValueError(
+                "Promoting to global knowledge requires explicit privacy confirmation "
+                "(`confirm_global_privacy=True`). Confirm this FAQ contains no customer-specific "
+                "promises, credentials, or private facts."
+            )
 
         q = (faq_question or cand.suggested_faq_q or cand.customer_question).strip()
         a = (faq_answer or cand.suggested_faq_a or cand.human_answer).strip()
@@ -116,18 +125,30 @@ class LearningCandidateService:
             source_id=source.id,
             title=f"FAQ: {q}",
             content=a,
-            scope_type="global",
+            scope_type=scope_type,
+            scope_id=scope_id,
             is_faq=True,
             faq_question=q,
-            metadata={"candidate_id": cand.id, "conversation_id": cand.conversation_id},
+            metadata={
+                "candidate_id": cand.id,
+                "conversation_id": cand.conversation_id,
+                "inbound_message_id": cand.inbound_message_id,
+                "outbound_message_id": cand.outbound_message_id,
+                "reviewed_by": reviewer_name,
+                "approved_at": datetime.now(UTC).isoformat(),
+                "scope_type": scope_type,
+                "scope_id": scope_id,
+            },
         )
 
         # 3. Update candidate status
         cand.status = "promoted"
         cand.reviewed_by = reviewer_name
-        cand.reviewed_at = datetime.utcnow()
+        cand.reviewed_at = datetime.now(UTC).replace(tzinfo=None)
         await session.commit()
-        logger.info(f"Promoted candidate #{cand.id} into Knowledge Base source #{source.id}")
+        logger.info(
+            f"Promoted candidate #{cand.id} into Knowledge Base source #{source.id} (scope={scope_type})"
+        )
         return True
 
     async def add_to_training(
@@ -151,7 +172,7 @@ class LearningCandidateService:
         )
         session.add(example)
         cand.status = "approved"
-        cand.reviewed_at = datetime.utcnow()
+        cand.reviewed_at = datetime.now(UTC).replace(tzinfo=None)
         await session.commit()
         await session.refresh(example)
         return example
@@ -167,7 +188,7 @@ class LearningCandidateService:
             return False
         cand.status = "rejected"
         cand.reviewed_by = reviewer_name
-        cand.reviewed_at = datetime.utcnow()
+        cand.reviewed_at = datetime.now(UTC).replace(tzinfo=None)
         await session.commit()
         return True
 

@@ -10,7 +10,7 @@ Features:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -186,15 +186,16 @@ async def create_group(
                 name=request.name,
                 is_active=True,
                 sync_status="synced",
-                last_synced_at=datetime.utcnow(),
+                last_synced_at=datetime.now(UTC).replace(tzinfo=None),
             )
             session.add(group)
             await session.flush()
         else:
             group = existing
             group.name = request.name
+            group.is_active = True
             group.sync_status = "synced"
-            group.last_synced_at = datetime.utcnow()
+            group.last_synced_at = datetime.now(UTC).replace(tzinfo=None)
 
         # Seed initial members
         for member_id in request.members:
@@ -238,7 +239,7 @@ async def sync_groups_from_gateway(
         raise HTTPException(status_code=502, detail="Failed to fetch groups from gateway")
 
     synced = 0
-    now = datetime.utcnow()
+    now = datetime.now(UTC).replace(tzinfo=None)
 
     for gg in gateway_groups:
         gid = gg.get("id") or gg.get("group_id", "")
@@ -342,7 +343,7 @@ async def update_group(
             existing.name = request.name
         if request.description is not None:
             existing.description = request.description
-        existing.last_activity = datetime.utcnow()
+        existing.last_activity = datetime.now(UTC).replace(tzinfo=None)
         await session.commit()
 
     return {"ok": True}

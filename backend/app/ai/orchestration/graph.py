@@ -22,7 +22,7 @@ logger = logging.getLogger("ai.orchestration.graph")
 
 def build_agent_graph(
     llm: LLMProvider,
-    retriever: KnowledgeRetriever,
+    retriever: KnowledgeRetriever | None = None,
 ) -> Any:
     """Build and compile the LangGraph workflow."""
 
@@ -86,6 +86,9 @@ def build_agent_graph(
 
     async def retrieve_knowledge_node(state: AgentState) -> dict[str, Any]:
         """Perform scope-isolated RAG retrieval."""
+        if not retriever:
+            return {"retrieved_chunks": [], "citations": []}
+
         text = state.get("text") or ""
         group_id = state.get("group_id")
         user_id = state.get("user_id")
@@ -178,7 +181,8 @@ def build_agent_graph(
             }
 
         # 2. Build prompt context
-        messages = [{"role": "system", "content": DEFAULT_SYSTEM_PROMPT_TEMPLATE}]
+        system_prompt = state.get("prompt_template") or DEFAULT_SYSTEM_PROMPT_TEMPLATE
+        messages = [{"role": "system", "content": system_prompt}]
 
         # Inject skills
         instructions = state.get("skill_instructions") or []
@@ -211,8 +215,18 @@ def build_agent_graph(
             tr_text = "\n".join(f"Tool {r['tool']}: {r['output']}" for r in tool_results)
             messages.append({"role": "system", "content": f"Business Tool Results:\n{tr_text}"})
 
-        # Inject user message
-        messages.append({"role": "user", "content": state.get("text") or ""})
+        # Inject conversation history (multi-turn context, oldest to newest)
+        history = state.get("history") or []
+        for turn in history:
+            messages.append({"role": turn.get("role", "user"), "content": turn.get("content", "")})
+
+        # Inject current user message
+        text = state.get("text") or ""
+        if state.get("is_group") and state.get("sender_id"):
+            current_user_msg = f"[{state.get('sender_id')}]: {text}"
+        else:
+            current_user_msg = text
+        messages.append({"role": "user", "content": current_user_msg})
 
         reply, tokens = await llm.generate(messages)
 

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import difflib
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import desc, select
@@ -475,16 +475,29 @@ async def send_conversation_message(
     )
 
     # Human manual reply learning & feedback loop
-    last_inbound_res = await session.execute(
-        select(Message)
-        .where(
-            Message.conversation_id == conv.id, Message.direction == MessageDirection.inbound.value
+    target_inbound = None
+    if payload.reply_to_id:
+        cand_inbound = await session.get(Message, payload.reply_to_id)
+        if (
+            cand_inbound
+            and cand_inbound.conversation_id == conv.id
+            and cand_inbound.direction == MessageDirection.inbound.value
+        ):
+            target_inbound = cand_inbound
+
+    if not target_inbound:
+        last_inbound_res = await session.execute(
+            select(Message)
+            .where(
+                Message.conversation_id == conv.id,
+                Message.direction == MessageDirection.inbound.value,
+            )
+            .order_by(desc(Message.id))
+            .limit(1)
         )
-        .order_by(desc(Message.id))
-        .limit(1)
-    )
-    last_inbound = last_inbound_res.scalar_one_or_none()
-    if last_inbound:
+        target_inbound = last_inbound_res.scalar_one_or_none()
+
+    if target_inbound:
         # Expire any pending AI suggestions since admin took manual action
         pending_sugs = await session.execute(
             select(AISuggestion).where(
@@ -503,15 +516,17 @@ async def send_conversation_message(
             actor=admin.username,
         )
 
-        await learning_service.create_candidate(
-            session=session,
-            conversation_id=conv.id,
-            customer_question=last_inbound.content,
-            human_answer=payload.message,
-            inbound_message_id=last_inbound.id,
-            outbound_message_id=msg.id,
-            category="support",
-        )
+        if msg.delivery_status not in ("failed", "cancelled", "unsent"):
+            await learning_service.create_candidate(
+                session=session,
+                conversation_id=conv.id,
+                customer_question=target_inbound.content,
+                human_answer=payload.message,
+                inbound_message_id=target_inbound.id,
+                outbound_message_id=msg.id,
+                category="support",
+                source_quality="human_manual",
+            )
 
     await write_audit_log(
         session=session,
@@ -570,7 +585,7 @@ async def update_conversation_mode(
 
     old_mode = conv.mode
     conv.mode = payload.mode
-    conv.updated_at = datetime.utcnow()
+    conv.updated_at = datetime.now(UTC).replace(tzinfo=None)
     await session.commit()
 
     await write_audit_log(
@@ -618,13 +633,13 @@ async def mark_conversation_read(
 
     if read_state:
         read_state.last_read_message_id = max(read_state.last_read_message_id, target_id)
-        read_state.last_read_at = datetime.utcnow()
+        read_state.last_read_at = datetime.now(UTC).replace(tzinfo=None)
     else:
         read_state = ConversationReadState(
             conversation_id=conversation_id,
             admin_identity=admin.username,
             last_read_message_id=target_id,
-            last_read_at=datetime.utcnow(),
+            last_read_at=datetime.now(UTC).replace(tzinfo=None),
         )
         session.add(read_state)
 
@@ -843,7 +858,7 @@ async def accept_suggestion(
     )
 
     sug.status = AISuggestionStatus.accepted.value
-    sug.reviewed_at = datetime.utcnow()
+    sug.reviewed_at = datetime.now(UTC).replace(tzinfo=None)
     sug.reviewed_by = admin.username
     sug.final_message_id = msg.id
     sug.edit_distance = 0
@@ -952,7 +967,7 @@ async def edit_and_send_suggestion(
     )
 
     sug.status = AISuggestionStatus.edited.value
-    sug.reviewed_at = datetime.utcnow()
+    sug.reviewed_at = datetime.now(UTC).replace(tzinfo=None)
     sug.reviewed_by = admin.username
     sug.final_message_id = msg.id
     sug.edit_distance = edit_distance
@@ -971,7 +986,7 @@ async def edit_and_send_suggestion(
     )
 
     # Distill human-edited Q&A into learning candidate
-    if sug.inbound_message_id:
+    if sug.inbound_message_id and msg.delivery_status not in ("failed", "cancelled", "unsent"):
         inbound_msg = await session.get(Message, sug.inbound_message_id)
         if inbound_msg:
             await learning_service.create_candidate(
@@ -981,7 +996,8 @@ async def edit_and_send_suggestion(
                 human_answer=payload.edited_text,
                 inbound_message_id=inbound_msg.id,
                 outbound_message_id=msg.id,
-                source_quality="high",
+                category="support",
+                source_quality="human_ai_edited",
             )
 
     await write_audit_log(
@@ -1048,7 +1064,7 @@ async def reject_suggestion(
         raise HTTPException(status_code=404, detail="No pending suggestion found")
 
     sug.status = AISuggestionStatus.rejected.value
-    sug.reviewed_at = datetime.utcnow()
+    sug.reviewed_at = datetime.now(UTC).replace(tzinfo=None)
     sug.reviewed_by = admin.username
     await session.commit()
 

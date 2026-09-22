@@ -5,7 +5,7 @@ AI Studio API: Management console routes for Knowledge, Memory, Skills, MCP, Lea
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import desc, select
@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai.evals.runner import eval_runner
 from app.ai.learning.curation import learning_service
 from app.ai.learning.examples import dataset_exporter
-from app.ai.mcp.client import mcp_manager
+from app.ai.mcp.client import mcp_manager, parse_and_decrypt_env
 from app.ai.prompts.manager import prompt_manager
 from app.ai.rag.ingestion import KnowledgeIngestionService
 from app.ai.runtime.factory import get_production_agent_runtime
@@ -26,6 +26,7 @@ from app.models.ai import (
     AIRun,
     AISuggestion,
     FeedbackEvent,
+    KnowledgeChunk,
     KnowledgeDocument,
     KnowledgeSource,
     MCPServerConfig,
@@ -50,6 +51,7 @@ from app.schemas.ai import (
     ToggleSkillRequest,
 )
 from app.services.audit_log import write_audit_log
+from app.services.runtime_config import encrypt_value
 
 router = APIRouter(prefix="/ai-studio", tags=["AI Studio"])
 
@@ -148,73 +150,110 @@ async def get_ai_diagnostics(
 ):
     """Observable status of real AI providers: LLM, Embedding, Vector Store, MCP, and Gateway."""
     from app.config import settings
+    from app.services.runtime_config import get_runtime_settings
     from app.services.signal_client import signal_client
 
+    runtime_cfg = await get_runtime_settings(session)
     runtime = await get_production_agent_runtime(session)
 
     # 1. LLM status
     llm_prov = runtime.llm_provider
-    llm_configured = bool(
-        getattr(llm_prov, "api_key", None) and getattr(llm_prov, "api_key") != "__NO_KEY__"
-    )
-    llm_status = (
-        "configured"
-        if llm_configured
-        else ("degraded" if settings.environment != "test" else "configured")
-    )
+    if type(llm_prov).__name__ == "DisabledLLMProvider" or not runtime_cfg.get("is_ai_enabled"):
+        llm_status = "disabled"
+    else:
+        llm_configured = bool(
+            getattr(llm_prov, "api_key", None) and getattr(llm_prov, "api_key") != "__NO_KEY__"
+        )
+        llm_status = (
+            "configured"
+            if llm_configured
+            else ("not_validated" if getattr(llm_prov, "api_key_optional", False) else "degraded")
+        )
 
     # 2. Embedding status
     emb_prov = runtime.embedding_provider
-    emb_configured = bool(
-        getattr(emb_prov, "api_key", None) and getattr(emb_prov, "api_key") != "__NO_KEY__"
-    )
-    emb_status = (
-        "configured"
-        if emb_configured
-        else ("degraded" if settings.environment != "test" else "configured")
-    )
+    if not runtime_cfg.get("rag_enabled"):
+        emb_status = "disabled"
+    else:
+        emb_configured = bool(
+            getattr(emb_prov, "api_key", None) and getattr(emb_prov, "api_key") != "__NO_KEY__"
+        )
+        emb_status = "configured" if emb_configured else "not_validated"
 
     # 3. Vector store status
     vec_store = runtime.vector_store
-    vec_provider = type(vec_store).__name__
-    vec_status = "connected"
-    if hasattr(vec_store, "client") and getattr(vec_store, "client") is not None:
-        try:
-            await vec_store.client.get_collections()
-            vec_status = "connected"
-        except Exception:
-            vec_status = "degraded"
-    elif vec_provider == "FakeVectorStore":
-        vec_status = "degraded" if settings.environment != "test" else "configured"
+    if not runtime_cfg.get("rag_enabled") or vec_store is None:
+        vec_provider = "none"
+        vec_status = "disabled"
+    else:
+        vec_provider = type(vec_store).__name__
+        vec_status = "configured"
+        if hasattr(vec_store, "client") and getattr(vec_store, "client") is not None:
+            try:
+                await vec_store.client.get_collections()
+                vec_status = "connected"
+            except Exception:
+                vec_status = "degraded"
+        elif vec_provider == "FakeVectorStore":
+            vec_status = "degraded" if settings.environment != "test" else "configured"
 
-    # 4. MCP manager status
+    # 4. RAG Index counts
+    docs_count = (await session.execute(select(sa_func.count(KnowledgeDocument.id)))).scalar() or 0
+    chunks_count = (await session.execute(select(sa_func.count(KnowledgeChunk.id)))).scalar() or 0
+    rag_index_status = (
+        "disabled"
+        if not runtime_cfg.get("rag_enabled")
+        else ("connected" if docs_count > 0 else "configured")
+    )
+
+    # 5. MCP manager status
     active_mcp = mcp_manager.list_servers()
-    mcp_status = "connected" if active_mcp else "configured"
+    all_mcp_servers = (
+        await session.execute(select(sa_func.count(MCPServerConfig.id)))
+    ).scalar() or 0
+    if all_mcp_servers == 0:
+        mcp_status = "configured"
+    elif active_mcp:
+        mcp_status = "connected"
+    else:
+        mcp_status = "degraded"
 
-    # 5. Signal Gateway status
+    # 6. Signal Gateway status
     gw_status = "configured"
     try:
         about = await signal_client.get_about()
         gw_status = "connected" if about else "degraded"
     except Exception:
-        gw_status = "degraded"
+        gw_status = "not_validated"
+
+    llm_dict = {
+        "name": getattr(llm_prov, "provider_name", type(llm_prov).__name__),
+        "model": getattr(llm_prov, "default_model", "unknown"),
+        "status": llm_status,
+    }
+    emb_dict = {
+        "name": type(emb_prov).__name__ if emb_prov else "None",
+        "model": getattr(emb_prov, "model", "unknown") if emb_prov else "none",
+        "status": emb_status,
+    }
 
     return {
-        "llm_provider": {
-            "name": getattr(llm_prov, "provider_name", type(llm_prov).__name__),
-            "model": getattr(llm_prov, "default_model", "unknown"),
-            "status": llm_status,
-        },
-        "embedding_provider": {
-            "name": type(emb_prov).__name__,
-            "status": emb_status,
-        },
+        "llm": llm_dict,
+        "llm_provider": llm_dict,
+        "embedding": emb_dict,
+        "embedding_provider": emb_dict,
         "vector_store": {
             "provider": vec_provider,
             "status": vec_status,
         },
+        "rag_index": {
+            "documents_count": docs_count,
+            "chunks_count": chunks_count,
+            "status": rag_index_status,
+        },
         "mcp": {
             "active_servers": len(active_mcp),
+            "total_servers": all_mcp_servers,
             "status": mcp_status,
         },
         "signal_gateway": {
@@ -617,7 +656,7 @@ async def toggle_skill(
     session: AsyncSession = Depends(get_session),
     admin: AdminUser = Depends(get_current_admin),
 ):
-    ok = skill_registry.set_enabled(skill_name, payload.is_enabled)
+    ok = await skill_registry.set_enabled_persisted(session, skill_name, payload.is_enabled)
     if not ok:
         raise HTTPException(status_code=404, detail=f"Skill '{skill_name}' not found")
 
@@ -673,12 +712,15 @@ async def register_mcp_server(
     session: AsyncSession = Depends(get_session),
     admin: AdminUser = Depends(get_current_admin),
 ):
+    env_str = json.dumps(payload.env) if payload.env else None
+    encrypted_env = encrypt_value(env_str) if env_str else None
+
     server = MCPServerConfig(
         name=payload.name,
         transport=payload.transport,
         command_or_url=payload.command_or_url,
         args_json=json.dumps(payload.args),
-        env_json=json.dumps(payload.env),
+        env_json=encrypted_env,
         is_enabled=True,
         status="disconnected",
     )
@@ -718,7 +760,7 @@ async def connect_mcp_server(
 
     try:
         args = json.loads(server.args_json) if server.args_json else []
-        env = json.loads(server.env_json) if server.env_json else {}
+        env = parse_and_decrypt_env(server.env_json)
         tools = await mcp_manager.connect_server(
             name=server.name,
             transport=server.transport,
@@ -727,7 +769,7 @@ async def connect_mcp_server(
             env=env,
         )
         server.status = "connected"
-        server.last_connected_at = datetime.utcnow()
+        server.last_connected_at = datetime.now(UTC).replace(tzinfo=None)
         server.error_message = None
         await session.commit()
         return {"ok": True, "status": "connected", "tools_discovered": len(tools)}
@@ -782,14 +824,21 @@ async def promote_candidate(
         embedding_provider=runtime.embedding_provider,
         vector_store=runtime.vector_store,
     )
-    ok = await learning_service.promote_to_knowledge(
-        session=session,
-        candidate_id=candidate_id,
-        ingestion_service=ingestion,
-        reviewer_name=admin.username,
-        faq_question=payload.faq_question,
-        faq_answer=payload.faq_answer,
-    )
+    try:
+        ok = await learning_service.promote_to_knowledge(
+            session=session,
+            candidate_id=candidate_id,
+            ingestion_service=ingestion,
+            reviewer_name=admin.username,
+            faq_question=payload.faq_question,
+            faq_answer=payload.faq_answer,
+            scope_type=payload.scope_type,
+            scope_id=payload.scope_id,
+            confirm_global_privacy=payload.confirm_global_privacy,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     if not ok:
         raise HTTPException(status_code=404, detail="Candidate not found")
     return {"ok": True, "promoted_candidate_id": candidate_id}

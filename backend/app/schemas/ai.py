@@ -221,6 +221,9 @@ class PromoteCandidateRequest(BaseModel):
     faq_question: str | None = None
     faq_answer: str | None = None
     category: str = "general"
+    scope_type: str = Field(default="global", pattern="^(global|group|user)$")
+    scope_id: str | None = None
+    confirm_global_privacy: bool = False
 
 
 # --- Evaluation & Overview ---

@@ -46,12 +46,16 @@ class OpenAICompatibleProvider:
         api_key: str = "",
         default_model: str = "gpt-4o-mini",
         timeout: float = 30.0,
+        temperature: float = 0.7,
+        max_tokens: int = 800,
     ) -> None:
         self.base_url = (base_url or "").strip().rstrip("/")
         self.api_key = api_key or "__NO_KEY__"
         self.default_model = default_model
         self.provider_name = "openai_compatible"
         self.timeout = timeout
+        self.temperature = temperature
+        self.max_tokens = max_tokens
         self._client: AsyncOpenAI | None = None
 
     def _get_client(self) -> AsyncOpenAI:
@@ -68,16 +72,18 @@ class OpenAICompatibleProvider:
         self,
         messages: list[dict[str, Any]],
         model: str | None = None,
-        temperature: float = 0.7,
-        max_tokens: int = 800,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> tuple[str, int]:
         client = self._get_client()
         target_model = model or self.default_model
+        temp = temperature if temperature is not None else self.temperature
+        tokens_limit = max_tokens if max_tokens is not None else self.max_tokens
         response = await client.chat.completions.create(
             model=target_model,
             messages=messages,  # type: ignore[arg-type]
-            temperature=temperature,
-            max_tokens=max_tokens,
+            temperature=temp,
+            max_tokens=tokens_limit,
         )
         content = response.choices[0].message.content or ""
         tokens = response.usage.total_tokens if response.usage else len(content) // 4
@@ -191,3 +197,29 @@ class FakeLLMProvider:
                 30,
             )
         return await self.generate(messages, model=model)
+
+
+class DisabledLLMProvider:
+    """Explicit provider when AI is disabled or unconfigured in Settings."""
+
+    def __init__(self, reason: str = "AI is disabled") -> None:
+        self.provider_name = "disabled"
+        self.default_model = "disabled"
+        self.reason = reason
+
+    async def generate(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 800,
+    ) -> tuple[str, int]:
+        raise RuntimeError(f"AI provider call prohibited: {self.reason}")
+
+    async def tool_generate(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        model: str | None = None,
+    ) -> tuple[str | None, list[dict[str, Any]], int]:
+        raise RuntimeError(f"AI provider call prohibited: {self.reason}")

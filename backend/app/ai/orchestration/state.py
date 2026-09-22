@@ -27,6 +27,9 @@ class AgentState(TypedDict, total=False):
     skill_instructions: list[str]
     tool_calls: list[dict[str, Any]]
     tool_results: list[dict[str, Any]]
+    history: list[dict[str, str]]
+    prompt_template: str | None
+    prompt_version: str | None
 
     # Response decision
     decision: str  # reply | draft_for_human | ask_clarifying | handoff | no_reply
