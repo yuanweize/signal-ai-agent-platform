@@ -278,6 +278,13 @@ class MCPClientManager:
         ]
 
     async def disconnect_server(self, name: str) -> bool:
+        from app.ai.tools.registry import tool_registry
+
+        # Lifecycle guarantee: Unregister all tools belonging to this MCP server
+        removed_count = tool_registry.unregister_server_tools(name)
+        if removed_count:
+            logger.info(f"Unregistered {removed_count} tool(s) for MCP server '{name}'")
+
         if name in self._active_servers:
             server_info = self._active_servers.pop(name)
             session = server_info.get("session")
@@ -320,7 +327,7 @@ class MCPClientManager:
                 logger.info(
                     f"Auto-connected enabled MCP server '{server.name}' ({len(tools)} tools)"
                 )
-            except Exception as e:
+            except (Exception, BaseExceptionGroup) as e:
                 server.status = "error"
                 server.error_message = str(e)
                 results[server.name] = 0

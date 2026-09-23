@@ -17,15 +17,42 @@
 
 ---
 
+---
+
 <div align="center">
-  <img src="assets/admin_overview.png" width="900" alt="Signal Market Bot Admin Overview" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
-  <p><em>Signal Market Bot Executive Console — Real-time operational telemetry, messaging volume, marketing broadcasts, and product metrics</em></p>
+  <img src="assets/screenshots/admin-overview.png" width="900" alt="Signal Market Bot Admin Overview" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
+  <p><em>Signal Market Bot Executive Console — Real-time operational telemetry, messaging volume, module health, and catalog metrics</em></p>
 </div>
 
 <div align="center">
-  <img src="assets/ai_engine_setting.png" width="900" alt="Signal Market Bot AI Engine Configuration" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
-  <p><em>Runtime AI Engine Configuration — Universal OpenAI-compatible endpoint integration, temperature tuning, dynamic prompt injection, and hot reloading</em></p>
+  <img src="assets/screenshots/ai-studio-overview.png" width="900" alt="Signal Market Bot AI Studio v0.4.1" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
+  <p><em>AI Studio Observability & Operations Console (v0.4.1) — Truthful token telemetry, latency percentiles, structured usage breakdown, and 4-group management workflow</em></p>
 </div>
+
+### 📸 Product Tour
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="assets/screenshots/ai-studio-trace.png" alt="Runs & Trace Inspector" style="border-radius: 8px;">
+      <br><strong>Runs & Trace Inspector</strong><br><em>Slide-over execution inspector with per-call model telemetry & token breakdown</em>
+    </td>
+    <td width="50%" align="center">
+      <img src="assets/screenshots/inbox-copilot.png" alt="Inbox Copilot & Takeover" style="border-radius: 8px;">
+      <br><strong>Inbox Copilot & Takeover</strong><br><em>Human-in-the-loop assisted draft review, provenance tracking, and takeover controls</em>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="assets/screenshots/ai-settings.png" alt="AI Engine Configuration" style="border-radius: 8px;">
+      <br><strong>Runtime AI Engine Settings</strong><br><em>Universal OpenAI-compatible configuration, model probing, and encrypted storage</em>
+    </td>
+    <td width="50%" align="center">
+      <img src="assets/screenshots/campaigns.png" alt="Targeted Broadcast Campaigns" style="border-radius: 8px;">
+      <br><strong>Targeted Broadcast Campaigns</strong><br><em>Smart group broadcasting composer with dry-run verification and delivery analytics</em>
+    </td>
+  </tr>
+</table>
 
 ---
 

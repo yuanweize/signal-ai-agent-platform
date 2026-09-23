@@ -25,6 +25,15 @@ DEFAULT_MODEL_PRICING: dict[str, dict[str, Any]] = {
 }
 
 
+def _normalize_model_alias(m: str) -> str:
+    norm = m.strip().lower()
+    if norm.startswith("gpt-4o-mini-"):
+        return "gpt-4o-mini"
+    if norm.startswith("gpt-4o-") and not norm.startswith("gpt-4o-mini"):
+        return "gpt-4o"
+    return norm
+
+
 def calculate_cost(
     model: str | None,
     input_tokens: int | None,
@@ -43,7 +52,7 @@ def calculate_cost(
         return None, None
 
     pricing_map = {**DEFAULT_MODEL_PRICING, **(custom_pricing or {})}
-    prices = pricing_map.get(model)
+    prices = pricing_map.get(model) or pricing_map.get(_normalize_model_alias(model))
     if not prices:
         # Unknown/Custom model with no configured pricing -> NEVER guess
         return None, None

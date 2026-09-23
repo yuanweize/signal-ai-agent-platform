@@ -23,7 +23,9 @@ import type {
   AIRunDTO,
   UsageSummaryDTO,
   UsageTimeseriesPointDTO,
+  UsageTimeseriesResponseDTO,
   ModelUsageItemDTO,
+  ModelUsageResponseDTO,
   KnowledgeSourceDTO,
   KnowledgeSourceDetailDTO,
   RAGSearchResultDTO,
@@ -512,7 +514,9 @@ class ApiClient {
     prompt_version?: string;
     has_error?: boolean;
     used_rag?: boolean;
+    has_rag?: boolean;
     used_tools?: boolean;
+    has_tools?: boolean;
     conversation_id?: number;
     traffic_source?: string;
   } = {}) {
@@ -525,8 +529,16 @@ class ApiClient {
     if (params.provider) q.append('provider', params.provider);
     if (params.prompt_version) q.append('prompt_version', params.prompt_version);
     if (params.has_error !== undefined) q.append('has_error', String(params.has_error));
-    if (params.used_rag !== undefined) q.append('used_rag', String(params.used_rag));
-    if (params.used_tools !== undefined) q.append('used_tools', String(params.used_tools));
+    const ragFilter = params.has_rag !== undefined ? params.has_rag : params.used_rag;
+    if (ragFilter !== undefined) {
+      q.append('has_rag', String(ragFilter));
+      q.append('used_rag', String(ragFilter));
+    }
+    const toolsFilter = params.has_tools !== undefined ? params.has_tools : params.used_tools;
+    if (toolsFilter !== undefined) {
+      q.append('has_tools', String(toolsFilter));
+      q.append('used_tools', String(toolsFilter));
+    }
     if (params.conversation_id !== undefined) q.append('conversation_id', String(params.conversation_id));
     if (params.traffic_source) q.append('traffic_source', params.traffic_source);
     const qs = q.toString() ? `?${q.toString()}` : '';
@@ -552,11 +564,19 @@ class ApiClient {
     if (params.model) q.append('model', params.model);
     if (params.provider) q.append('provider', params.provider);
     const qs = q.toString() ? `?${q.toString()}` : '';
-    return this.request<UsageTimeseriesPointDTO[]>(`/ai-studio/usage/timeseries${qs}`);
+    const res = await this.request<UsageTimeseriesResponseDTO | UsageTimeseriesPointDTO[]>(`/ai-studio/usage/timeseries${qs}`);
+    if (res && typeof res === 'object' && 'points' in res && Array.isArray((res as UsageTimeseriesResponseDTO).points)) {
+      return (res as UsageTimeseriesResponseDTO).points;
+    }
+    return (res as UsageTimeseriesPointDTO[]) || [];
   }
 
   async getUsageModels(timeRange = '24h') {
-    return this.request<ModelUsageItemDTO[]>(`/ai-studio/usage/models?time_range=${encodeURIComponent(timeRange)}`);
+    const res = await this.request<ModelUsageResponseDTO | ModelUsageItemDTO[]>(`/ai-studio/usage/models?time_range=${encodeURIComponent(timeRange)}`);
+    if (res && typeof res === 'object' && 'models' in res && Array.isArray((res as ModelUsageResponseDTO).models)) {
+      return (res as ModelUsageResponseDTO).models;
+    }
+    return (res as ModelUsageItemDTO[]) || [];
   }
 
   async getKnowledgeSources() {
@@ -581,7 +601,7 @@ class ApiClient {
   }
 
   async reindexKnowledgeSource(sourceId: number) {
-    return this.request<{ ok: boolean; indexed_documents: number; indexed_chunks: number }>(
+    return this.request<{ ok: boolean; indexed_documents: number; indexed_chunks: number; documents_count?: number; chunks_reindexed?: number }>(
       `/ai-studio/knowledge/sources/${sourceId}/reindex`,
       { method: 'POST' }
     );
@@ -607,9 +627,9 @@ class ApiClient {
     );
   }
 
-  async deleteKnowledgeDoc(sourceId: number, docId: number) {
+  async deleteKnowledgeDoc(_sourceId: number, docId: number) {
     return this.request<{ ok: boolean; document_id: number }>(
-      `/ai-studio/knowledge/sources/${sourceId}/documents/${docId}`,
+      `/ai-studio/knowledge/documents/${docId}`,
       {
         method: 'DELETE',
       }
@@ -618,7 +638,18 @@ class ApiClient {
 
   async searchKnowledge(query: string, scopeType?: string, scopeId?: string, limit = 5) {
     const q = new URLSearchParams({ query, limit: String(limit) });
-    if (scopeType) q.append('scope_type', scopeType);
+    if (scopeType) {
+      q.append('scope_type', scopeType);
+      if (scopeType === 'group' && scopeId) {
+        q.append('is_group', 'true');
+        q.append('group_id', scopeId);
+      } else if (scopeType === 'user' && scopeId) {
+        q.append('is_group', 'false');
+        q.append('user_id', scopeId);
+      } else if (scopeType === 'global') {
+        q.append('is_group', 'false');
+      }
+    }
     if (scopeId) q.append('scope_id', scopeId);
     return this.request<RAGSearchResultDTO[]>(`/ai-studio/knowledge/search?${q.toString()}`);
   }
@@ -670,18 +701,41 @@ class ApiClient {
   }
 
   async getMCPServerDetail(serverId: number) {
-    return this.request<MCPServerDetailDTO>(`/ai-studio/mcp/servers/${serverId}`);
+    const res = await this.request<Record<string, unknown>>(`/ai-studio/mcp/servers/${serverId}`);
+    const server = (res.server || res) as MCPServerDTO;
+    const tools = ((res.discovered_tools || res.tools || []) as unknown) as MCPServerDetailDTO['tools'];
+    return {
+      ...server,
+      server,
+      tools,
+      discovered_tools: tools,
+    } as MCPServerDetailDTO;
   }
 
   async createMCPServer(data: {
     name: string;
-    transport_type: string;
+    transport_type?: string;
+    transport?: string;
     endpoint_url?: string;
     command?: string;
+    command_or_url?: string;
+    args?: string[];
+    env?: Record<string, string>;
   }) {
+    const transport = data.transport || data.transport_type || 'stdio';
+    const command_or_url = data.command_or_url || (transport === 'stdio' ? data.command : data.endpoint_url) || '';
     return this.request<MCPServerDTO>('/ai-studio/mcp/servers', {
       method: 'POST',
-      body: data,
+      body: {
+        name: data.name,
+        transport,
+        transport_type: transport,
+        command_or_url,
+        command: transport === 'stdio' ? command_or_url : undefined,
+        endpoint_url: transport !== 'stdio' ? command_or_url : undefined,
+        args: data.args || [],
+        env: data.env || {},
+      },
     });
   }
 
@@ -693,8 +747,8 @@ class ApiClient {
   }
 
   async toggleMCPServer(serverId: number, isEnabled: boolean) {
-    return this.request<{ ok: boolean; is_enabled: boolean }>(`/ai-studio/mcp/servers/${serverId}`, {
-      method: 'PATCH',
+    return this.request<{ ok: boolean; is_enabled: boolean }>(`/ai-studio/mcp/servers/${serverId}/toggle`, {
+      method: 'POST',
       body: { is_enabled: isEnabled },
     });
   }

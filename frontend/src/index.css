@@ -198,7 +198,7 @@ body {
 .form-group select {
   width: 100%;
   padding: 0.75rem 1rem;
-  background: var(--bg-input);
+  background-color: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
@@ -213,7 +213,7 @@ body {
 .form-group textarea:focus,
 .form-group select:focus {
   border-color: var(--accent);
-  background: var(--bg-card);
+  background-color: var(--bg-card);
   box-shadow: 0 0 0 3px var(--accent-glow), inset 0 2px 4px rgba(0, 0, 0, 0.02);
 }
 

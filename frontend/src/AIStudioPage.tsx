@@ -276,7 +276,9 @@ export default function AIStudioPage() {
   const handleReindexSource = async (sourceId: number) => {
     try {
       const res = await api.reindexKnowledgeSource(sourceId);
-      setSuccessMsg(`Reindexed source #${sourceId}: ${res.indexed_documents} documents, ${res.indexed_chunks} chunks.`);
+      const docs = res.indexed_documents ?? res.documents_count ?? 0;
+      const chunks = res.indexed_chunks ?? res.chunks_reindexed ?? 0;
+      setSuccessMsg(`Reindexed source #${sourceId}: ${docs} documents, ${chunks} chunks.`);
       loadTabData('knowledge');
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Failed to reindex source');
@@ -1296,9 +1298,15 @@ export default function AIStudioPage() {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
                   <div className="p-3 rounded-xl bg-[var(--bg-input)]">
                     <span className="text-[var(--text-muted)]">Connection:</span>
-                    <div className={`font-bold mt-0.5 ${liveTestResult.connection_status === 'connected' ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {liveTestResult.connection_status.toUpperCase()}
-                    </div>
+                    {(() => {
+                      const connStatus = (liveTestResult.connection_status || (liveTestResult.connected ? 'connected' : 'failed') || 'unknown').toLowerCase();
+                      const isConnOk = connStatus === 'connected' || liveTestResult.connected === true;
+                      return (
+                        <div className={`font-bold mt-0.5 ${isConnOk ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {connStatus.toUpperCase()}
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div className="p-3 rounded-xl bg-[var(--bg-input)]">
                     <span className="text-[var(--text-muted)]">Latency:</span>
@@ -1306,11 +1314,15 @@ export default function AIStudioPage() {
                   </div>
                   <div className="p-3 rounded-xl bg-[var(--bg-input)]">
                     <span className="text-[var(--text-muted)]">Native Tool Calling:</span>
-                    <div className="font-bold text-[var(--text-primary)] mt-0.5">{liveTestResult.native_tool_calling.toUpperCase()}</div>
+                    <div className="font-bold text-[var(--text-primary)] mt-0.5">
+                      {(liveTestResult.native_tool_calling || liveTestResult.tool_calling_status || 'unsupported').toUpperCase()}
+                    </div>
                   </div>
                   <div className="p-3 rounded-xl bg-[var(--bg-input)]">
                     <span className="text-[var(--text-muted)]">Embeddings:</span>
-                    <div className="font-bold text-[var(--text-primary)] mt-0.5">{liveTestResult.embeddings.toUpperCase()}</div>
+                    <div className="font-bold text-[var(--text-primary)] mt-0.5">
+                      {(liveTestResult.embeddings || liveTestResult.embedding_status || 'not_configured').toUpperCase()}
+                    </div>
                   </div>
                 </div>
 
@@ -1754,55 +1766,59 @@ export default function AIStudioPage() {
             </div>
 
             {/* MCP Discovered Tools Detail Modal (Requirement #42) */}
-            {selectedMcpDetail && (
-              <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-                <div className="w-full max-w-2xl bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl p-6 space-y-4 max-h-[85vh] overflow-y-auto">
-                  <div className="flex items-center justify-between pb-3 border-b border-[var(--border)]">
-                    <div>
-                      <h3 className="text-sm font-bold text-[var(--text-primary)]">
-                        Discovered Tools: {selectedMcpDetail.name}
-                      </h3>
-                      <span className="text-xs text-[var(--text-muted)]">
-                        {selectedMcpDetail.tools.length} tool(s) registered
-                      </span>
-                    </div>
-                    <button onClick={() => setSelectedMcpDetail(null)} className="p-1 rounded text-[var(--text-secondary)]">
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-
-                  <div className="space-y-3">
-                    {selectedMcpDetail.tools.length === 0 ? (
-                      <div className="p-6 text-center text-xs text-[var(--text-muted)]">
-                        No tools discovered on this server. Run connection test to discover tools.
+            {selectedMcpDetail && (() => {
+              const serverName = selectedMcpDetail.server?.name || selectedMcpDetail.name || 'MCP Server';
+              const toolsList = selectedMcpDetail.discovered_tools || selectedMcpDetail.tools || [];
+              return (
+                <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="w-full max-w-2xl bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl p-6 space-y-4 max-h-[85vh] overflow-y-auto">
+                    <div className="flex items-center justify-between pb-3 border-b border-[var(--border)]">
+                      <div>
+                        <h3 className="text-sm font-bold text-[var(--text-primary)]">
+                          Discovered Tools: {serverName}
+                        </h3>
+                        <span className="text-xs text-[var(--text-muted)]">
+                          {toolsList.length} tool(s) registered
+                        </span>
                       </div>
-                    ) : (
-                      selectedMcpDetail.tools.map(t => (
-                        <div key={t.name} className="p-4 rounded-xl bg-[var(--bg-input)] border border-[var(--border)] text-xs space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="font-mono font-bold text-indigo-400">{t.name}</span>
-                            <div className="flex items-center gap-1.5 text-[10px]">
-                              {t.read_only ? (
-                                <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300">Read-Only</span>
-                              ) : (
-                                <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">Write Action</span>
-                              )}
-                              {t.requires_approval && (
-                                <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300">Requires Approval</span>
-                              )}
-                            </div>
-                          </div>
-                          <p className="text-[11px] text-[var(--text-secondary)]">{t.description}</p>
-                          <pre className="text-[10px] text-[var(--text-secondary)] bg-black/40 p-2 rounded overflow-x-auto font-mono">
-                            {JSON.stringify(t.input_schema || {}, null, 2)}
-                          </pre>
+                      <button onClick={() => setSelectedMcpDetail(null)} className="p-1 rounded text-[var(--text-secondary)]">
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    <div className="space-y-3">
+                      {toolsList.length === 0 ? (
+                        <div className="p-6 text-center text-xs text-[var(--text-muted)]">
+                          No tools discovered on this server. Run connection test to discover tools.
                         </div>
-                      ))
-                    )}
+                      ) : (
+                        toolsList.map(t => (
+                          <div key={t.name} className="p-4 rounded-xl bg-[var(--bg-input)] border border-[var(--border)] text-xs space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="font-mono font-bold text-indigo-400">{t.name}</span>
+                              <div className="flex items-center gap-1.5 text-[10px]">
+                                {t.read_only ? (
+                                  <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300">Read-Only</span>
+                                ) : (
+                                  <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">Write Action</span>
+                                )}
+                                {t.requires_approval && (
+                                  <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300">Requires Approval</span>
+                                )}
+                              </div>
+                            </div>
+                            <p className="text-[11px] text-[var(--text-secondary)]">{t.description}</p>
+                            <pre className="text-[10px] text-[var(--text-secondary)] bg-black/40 p-2 rounded overflow-x-auto font-mono">
+                              {JSON.stringify(t.input_schema || {}, null, 2)}
+                            </pre>
+                          </div>
+                        ))
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         )}
 

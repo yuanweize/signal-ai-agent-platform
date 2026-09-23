@@ -13,6 +13,7 @@ UsageSource = Literal[
     "estimated",
     "unavailable",
     "legacy_total_only",
+    "partial",
 ]
 
 
@@ -27,12 +28,12 @@ class TokenUsage:
 
     def is_available(self) -> bool:
         return (
-            self.usage_source in ("provider", "estimated", "legacy_total_only")
+            self.usage_source in ("provider", "estimated", "legacy_total_only", "partial")
             and self.total_tokens is not None
         )
 
     def add(self, other: TokenUsage | None) -> TokenUsage:
-        """Combine two token usages safely."""
+        """Combine two token usages safely with truthful provenance."""
         if other is None:
             return self
 
@@ -62,13 +63,20 @@ class TokenUsage:
             else None
         )
 
-        if self.usage_source == "provider" and other.usage_source == "provider":
+        sources = {self.usage_source, other.usage_source}
+        if sources == {"provider"}:
             src: UsageSource = "provider"
-        elif "estimated" in (self.usage_source, other.usage_source):
+        elif "partial" in sources:
+            src = "partial"
+        elif "provider" in sources and "unavailable" in sources:
+            src = "partial"
+        elif "provider" in sources and "legacy_total_only" in sources:
+            src = "partial"
+        elif "legacy_total_only" in sources and "unavailable" in sources:
+            src = "partial"
+        elif "estimated" in sources:
             src = "estimated"
-        elif "provider" in (self.usage_source, other.usage_source):
-            src = "provider"
-        elif "legacy_total_only" in (self.usage_source, other.usage_source):
+        elif sources == {"legacy_total_only"}:
             src = "legacy_total_only"
         else:
             src = "unavailable"

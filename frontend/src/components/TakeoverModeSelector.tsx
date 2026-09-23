@@ -100,10 +100,11 @@ export const TakeoverModeSelector: React.FC<TakeoverModeSelectorProps> = ({
     };
   }, [isOpen]);
 
-  // Handle Escape key to close
+  // Handle Escape key to close (only when open)
   useEffect(() => {
+    if (!isOpen) return;
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape' && isOpen) {
+      if (event.key === 'Escape') {
         setIsOpen(false);
       }
     }
@@ -115,12 +116,18 @@ export const TakeoverModeSelector: React.FC<TakeoverModeSelectorProps> = ({
 
   return (
     <div className={`relative inline-block text-left ${className}`} ref={dropdownRef}>
-      {/* Hidden native select for accessibility and testing compatibility */}
+      {/* Hidden native select for accessibility and testing compatibility fallback */}
       <select
+        aria-hidden="true"
         aria-label="Takeover mode"
         className="sr-only"
         value={mode}
-        onChange={e => onChange(e.target.value as ConversationMode)}
+        onChange={e => {
+          const nextMode = e.target.value as ConversationMode;
+          if (nextMode !== mode) {
+            onChange(nextMode);
+          }
+        }}
         disabled={disabled}
         tabIndex={-1}
       >
@@ -136,7 +143,7 @@ export const TakeoverModeSelector: React.FC<TakeoverModeSelectorProps> = ({
         type="button"
         disabled={disabled}
         onClick={() => setIsOpen(!isOpen)}
-        aria-haspopup="listbox"
+        aria-haspopup="menu"
         aria-expanded={isOpen}
         className={`group flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all duration-200 cursor-pointer select-none ${
           currentMode.badgeBg
@@ -171,7 +178,7 @@ export const TakeoverModeSelector: React.FC<TakeoverModeSelectorProps> = ({
       {/* Dropdown Popover Menu */}
       {isOpen && (
         <div
-          role="listbox"
+          role="menu"
           aria-label="Takeover options"
           className="absolute right-0 mt-2 w-80 rounded-xl bg-[rgba(26,26,46,0.96)] border border-[var(--border)] shadow-[0_16px_40px_rgba(0,0,0,0.6)] backdrop-blur-xl p-1.5 z-50 animate-in fade-in zoom-in-95 duration-150"
         >
@@ -193,10 +200,12 @@ export const TakeoverModeSelector: React.FC<TakeoverModeSelectorProps> = ({
                 <button
                   key={item.key}
                   type="button"
-                  role="option"
-                  aria-selected={isSelected}
+                  role="menuitemradio"
+                  aria-checked={isSelected}
                   onClick={() => {
-                    onChange(item.key);
+                    if (item.key !== mode) {
+                      onChange(item.key);
+                    }
                     setIsOpen(false);
                   }}
                   className={`w-full flex items-start gap-3 p-2.5 rounded-lg text-left transition-all duration-150 cursor-pointer ${

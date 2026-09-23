@@ -80,7 +80,7 @@ Located in [`backend/app/ai/mcp/client.py`](../backend/app/ai/mcp/client.py):
 Located in [`backend/app/ai/observability/`](../backend/app/ai/observability/):
 - **Trace Persistence**: Every AI interaction logs an `AIRun` record capturing requested model, effective provider, prompt version, retrieved chunks, memories, tool calls, decision reason, tokens, and latency.
 - **No Hardcoded Metrics**: Dashboard metrics (such as RAG hit rate) are dynamically computed from stored traces. If no traces exist, `null` is returned rather than misleading hardcoded numbers.
-- **Diagnostics API**: `GET /api/ai-studio/diagnostics` reports live observable status (`configured`, `connected`, `live_verified`, `degraded`, `disabled`, `not_validated`) for LLM, Embedding, Qdrant, MCP, and Signal Gateway.
+- **Diagnostics API**: `GET /api/ai-studio/diagnostics` reports live observable status (`configured`, `connected`, `live_verified`, `degraded`, `disabled`, `not_validated`, `error`, `unsupported`) for LLM, Embedding, Qdrant, MCP, and Signal Gateway.
 
 ---
 
@@ -89,9 +89,9 @@ Located in [`backend/app/ai/observability/`](../backend/app/ai/observability/):
 ### Provider-Neutral Token Telemetry
 Located in [`backend/app/ai/types/usage.py`](../backend/app/ai/types/usage.py) and [`backend/app/ai/telemetry/pricing.py`](../backend/app/ai/telemetry/pricing.py):
 - **Token Telemetry Breakdown**: Standardized `TokenUsage` tracks `input_tokens`, `output_tokens`, `total_tokens`, `cached_input_tokens`, and `reasoning_tokens`.
-- **Elimination of Fallback Estimates**: Removed heuristic `len // 4` token estimates. Unreported usage is recorded strictly with `usage_source='unavailable'`.
+- **Truthful Provenance Hierarchy**: Token usage sources are strictly categorized as `provider`, `estimated`, `unavailable`, or `partial`. Fallback token counts are never labeled as direct provider telemetry.
 - **Per-Model-Call Trace Persistence**: Individual LLM queries within LangGraph turns (e.g. planner phase, response generation phase) persist dedicated `AIModelCall` records linked to the parent `AIRun`.
-- **Realistic Cost Model**: Truthful pricing matrix covering major model families with graceful fallback to `None` for unconfigured models (no deceptive zero-cost reports).
+- **Realistic Cost Model**: Truthful pricing matrix covering major model families with official snapshot aliases (e.g. `gpt-4o-mini-2024-07-18`) and graceful fallback to `None` for unconfigured models (no deceptive zero-cost reports).
 
 ### Responsive Information Architecture
 Organized into 4 operational groups in `AIStudioPage.tsx`:

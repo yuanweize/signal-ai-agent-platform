@@ -99,7 +99,7 @@ class AIRun(Base):
     total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cached_input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reasoning_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    llm_call_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    llm_call_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     usage_source: Mapped[str] = mapped_column(String(32), default="unavailable", nullable=False)
     estimated_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
     cost_currency: Mapped[str | None] = mapped_column(String(8), default="USD", nullable=True)
@@ -406,7 +406,7 @@ class TrainingExample(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     source_candidate_id: Mapped[int | None] = mapped_column(
-        ForeignKey("learning_candidates.id", ondelete="SET NULL"), nullable=True
+        ForeignKey("learning_candidates.id", ondelete="SET NULL"), nullable=True, unique=True
     )
     system_instruction: Mapped[str | None] = mapped_column(Text, nullable=True)
     input_context: Mapped[str] = mapped_column(Text, nullable=False)

@@ -17,15 +17,42 @@
 
 ---
 
+---
+
 <div align="center">
-  <img src="assets/admin_overview.png" width="900" alt="Signal Market Bot 管理控制台概览" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
-  <p><em>Signal Market Bot 运营全景看板 — 实时业务指标、消息流量统计、群发活动追踪与商品目录分析</em></p>
+  <img src="assets/screenshots/admin-overview.png" width="900" alt="Signal Market Bot 管理控制台概览" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
+  <p><em>Signal Market Bot 运营全景看板 — 实时业务指标、消息流量统计、核心模块健康度与商品目录分析</em></p>
 </div>
 
 <div align="center">
-  <img src="assets/ai_engine_setting.png" width="900" alt="Signal Market Bot AI 引擎配置面板" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
-  <p><em>运行时 AI 引擎中台 — 多大模型提供商通用适配、温度采样调节、动态 Prompt 上下文注入与全热重载</em></p>
+  <img src="assets/screenshots/ai-studio-overview.png" width="900" alt="Signal Market Bot AI Studio v0.4.1" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
+  <p><em>AI Studio 可观测性与运营控制台 (v0.4.1) — 真实运行时 Token 消耗分解、分位耗时统计、结构化用量看板与四大业务分组中台</em></p>
 </div>
+
+### 📸 产品导览 (Product Tour)
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="assets/screenshots/ai-studio-trace.png" alt="Runs & Trace 链路分析" style="border-radius: 8px;">
+      <br><strong>Runs & Trace 链路执行分析器</strong><br><em>抽屉式链路追踪面板，呈现单次 Turn 模型调用明细、决策归因与 Token 分解</em>
+    </td>
+    <td width="50%" align="center">
+      <img src="assets/screenshots/inbox-copilot.png" alt="客服工作台 Copilot 模式" style="border-radius: 8px;">
+      <br><strong>客服工作台 Copilot 协同与接管</strong><br><em>人机协同草稿审核、知识证据溯源链条与 4 态接管模式无缝切换</em>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="assets/screenshots/ai-settings.png" alt="AI 引擎设置" style="border-radius: 8px;">
+      <br><strong>运行时 AI 引擎参数配置</strong><br><em>通用 OpenAI 兼容接口配置、在线模型探测探针与加密凭据存储</em>
+    </td>
+    <td width="50%" align="center">
+      <img src="assets/screenshots/campaigns.png" alt="群发与营销广播" style="border-radius: 8px;">
+      <br><strong>群发活动与社群营销广播</strong><br><em>目标群组广播编辑器、静默期与防打扰策略、演练试跑验证与投递日志</em>
+    </td>
+  </tr>
+</table>
 
 ---
 

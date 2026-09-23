@@ -12,9 +12,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from sqlalchemy import desc, select
+from sqlalchemy import and_, desc, or_, select
 from sqlalchemy import func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import case as sa_case
 
 from app.ai.evals.runner import eval_runner
 from app.ai.learning.curation import learning_service
@@ -35,13 +36,14 @@ from app.models.ai import (
     KnowledgeChunk,
     KnowledgeDocument,
     KnowledgeSource,
+    LearningCandidate,
     MCPServerConfig,
     MemoryItem,
     PromptVersion,
     ToolInvocation,
     TrainingExample,
 )
-from app.models.conversation import Conversation
+from app.models.config import BotConfig
 from app.schemas.ai import (
     AIOverviewMetricsDTO,
     AIRunDTO,
@@ -65,14 +67,17 @@ from app.schemas.ai import (
     ModelUsageResponseDTO,
     PromoteCandidateRequest,
     PromptVersionDTO,
+    ProviderLiveTestRequest,
     ProviderLiveTestResponse,
     SkillDTO,
     ToggleSkillRequest,
+    UsageSummaryDTO,
     UsageTimeseriesPointDTO,
     UsageTimeseriesResponseDTO,
 )
 from app.services.audit_log import write_audit_log
 from app.services.runtime_config import encrypt_value
+from app.services.sandbox import get_or_create_sandbox_conversation
 
 router = APIRouter(prefix="/ai-studio", tags=["AI Studio"])
 
@@ -108,7 +113,12 @@ def resolve_time_bounds(
         return now - timedelta(days=7), now
     if time_range == "30d":
         return now - timedelta(days=30), now
-    return None, None
+    if time_range == "all":
+        return None, None
+    raise HTTPException(
+        status_code=422,
+        detail=f"Invalid time_range: '{time_range}'. Expected one of: 24h, 7d, 30d, all.",
+    )
 
 
 def compute_percentiles(
@@ -165,17 +175,26 @@ async def get_ai_overview_metrics(
     successful_runs = total_runs - error_runs
     error_rate = round(error_runs / total_runs, 3) if total_runs > 0 else 0.0
 
-    # Latencies
+    # Latencies (computed via SQL avg and bounded percentile scan)
+    avg_lat_val = (
+        await session.execute(
+            select(sa_func.avg(AIRun.latency_ms)).where(*run_filters, AIRun.latency_ms.is_not(None))
+        )
+    ).scalar()
+    avg_lat = round(float(avg_lat_val), 1) if avg_lat_val is not None else 0.0
+
     lat_rows = (
         (
             await session.execute(
-                select(AIRun.latency_ms).where(*run_filters, AIRun.latency_ms.is_not(None))
+                select(AIRun.latency_ms)
+                .where(*run_filters, AIRun.latency_ms.is_not(None))
+                .order_by(AIRun.latency_ms.asc())
+                .limit(2000)
             )
         )
         .scalars()
         .all()
     )
-    avg_lat = round(sum(lat_rows) / len(lat_rows), 1) if lat_rows else 0.0
     p50, p95, p99 = compute_percentiles(lat_rows)
 
     # Token aggregates & cost
@@ -281,27 +300,35 @@ async def get_ai_overview_metrics(
     ).scalar() or 0
     actual_rag_hit_rate = round(runs_with_rag / total_runs, 3) if total_runs > 0 else 0.0
 
-    # Tool Invocations
+    # Tool Invocations (exclude evaluation and provider_test traffic from production KPIs)
     tool_filters = []
     if t_start:
         tool_filters.append(ToolInvocation.created_at >= t_start)
     if t_end:
         tool_filters.append(ToolInvocation.created_at <= t_end)
 
+    tool_base = select(ToolInvocation.id)
+    if not include_eval:
+        tool_base = tool_base.outerjoin(AIRun, ToolInvocation.ai_run_id == AIRun.id).where(
+            or_(AIRun.traffic_source == "production", ToolInvocation.ai_run_id.is_(None))
+        )
+    if tool_filters:
+        tool_base = tool_base.where(*tool_filters)
+
     total_tool_calls = (
-        await session.execute(select(sa_func.count(ToolInvocation.id)).where(*tool_filters))
+        await session.execute(select(sa_func.count()).select_from(tool_base.subquery()))
     ).scalar() or 0
     successful_tool_calls = (
         await session.execute(
-            select(sa_func.count(ToolInvocation.id)).where(
-                *tool_filters, ToolInvocation.status == "success"
+            select(sa_func.count()).select_from(
+                tool_base.where(ToolInvocation.status == "success").subquery()
             )
         )
     ).scalar() or 0
     approved_tool_calls = (
         await session.execute(
-            select(sa_func.count(ToolInvocation.id)).where(
-                *tool_filters, ToolInvocation.is_approved.is_(True)
+            select(sa_func.count()).select_from(
+                tool_base.where(ToolInvocation.is_approved.is_(True)).subquery()
             )
         )
     ).scalar() or 0
@@ -384,19 +411,24 @@ async def get_ai_diagnostics(
             llm_status = (
                 "not_validated" if getattr(llm_prov, "api_key_optional", False) else "degraded"
             )
-        else:
-            # Check if recently verified via live provider test or successful run
-            recent_success = (
+            current_model = (runtime_cfg.get("ai_model") or "gpt-4o-mini").strip()
+            # Ensure verification is bound to current configuration timestamp
+            ai_cfg_keys = ["ai_api_key_enc", "ai_model", "ai_api_base_url"]
+            last_cfg_update = (
                 await session.execute(
-                    select(AIRun.id)
-                    .where(
-                        (AIRun.traffic_source == "provider_test") | (AIRun.errors.is_(None)),
-                        AIRun.created_at
-                        >= datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=24),
-                    )
-                    .limit(1)
+                    select(sa_func.max(BotConfig.updated_at)).where(BotConfig.key.in_(ai_cfg_keys))
                 )
-            ).scalar_one_or_none()
+            ).scalar()
+
+            verify_query = select(AIRun.id).where(
+                AIRun.model == current_model,
+                AIRun.errors.is_(None),
+                AIRun.created_at >= datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=24),
+            )
+            if last_cfg_update is not None:
+                verify_query = verify_query.where(AIRun.created_at >= last_cfg_update)
+
+            recent_success = (await session.execute(verify_query.limit(1))).scalar_one_or_none()
             llm_status = "live_verified" if recent_success else "configured"
 
     # 2. Embedding status
@@ -518,6 +550,7 @@ async def get_ai_diagnostics(
 
 @router.post("/diagnostics/test-provider", response_model=ProviderLiveTestResponse)
 async def test_live_provider(
+    payload: ProviderLiveTestRequest | None = None,
     session: AsyncSession = Depends(get_session),
     _admin: AdminUser = Depends(get_current_admin),
 ):
@@ -533,25 +566,48 @@ async def test_live_provider(
     enabled = bool(settings_dict.get("is_ai_enabled", True))
     has_auth = bool(api_key) or is_ai_api_key_optional(base_url)
 
+    test_tools = payload.test_tools if payload is not None else True
+    test_embeddings = payload.test_embeddings if payload is not None else True
+
     tested_at = datetime.now(UTC).replace(tzinfo=None)
 
     if not enabled:
         return ProviderLiveTestResponse(
             connected=False,
+            connection_status="not_configured",
             provider="openai_compatible",
+            provider_detected="openai_compatible",
             model=model,
             endpoint=base_url or "not configured",
+            preview="",
+            response_preview="",
+            usage_source="unavailable",
+            tool_calling_status="not_verified",
+            native_tool_calling="not_verified",
+            embedding_status="not_configured",
+            embeddings="not_configured",
             error="AI is disabled in Settings",
+            error_message="AI is disabled in Settings",
             tested_at=tested_at,
         )
 
     if not has_auth or not base_url:
         return ProviderLiveTestResponse(
             connected=False,
+            connection_status="not_configured",
             provider="openai_compatible",
+            provider_detected="openai_compatible",
             model=model,
             endpoint=base_url or "not configured",
+            preview="",
+            response_preview="",
+            usage_source="unavailable",
+            tool_calling_status="not_verified",
+            native_tool_calling="not_verified",
+            embedding_status="not_configured",
+            embeddings="not_configured",
             error="API credentials not configured in Settings",
+            error_message="API credentials not configured in Settings",
             tested_at=tested_at,
         )
 
@@ -598,7 +654,7 @@ async def test_live_provider(
 
     # 2. Native Tool Calling Probe
     tool_status = "not_verified"
-    if connected:
+    if connected and test_tools:
         try:
             sample_tool = [
                 {
@@ -625,61 +681,70 @@ async def test_live_provider(
         except Exception:
             tool_status = "unsupported"
 
-    # 3. Embeddings Probe
+    # 3. Embeddings Probe (use embedding_base_url per section 16)
     emb_status = "not_configured"
-    emb_url = (settings_dict.get("embedding_api_base_url") or base_url).strip()
-    emb_key = (settings_dict.get("embedding_api_key") or api_key).strip()
-    emb_model = (settings_dict.get("embedding_model") or "text-embedding-3-small").strip()
-    if emb_url and (emb_key or is_ai_api_key_optional(emb_url)):
-        try:
-            emb_provider = OpenAICompatibleEmbeddingProvider(
-                base_url=emb_url,
-                api_key=emb_key,
-                model=emb_model,
-                timeout=10.0,
-            )
-            vectors = await emb_provider.embed(["test probe"])
-            if vectors and len(vectors) > 0 and len(vectors[0]) > 0:
-                emb_status = "connected"
-            else:
+    if test_embeddings:
+        emb_url = (
+            settings_dict.get("embedding_base_url")
+            or settings_dict.get("embedding_api_base_url")
+            or base_url
+        ).strip()
+        emb_key = (settings_dict.get("embedding_api_key") or api_key).strip()
+        emb_model = (settings_dict.get("embedding_model") or "text-embedding-3-small").strip()
+        if emb_url and (emb_key or is_ai_api_key_optional(emb_url)):
+            try:
+                emb_provider = OpenAICompatibleEmbeddingProvider(
+                    base_url=emb_url,
+                    api_key=emb_key,
+                    model=emb_model,
+                    timeout=10.0,
+                )
+                vectors = await emb_provider.embed(["test probe"])
+                if vectors and len(vectors) > 0 and len(vectors[0]) > 0:
+                    emb_status = "connected"
+                else:
+                    emb_status = "unsupported"
+            except Exception:
                 emb_status = "unsupported"
-        except Exception:
-            emb_status = "unsupported"
 
-    # Persist an AIRun with traffic_source="provider_test" so telemetry is recorded without polluting production stats
+    # Persist an AIRun into dedicated sandbox conversation with traffic_source="provider_test"
     if connected:
         try:
-            conv_id = (await session.execute(select(Conversation.id).limit(1))).scalar_one_or_none()
-            if conv_id is not None:
-                test_run = AIRun(
-                    trace_id=f"tr_test_{uuid.uuid4().hex[:8]}",
-                    conversation_id=conv_id,
-                    model=model,
-                    provider="openai_compatible",
-                    prompt_version="probe",
-                    decision="provider_test",
-                    latency_ms=lat_ms,
-                    tokens=u_tot or 0,
-                    input_tokens=u_in,
-                    output_tokens=u_out,
-                    total_tokens=u_tot,
-                    cached_input_tokens=u_cached,
-                    reasoning_tokens=u_reasoning,
-                    usage_source=u_source,
-                    traffic_source="provider_test",
-                )
-                session.add(test_run)
-                await session.commit()
+            sandbox_conv_id = await get_or_create_sandbox_conversation(
+                session, "__system_provider_probe__"
+            )
+            test_run = AIRun(
+                trace_id=f"tr_test_{uuid.uuid4().hex[:8]}",
+                conversation_id=sandbox_conv_id,
+                model=model,
+                provider="openai_compatible",
+                prompt_version="probe",
+                decision="provider_test",
+                latency_ms=lat_ms,
+                tokens=u_tot or 0,
+                input_tokens=u_in,
+                output_tokens=u_out,
+                total_tokens=u_tot,
+                cached_input_tokens=u_cached,
+                reasoning_tokens=u_reasoning,
+                usage_source=u_source,
+                traffic_source="provider_test",
+            )
+            session.add(test_run)
+            await session.commit()
         except Exception:
-            pass
+            await session.rollback()
 
     return ProviderLiveTestResponse(
         connected=connected,
+        connection_status="connected" if connected else "failed",
         provider="openai_compatible",
+        provider_detected="openai_compatible",
         model=model,
         endpoint=base_url,
         latency_ms=lat_ms,
         preview=preview,
+        response_preview=preview,
         input_tokens=u_in,
         output_tokens=u_out,
         total_tokens=u_tot,
@@ -688,9 +753,12 @@ async def test_live_provider(
         usage_source=u_source,
         finish_reason=finish_reason,
         tool_calling_status=tool_status,
+        native_tool_calling=tool_status,
         embedding_status=emb_status,
+        embeddings=emb_status,
         tested_at=tested_at,
         error=err,
+        error_message=err,
     )
 
 
@@ -699,7 +767,7 @@ async def test_live_provider(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/usage/summary")
+@router.get("/usage/summary", response_model=UsageSummaryDTO)
 async def get_usage_summary(
     time_range: str = Query("all"),
     provider: str | None = None,
@@ -729,6 +797,14 @@ async def get_usage_summary(
                 sa_func.sum(AIRun.cached_input_tokens),
                 sa_func.sum(AIRun.reasoning_tokens),
                 sa_func.sum(AIRun.estimated_cost),
+                sa_func.sum(AIRun.llm_call_count),
+                sa_func.avg(AIRun.latency_ms),
+                sa_func.sum(
+                    sa_case(
+                        (and_(AIRun.errors.is_not(None), AIRun.errors != ""), 1),
+                        else_=0,
+                    )
+                ),
             ).where(*filters)
         )
     ).one_or_none()
@@ -740,18 +816,27 @@ async def get_usage_summary(
     cached_tokens = int(res[4]) if res and res[4] is not None else None
     reason_tokens = int(res[5]) if res and res[5] is not None else None
     est_cost = round(float(res[6]), 5) if res and res[6] is not None else None
+    total_model_calls = int(res[7]) if res and res[7] is not None else 0
+    avg_latency_ms = round(float(res[8]), 1) if res and res[8] is not None else 0.0
+    err_runs = int(res[9]) if res and res[9] is not None else 0
+    err_rate = round(err_runs / total_runs, 3) if total_runs > 0 else 0.0
 
-    return {
-        "time_range": time_range,
-        "total_runs": total_runs,
-        "total_tokens": tot_tokens,
-        "input_tokens": in_tokens,
-        "output_tokens": out_tokens,
-        "cached_input_tokens": cached_tokens,
-        "reasoning_tokens": reason_tokens,
-        "estimated_cost": est_cost,
-        "currency": "USD",
-    }
+    return UsageSummaryDTO(
+        time_range=time_range,
+        total_runs=total_runs,
+        total_tokens=tot_tokens,
+        input_tokens=in_tokens,
+        output_tokens=out_tokens,
+        cached_input_tokens=cached_tokens,
+        reasoning_tokens=reason_tokens,
+        estimated_cost=est_cost,
+        currency="USD",
+        cost_currency="USD",
+        total_model_calls=total_model_calls,
+        avg_latency_ms=avg_latency_ms,
+        errors=err_runs,
+        error_rate=err_rate,
+    )
 
 
 @router.get("/usage/timeseries", response_model=UsageTimeseriesResponseDTO)
@@ -842,6 +927,10 @@ async def get_usage_models(
     if t_end:
         filters.append(AIRun.created_at <= t_end)
 
+    error_case = sa_case(
+        (and_(AIRun.errors.is_not(None), AIRun.errors != ""), 1),
+        else_=0,
+    )
     stmt = (
         select(
             AIRun.provider,
@@ -852,6 +941,7 @@ async def get_usage_models(
             sa_func.sum(AIRun.output_tokens),
             sa_func.avg(AIRun.latency_ms),
             sa_func.sum(AIRun.estimated_cost),
+            sa_func.sum(error_case),
         )
         .where(*filters)
         .group_by(AIRun.provider, AIRun.model)
@@ -860,26 +950,16 @@ async def get_usage_models(
     res = (await session.execute(stmt)).all()
     items = []
     for r in res:
-        prov = r[0] or "unknown"
-        mod = r[1] or "default"
+        raw_prov, raw_mod = r[0], r[1]
+        prov = raw_prov or "unknown"
+        mod = raw_mod or "default"
         runs_cnt = r[2] or 0
         tot_tok = int(r[3]) if r[3] is not None else 0
         in_tok = int(r[4]) if r[4] is not None else 0
         out_tok = int(r[5]) if r[5] is not None else 0
         avg_lat = round(float(r[6]), 1) if r[6] is not None else 0.0
         est_cost = round(float(r[7]), 5) if r[7] is not None else None
-
-        err_cnt = (
-            await session.execute(
-                select(sa_func.count(AIRun.id)).where(
-                    *filters,
-                    AIRun.provider == prov,
-                    AIRun.model == mod,
-                    AIRun.errors.is_not(None),
-                    AIRun.errors != "",
-                )
-            )
-        ).scalar() or 0
+        err_cnt = int(r[8]) if r[8] is not None else 0
         err_rate = round(err_cnt / runs_cnt, 3) if runs_cnt > 0 else 0.0
 
         items.append(
@@ -919,7 +999,9 @@ async def list_ai_runs(
     prompt_version: str | None = None,
     has_error: bool | None = None,
     has_rag: bool | None = None,
+    used_rag: bool | None = None,
     has_tools: bool | None = None,
+    used_tools: bool | None = None,
     conversation_id: int | None = None,
     traffic_source: str | None = None,
     session: AsyncSession = Depends(get_session),
@@ -943,14 +1025,27 @@ async def list_ai_runs(
         stmt = stmt.where(AIRun.errors.is_not(None), AIRun.errors != "")
     elif has_error is False:
         stmt = stmt.where((AIRun.errors.is_(None)) | (AIRun.errors == ""))
-    if has_rag is True:
+
+    effective_rag = has_rag if has_rag is not None else used_rag
+    if effective_rag is True:
         stmt = stmt.where(
             AIRun.retrieval.is_not(None), AIRun.retrieval != "[]", AIRun.retrieval != ""
         )
-    if has_tools is True:
+    elif effective_rag is False:
+        stmt = stmt.where(
+            or_(AIRun.retrieval.is_(None), AIRun.retrieval == "[]", AIRun.retrieval == "")
+        )
+
+    effective_tools = has_tools if has_tools is not None else used_tools
+    if effective_tools is True:
         stmt = stmt.where(
             AIRun.tool_calls.is_not(None), AIRun.tool_calls != "[]", AIRun.tool_calls != ""
         )
+    elif effective_tools is False:
+        stmt = stmt.where(
+            or_(AIRun.tool_calls.is_(None), AIRun.tool_calls == "[]", AIRun.tool_calls == "")
+        )
+
     if time_range:
         t_start, t_end = resolve_time_bounds(time_range)
         if t_start:
@@ -968,6 +1063,9 @@ async def list_ai_runs(
 
     items = []
     for r in runs:
+        ret = json.loads(r.retrieval) if r.retrieval else []
+        mem = json.loads(r.memory) if r.memory else []
+        tc = json.loads(r.tool_calls) if r.tool_calls else []
         items.append(
             AIRunDTO(
                 id=r.id,
@@ -978,9 +1076,13 @@ async def list_ai_runs(
                 provider=r.provider,
                 prompt_version=r.prompt_version,
                 skills=json.loads(r.skills) if r.skills else [],
-                retrieval=json.loads(r.retrieval) if r.retrieval else [],
-                memory=json.loads(r.memory) if r.memory else [],
-                tool_calls=json.loads(r.tool_calls) if r.tool_calls else [],
+                retrieval=ret,
+                citations=ret,
+                memory=mem,
+                memories=mem,
+                tool_calls=tc,
+                rag_hit_count=len(ret),
+                tool_call_count=len(tc),
                 decision=r.decision,
                 confidence=r.confidence,
                 latency_ms=r.latency_ms,
@@ -1042,6 +1144,10 @@ async def get_ai_run_detail(
         for mc in res.scalars().all()
     ]
 
+    ret = json.loads(run.retrieval) if run.retrieval else []
+    mem = json.loads(run.memory) if run.memory else []
+    tc = json.loads(run.tool_calls) if run.tool_calls else []
+
     return AIRunDTO(
         id=run.id,
         trace_id=run.trace_id,
@@ -1051,9 +1157,13 @@ async def get_ai_run_detail(
         provider=run.provider,
         prompt_version=run.prompt_version,
         skills=json.loads(run.skills) if run.skills else [],
-        retrieval=json.loads(run.retrieval) if run.retrieval else [],
-        memory=json.loads(run.memory) if run.memory else [],
-        tool_calls=json.loads(run.tool_calls) if run.tool_calls else [],
+        retrieval=ret,
+        citations=ret,
+        memory=mem,
+        memories=mem,
+        tool_calls=tc,
+        rag_hit_count=len(ret),
+        tool_call_count=len(tc),
         decision=run.decision,
         confidence=run.confidence,
         latency_ms=run.latency_ms,
@@ -1193,6 +1303,8 @@ async def reindex_knowledge_source(
         "source_id": source_id,
         "documents_count": len(docs),
         "chunks_reindexed": reindexed_count,
+        "indexed_documents": len(docs),
+        "indexed_chunks": reindexed_count,
     }
 
 
@@ -1299,6 +1411,25 @@ async def delete_knowledge_document(
     return {"ok": True, "deleted_document_id": document_id}
 
 
+@router.delete(
+    "/knowledge/sources/{source_id}/documents/{document_id}",
+    include_in_schema=False,
+)
+async def delete_knowledge_document_nested(
+    source_id: int,
+    document_id: int,
+    http_request: Request,
+    session: AsyncSession = Depends(get_session),
+    admin: AdminUser = Depends(get_current_admin),
+):
+    return await delete_knowledge_document(
+        document_id=document_id,
+        http_request=http_request,
+        session=session,
+        admin=admin,
+    )
+
+
 @router.post("/knowledge/sources/{source_id}/documents")
 async def add_document_to_source(
     source_id: int,
@@ -1379,10 +1510,25 @@ async def test_knowledge_retrieval(
     is_group: bool = False,
     group_id: str | None = None,
     user_id: str | None = None,
+    scope_type: str | None = None,
+    scope_id: str | None = None,
     session: AsyncSession = Depends(get_session),
     _admin: AdminUser = Depends(get_current_admin),
 ):
     """Simulate RAG search with scope isolation testing."""
+    if scope_type == "group":
+        is_group = True
+        if scope_id:
+            group_id = scope_id
+    elif scope_type == "user":
+        is_group = False
+        if scope_id:
+            user_id = scope_id
+    elif scope_type in ("global", "dm", "all"):
+        is_group = False
+        group_id = None
+        user_id = None
+
     runtime = await get_production_agent_runtime(session)
     require_rag_runtime(runtime)
     if not runtime.retriever:
@@ -1422,6 +1568,8 @@ async def test_knowledge_retrieval_get(
     is_group: bool = False,
     group_id: str | None = None,
     user_id: str | None = None,
+    scope_type: str | None = None,
+    scope_id: str | None = None,
     session: AsyncSession = Depends(get_session),
     admin: AdminUser = Depends(get_current_admin),
 ):
@@ -1431,6 +1579,8 @@ async def test_knowledge_retrieval_get(
         is_group=is_group,
         group_id=group_id,
         user_id=user_id,
+        scope_type=scope_type,
+        scope_id=scope_id,
         session=session,
         _admin=admin,
     )
@@ -1451,7 +1601,12 @@ async def reindex_document(
     )
     try:
         chunks_count = await ingestion.reindex_document(session=session, document_id=document_id)
-        return {"ok": True, "document_id": document_id, "chunks_reindexed": chunks_count}
+        return {
+            "ok": True,
+            "document_id": document_id,
+            "chunks_reindexed": chunks_count,
+            "indexed_chunks": chunks_count,
+        }
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -1469,7 +1624,14 @@ async def reindex_all_knowledge(
         vector_store=runtime.vector_store,
     )
     result = await ingestion.reindex_all(session=session)
-    return {"ok": True, **result}
+    return {
+        "ok": True,
+        "documents_count": result.get("documents_reindexed", 0),
+        "chunks_reindexed": result.get("chunks_reindexed", 0),
+        "indexed_documents": result.get("documents_reindexed", 0),
+        "indexed_chunks": result.get("chunks_reindexed", 0),
+        **result,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1807,6 +1969,28 @@ async def toggle_mcp_server(
     return {"ok": True, "is_enabled": server.is_enabled, "status": server.status}
 
 
+@router.patch("/mcp/servers/{server_id}")
+async def update_mcp_server(
+    server_id: int,
+    payload: dict[str, Any],
+    session: AsyncSession = Depends(get_session),
+    _admin: AdminUser = Depends(get_current_admin),
+):
+    """Enable or disable an MCP server configuration via canonical PATCH."""
+    server = await session.get(MCPServerConfig, server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="MCP server not found")
+    if "is_enabled" in payload:
+        new_val = bool(payload["is_enabled"])
+        if server.is_enabled != new_val:
+            server.is_enabled = new_val
+            if not new_val:
+                await mcp_manager.disconnect_server(server.name)
+                server.status = "disabled"
+            await session.commit()
+    return {"ok": True, "is_enabled": server.is_enabled, "status": server.status}
+
+
 @router.get("/mcp/servers/{server_id}", response_model=MCPServerDetailDTO)
 async def get_mcp_server_detail(
     server_id: int,
@@ -1835,7 +2019,19 @@ async def get_mcp_server_detail(
         last_health_check=server.last_connected_at,
         error_message=server.error_message,
     )
-    return MCPServerDetailDTO(server=dto, discovered_tools=tools)
+    return MCPServerDetailDTO(
+        server=dto,
+        discovered_tools=tools,
+        id=server.id,
+        name=server.name,
+        transport=server.transport,
+        transport_type=server.transport,
+        endpoint_url=server.command_or_url if server.transport in ("http", "sse") else None,
+        command=server.command_or_url if server.transport == "stdio" else None,
+        is_enabled=server.is_enabled,
+        status=server.status,
+        tools=tools,
+    )
 
 
 @router.delete("/mcp/servers/{server_id}")
@@ -1906,14 +2102,26 @@ async def promote_candidate(
     admin: AdminUser = Depends(get_current_admin),
 ):
     """Promote learning candidate to Knowledge or Training dataset based on requested action."""
+    cand = await session.get(LearningCandidate, candidate_id)
+    if not cand:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    if cand.status != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Candidate #{candidate_id} has already been {cand.status}.",
+        )
+
     action = (payload.action or "knowledge").strip().lower()
 
     if action == "training":
-        ok = await learning_service.add_to_training(
-            session=session,
-            candidate_id=candidate_id,
-            reviewer_name=admin.username,
-        )
+        try:
+            ok = await learning_service.add_to_training(
+                session=session,
+                candidate_id=candidate_id,
+                reviewer_name=admin.username,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e))
         if not ok:
             raise HTTPException(status_code=404, detail="Candidate not found")
         return {
@@ -1943,7 +2151,10 @@ async def promote_candidate(
                 confirm_global_privacy=payload.confirm_global_privacy,
             )
         except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            err_msg = str(e)
+            if "privacy confirmation" in err_msg:
+                raise HTTPException(status_code=400, detail=err_msg)
+            raise HTTPException(status_code=409, detail=err_msg)
 
         if not ok:
             raise HTTPException(status_code=404, detail="Candidate not found")
@@ -1966,11 +2177,24 @@ async def reject_candidate(
     session: AsyncSession = Depends(get_session),
     admin: AdminUser = Depends(get_current_admin),
 ):
-    ok = await learning_service.reject_candidate(
-        session=session,
-        candidate_id=candidate_id,
-        reviewer_name=admin.username,
-    )
+    cand = await session.get(LearningCandidate, candidate_id)
+    if not cand:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    if cand.status != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Candidate #{candidate_id} has already been {cand.status}.",
+        )
+
+    try:
+        ok = await learning_service.reject_candidate(
+            session=session,
+            candidate_id=candidate_id,
+            reviewer_name=admin.username,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
     if not ok:
         raise HTTPException(status_code=404, detail="Candidate not found")
     return {"ok": True, "rejected_candidate_id": candidate_id}
@@ -2057,19 +2281,27 @@ async def list_evaluation_runs(
 
     items = []
     for r in runs:
-        results_data = [
-            {
-                "case_id": cr.case_id,
-                "case_name": cr.case_id,
-                "passed": (cr.status == "PASS"),
-                "decision_correct": True,
-                "actual_decision": cr.actual_decision or "",
-                "keyword_score": 1.0,
-                "latency_ms": cr.latency_ms or 0,
-                "tokens": cr.tokens or 0,
-            }
-            for cr in (r.case_results or [])
-        ]
+        results_data = []
+        for cr in r.case_results or []:
+            det = {}
+            if cr.details:
+                try:
+                    det = json.loads(cr.details)
+                except Exception:
+                    det = {}
+            results_data.append(
+                {
+                    "case_id": cr.case_id,
+                    "case_name": det.get("case_name") or cr.case_id,
+                    "passed": (cr.status == "PASS"),
+                    "decision_correct": det.get("decision_correct", (cr.status == "PASS")),
+                    "expected_decision": cr.expected_decision or "",
+                    "actual_decision": cr.actual_decision or "",
+                    "keyword_score": det.get("keyword_score", 1.0 if cr.status == "PASS" else 0.0),
+                    "latency_ms": cr.latency_ms or 0,
+                    "tokens": cr.tokens,
+                }
+            )
         items.append(
             EvaluationRunDTO(
                 id=r.id,
@@ -2083,7 +2315,7 @@ async def list_evaluation_runs(
                 pass_rate=r.pass_rate,
                 decision_accuracy=r.decision_accuracy,
                 average_latency_ms=r.avg_latency_ms,
-                total_tokens=r.total_tokens or 0,
+                total_tokens=r.total_tokens,
                 estimated_cost=r.estimated_cost,
                 status=r.status,
                 started_at=r.started_at,
@@ -2138,14 +2370,23 @@ async def create_prompt_version(
             detail=f"Prompt version '{payload.version}' already exists. Versions are immutable.",
         )
 
-    pv = await prompt_manager.create_version(
-        session=session,
-        version=payload.version,
-        name=payload.name,
-        template=payload.template,
-        created_by=admin.username,
-        set_active=payload.set_active,
-    )
+    from sqlalchemy.exc import IntegrityError
+
+    try:
+        pv = await prompt_manager.create_version(
+            session=session,
+            version=payload.version,
+            name=payload.name,
+            template=payload.template,
+            created_by=admin.username,
+            set_active=payload.set_active,
+        )
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"Prompt version '{payload.version}' already exists. Versions are immutable.",
+        )
 
     await write_audit_log(
         session=session,

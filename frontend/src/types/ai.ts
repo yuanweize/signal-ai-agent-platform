@@ -151,13 +151,14 @@ export interface AIRunDTO {
   traffic_source?: string;
   rag_hit_count?: number;
   tool_call_count?: number;
-  skills: string[];
+  retrieval?: Array<Record<string, unknown>>;
   citations: Array<{
     chunk_id?: number;
     title?: string;
     snippet?: string;
     score?: number;
   }>;
+  memory?: Array<Record<string, unknown>>;
   memories: Array<{
     id?: number;
     content?: string;
@@ -181,16 +182,20 @@ export interface AIRunListResponse {
 }
 
 export interface UsageSummaryDTO {
+  time_range?: string;
   total_runs: number;
   total_tokens: number;
-  input_tokens: number;
-  output_tokens: number;
-  cached_input_tokens: number;
-  reasoning_tokens: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cached_input_tokens: number | null;
+  reasoning_tokens: number | null;
   estimated_cost: number | null;
+  currency: string;
   cost_currency: string;
   total_model_calls: number;
   avg_latency_ms: number;
+  errors: number;
+  error_rate: number;
 }
 
 export interface UsageTimeseriesPointDTO {
@@ -203,6 +208,12 @@ export interface UsageTimeseriesPointDTO {
   avg_latency_ms: number;
 }
 
+export interface UsageTimeseriesResponseDTO {
+  points: UsageTimeseriesPointDTO[];
+  time_range: string;
+  timezone: string;
+}
+
 export interface ModelUsageItemDTO {
   provider: string;
   model: string;
@@ -210,12 +221,18 @@ export interface ModelUsageItemDTO {
   total_tokens: number;
   input_tokens: number;
   output_tokens: number;
-  cached_input_tokens: number;
-  reasoning_tokens: number;
+  cached_input_tokens?: number;
+  reasoning_tokens?: number;
   avg_latency_ms: number;
-  error_count: number;
+  errors?: number;
+  error_count?: number;
+  error_rate?: number;
   estimated_cost: number | null;
   currency: string;
+}
+
+export interface ModelUsageResponseDTO {
+  models: ModelUsageItemDTO[];
 }
 
 export interface KnowledgeDocumentDTO {
@@ -258,6 +275,8 @@ export interface MCPToolDetailDTO {
 
 export interface MCPServerDetailDTO extends MCPServerDTO {
   tools: MCPToolDetailDTO[];
+  discovered_tools?: MCPToolDetailDTO[];
+  server?: MCPServerDTO;
   latency_ms?: number | null;
 }
 
@@ -265,16 +284,21 @@ export interface ProviderLiveTestResultDTO {
   endpoint: string;
   model: string;
   provider_detected: string;
-  connection_status: 'connected' | 'failed' | 'not_configured';
+  connection_status: 'connected' | 'failed' | 'not_configured' | string;
+  connected?: boolean;
   latency_ms?: number | null;
+  preview?: string | null;
   response_preview?: string | null;
   input_tokens?: number | null;
   output_tokens?: number | null;
   total_tokens?: number | null;
   usage_source?: string;
-  native_tool_calling: 'supported' | 'unsupported' | 'not_verified' | 'error';
-  embeddings: 'connected' | 'not_configured' | 'unsupported' | 'error';
+  native_tool_calling: 'supported' | 'unsupported' | 'not_verified' | 'error' | string;
+  tool_calling_status?: string;
+  embeddings: 'connected' | 'not_configured' | 'unsupported' | 'error' | string;
+  embedding_status?: string;
   tested_at: string;
+  error?: string | null;
   error_message?: string | null;
 }
 

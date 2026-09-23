@@ -323,7 +323,7 @@ class AgentRuntime:
                 total_tokens=usage_dict.get("total_tokens") or output_state.get("tokens"),
                 cached_input_tokens=usage_dict.get("cached_input_tokens"),
                 reasoning_tokens=usage_dict.get("reasoning_tokens"),
-                llm_call_count=len(model_calls) if model_calls else 1,
+                llm_call_count=len(model_calls),
                 usage_source=usage_dict.get("usage_source", "unavailable"),
                 traffic_source=traffic_source,
                 model_calls=model_calls,

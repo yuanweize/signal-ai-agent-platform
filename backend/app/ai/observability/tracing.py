@@ -46,7 +46,7 @@ class AITracer(Protocol):
         total_tokens: int | None = None,
         cached_input_tokens: int | None = None,
         reasoning_tokens: int | None = None,
-        llm_call_count: int = 1,
+        llm_call_count: int | None = None,
         usage_source: str = "unavailable",
         estimated_cost: float | None = None,
         cost_currency: str = "USD",
@@ -135,7 +135,7 @@ class LocalTracer:
         call_count = (
             llm_call_count
             if llm_call_count is not None
-            else (len(model_calls) if model_calls else 1)
+            else (len(model_calls) if model_calls is not None else (1 if effective_total else 0))
         )
 
         # Compute cost if not provided and pricing exists
@@ -261,48 +261,22 @@ class LangfuseTracer(LocalTracer):
     async def record_run(
         self,
         session: AsyncSession,
-        trace_id: str,
         conversation_id: int,
-        input_message_id: int | None,
-        model: str,
-        provider: str,
-        prompt_version: str,
-        skills_used: list[str],
-        retrieved_chunks: list[dict[str, Any]],
-        memories_used: list[dict[str, Any]],
-        tool_calls: list[dict[str, Any]],
-        decision: str,
-        confidence: float,
-        latency_ms: int,
-        tokens: int,
-        errors: str | None = None,
-        final_message_id: int | None = None,
+        *args: Any,
+        **kwargs: Any,
     ) -> AIRun:
         # 1. Always record locally first
         run = await super().record_run(
-            session=session,
-            trace_id=trace_id,
-            conversation_id=conversation_id,
-            input_message_id=input_message_id,
-            model=model,
-            provider=provider,
-            prompt_version=prompt_version,
-            skills_used=skills_used,
-            retrieved_chunks=retrieved_chunks,
-            memories_used=memories_used,
-            tool_calls=tool_calls,
-            decision=decision,
-            confidence=confidence,
-            latency_ms=latency_ms,
-            tokens=tokens,
-            errors=errors,
-            final_message_id=final_message_id,
+            session,
+            conversation_id,
+            *args,
+            **kwargs,
         )
 
         # 2. Mirror to Langfuse if available (fail-safe)
         if self.is_configured:
             try:
-                logger.info(f"Mirrored trace {trace_id} to Langfuse at {self.host}")
+                logger.info(f"Mirrored trace {run.trace_id} to Langfuse at {self.host}")
             except Exception as e:
                 logger.warning(f"Langfuse export skipped: {e}")
 

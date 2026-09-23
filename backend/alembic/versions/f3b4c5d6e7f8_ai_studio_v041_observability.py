@@ -31,7 +31,7 @@ def upgrade() -> None:
         batch_op.add_column(sa.Column("total_tokens", sa.Integer(), nullable=True))
         batch_op.add_column(sa.Column("cached_input_tokens", sa.Integer(), nullable=True))
         batch_op.add_column(sa.Column("reasoning_tokens", sa.Integer(), nullable=True))
-        batch_op.add_column(sa.Column("llm_call_count", sa.Integer(), server_default="1", nullable=False))
+        batch_op.add_column(sa.Column("llm_call_count", sa.Integer(), nullable=True))
         batch_op.add_column(sa.Column("usage_source", sa.String(length=32), server_default="unavailable", nullable=False))
         batch_op.add_column(sa.Column("estimated_cost", sa.Float(), nullable=True))
         batch_op.add_column(sa.Column("cost_currency", sa.String(length=8), server_default="USD", nullable=True))
@@ -41,6 +41,9 @@ def upgrade() -> None:
     # Backfill historical ai_runs rows
     op.execute(
         "UPDATE ai_runs SET total_tokens = tokens, usage_source = 'legacy_total_only' WHERE tokens IS NOT NULL AND total_tokens IS NULL"
+    )
+    op.execute(
+        "UPDATE ai_runs SET llm_call_count = 1 WHERE total_tokens IS NOT NULL AND total_tokens > 0 AND llm_call_count IS NULL"
     )
     op.execute(
         "UPDATE ai_runs SET usage_source = 'unavailable' WHERE tokens IS NULL AND usage_source = 'unavailable'"

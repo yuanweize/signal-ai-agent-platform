@@ -95,6 +95,12 @@ class LearningCandidateService:
         if not cand:
             return False
 
+        if cand.status != "pending":
+            raise ValueError(
+                f"Candidate #{candidate_id} cannot be promoted because its status is '{cand.status}'. "
+                "Only pending candidates can be promoted."
+            )
+
         if scope_type == "global" and not confirm_global_privacy:
             raise ValueError(
                 "Promoting to global knowledge requires explicit privacy confirmation "
@@ -163,6 +169,21 @@ class LearningCandidateService:
         if not cand:
             return None
 
+        if cand.status != "pending":
+            raise ValueError(
+                f"Candidate #{candidate_id} cannot be added to training because its status is '{cand.status}'. "
+                "Only pending candidates can be added."
+            )
+
+        # Idempotency check: verify no training example exists for this candidate
+        existing = (
+            await session.execute(
+                select(TrainingExample).where(TrainingExample.source_candidate_id == cand.id)
+            )
+        ).scalar_one_or_none()
+        if existing:
+            raise ValueError(f"Training example already exists for candidate #{candidate_id}.")
+
         example = TrainingExample(
             source_candidate_id=cand.id,
             system_instruction=system_instruction
@@ -188,6 +209,12 @@ class LearningCandidateService:
         cand = await session.get(LearningCandidate, candidate_id)
         if not cand:
             return False
+
+        if cand.status != "pending":
+            raise ValueError(
+                f"Candidate #{candidate_id} cannot be rejected because its status is '{cand.status}'."
+            )
+
         cand.status = "rejected"
         cand.reviewed_by = reviewer_name
         cand.reviewed_at = datetime.now(UTC).replace(tzinfo=None)

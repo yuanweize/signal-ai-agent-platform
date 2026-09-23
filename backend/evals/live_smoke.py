@@ -32,13 +32,6 @@ import time
 
 import httpx
 
-# Normalize NO_PROXY to strip IPv6 entries (e.g. ::1) that trigger httpx.InvalidURL parser bug
-for _k in ("NO_PROXY", "no_proxy"):
-    if _k in os.environ and ":" in os.environ[_k]:
-        os.environ[_k] = ",".join(
-            _p.strip() for _p in os.environ[_k].split(",") if not _p.strip().startswith(":")
-        )
-
 
 async def load_credentials_from_db() -> tuple[str, str, str]:
     """Attempt to load AI credentials from bot_config table."""
@@ -351,7 +344,11 @@ async def run_live_smoke(
             ],
         )
         res2 = await runtime.run(session=session, context=ctx2)
-        print(f"  PASS: Turn 2 Reply: {res2.answer[:80]!r}")
+        has_context = "alpine" in res2.answer.lower() or "coffee" in res2.answer.lower()
+        if has_context:
+            print(f"  PASS: Turn 2 context retained: {res2.answer[:80]!r}")
+        else:
+            print(f"  WARN: Turn 2 reply did not mention Alpine Coffee: {res2.answer[:80]!r}")
 
     # -----------------------------------------------------------------------
     # Level 5: Active PromptVersion Injection & Provenance Tracking
@@ -459,9 +456,8 @@ async def run_live_smoke(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Live AI Gateway Smoke Test Runner")
-    parser.add_argument("--base-url", help="Target API Base URL")
-    parser.add_argument("--model", help="Target Model Name")
-    parser.add_argument("--api-key", help="API Key (do not log)")
+    parser.add_argument("--base-url", help="Target API Base URL (defaults to LIVE_AI_BASE_URL)")
+    parser.add_argument("--model", help="Target Model Name (defaults to LIVE_AI_MODEL)")
     parser.add_argument(
         "--require-live",
         action="store_true",
@@ -478,7 +474,7 @@ def main() -> int:
         run_live_smoke(
             base_url=args.base_url,
             model=args.model,
-            api_key=args.api_key,
+            api_key=None,
             require_live=args.require_live,
             use_db_config=args.use_db_config,
         )

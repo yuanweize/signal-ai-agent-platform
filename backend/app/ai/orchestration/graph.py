@@ -125,6 +125,9 @@ def build_agent_graph(
 
         # 1. Attempt model/tool planner selection via native tool calling if supported (Section 8, 11)
         if hasattr(llm, "tool_generate") and allowed_schemas:
+            import time
+
+            t_plan_start = time.perf_counter()
             try:
                 user_msg = [{"role": "user", "content": state.get("text") or ""}]
                 call_res = await asyncio.wait_for(
@@ -150,7 +153,7 @@ def build_agent_graph(
                         phase="tool_planner",
                         provider=getattr(llm, "provider_name", "unknown"),
                         model=getattr(llm, "default_model", "default"),
-                        latency_ms=0,
+                        latency_ms=round((time.perf_counter() - t_plan_start) * 1000),
                         usage=TokenUsage(
                             total_tokens=t_tokens,
                             usage_source="provider" if t_tokens else "unavailable",
@@ -168,9 +171,21 @@ def build_agent_graph(
                             }
                         )
             except Exception as e:
+                plan_latency = round((time.perf_counter() - t_plan_start) * 1000)
+                err_msg = str(e)[:256]
                 logger.debug(
-                    f"Model tool calling unavailable or failed ({e}); falling back to deterministic intent routing."
+                    f"Model tool calling unavailable or failed ({err_msg}); falling back to deterministic intent routing."
                 )
+                failed_rec = ModelCallRecord(
+                    phase="tool_planner",
+                    provider=getattr(llm, "provider_name", "unknown"),
+                    model=getattr(llm, "default_model", "default"),
+                    latency_ms=plan_latency,
+                    usage=TokenUsage(usage_source="unavailable"),
+                    success=False,
+                    error=err_msg,
+                )
+                model_call_records.append(failed_rec.to_dict())
 
         # 2. Fallback deterministic business routing for critical built-in & MCP flows (Section 11)
         if not proposed_calls:

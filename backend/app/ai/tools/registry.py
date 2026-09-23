@@ -80,6 +80,17 @@ class ToolRegistry:
     def unregister(self, name: str) -> None:
         self._tools.pop(name, None)
 
+    def unregister_server_tools(self, mcp_server_name: str) -> int:
+        """Remove all registered tools belonging to a disconnected MCP server."""
+        to_remove = [
+            name
+            for name, tool in self._tools.items()
+            if tool.is_mcp and tool.mcp_server_name == mcp_server_name
+        ]
+        for name in to_remove:
+            self._tools.pop(name, None)
+        return len(to_remove)
+
     def list_tools(self) -> list[RegisteredTool]:
         return list(self._tools.values())
 

@@ -228,7 +228,7 @@ class FakeLLMProvider:
             return LLMResult(
                 content=self.fixed_reply,
                 usage=TokenUsage(
-                    input_tokens=10, output_tokens=32, total_tokens=42, usage_source="provider"
+                    input_tokens=10, output_tokens=32, total_tokens=42, usage_source="estimated"
                 ),
                 model=target_model,
                 latency_ms=15,
@@ -249,7 +249,7 @@ class FakeLLMProvider:
                             input_tokens=15,
                             output_tokens=20,
                             total_tokens=35,
-                            usage_source="provider",
+                            usage_source="estimated",
                         ),
                         model=target_model,
                         latency_ms=15,
@@ -257,7 +257,7 @@ class FakeLLMProvider:
                 return LLMResult(
                     content=f"According to warehouse and inventory records: {tool_data}",
                     usage=TokenUsage(
-                        input_tokens=15, output_tokens=20, total_tokens=35, usage_source="provider"
+                        input_tokens=15, output_tokens=20, total_tokens=35, usage_source="estimated"
                     ),
                     model=target_model,
                     latency_ms=15,
@@ -297,7 +297,7 @@ class FakeLLMProvider:
                 input_tokens=in_tok,
                 output_tokens=out_tok,
                 total_tokens=in_tok + out_tok,
-                usage_source="provider",
+                usage_source="estimated",
             ),
             model=target_model,
             latency_ms=15,
@@ -338,7 +338,7 @@ class FakeLLMProvider:
                     {"id": "call_inv_1", "name": tool_name, "arguments": {"sku": "SKU-COFFEE-01"}}
                 ],
                 usage=TokenUsage(
-                    input_tokens=15, output_tokens=15, total_tokens=30, usage_source="provider"
+                    input_tokens=15, output_tokens=15, total_tokens=30, usage_source="estimated"
                 ),
                 model=target_model,
                 latency_ms=20,
@@ -362,7 +362,7 @@ class FakeLLMProvider:
                     {"id": "call_disp_1", "name": tool_name, "arguments": {"order_id": 101}}
                 ],
                 usage=TokenUsage(
-                    input_tokens=15, output_tokens=15, total_tokens=30, usage_source="provider"
+                    input_tokens=15, output_tokens=15, total_tokens=30, usage_source="estimated"
                 ),
                 model=target_model,
                 latency_ms=20,
@@ -374,7 +374,7 @@ class FakeLLMProvider:
                     {"id": "call_1", "name": "search_products", "arguments": {"query": "coffee"}}
                 ],
                 usage=TokenUsage(
-                    input_tokens=15, output_tokens=15, total_tokens=30, usage_source="provider"
+                    input_tokens=15, output_tokens=15, total_tokens=30, usage_source="estimated"
                 ),
                 model=target_model,
                 latency_ms=20,
