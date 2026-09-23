@@ -14,6 +14,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import and_, desc, or_, select
 from sqlalchemy import func as sa_func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import case as sa_case
 
@@ -71,6 +72,7 @@ from app.schemas.ai import (
     ProviderLiveTestResponse,
     SkillDTO,
     ToggleSkillRequest,
+    UpdateMCPServerRequest,
     UsageSummaryDTO,
     UsageTimeseriesPointDTO,
     UsageTimeseriesResponseDTO,
@@ -183,19 +185,36 @@ async def get_ai_overview_metrics(
     ).scalar()
     avg_lat = round(float(avg_lat_val), 1) if avg_lat_val is not None else 0.0
 
-    lat_rows = (
-        (
-            await session.execute(
-                select(AIRun.latency_ms)
-                .where(*run_filters, AIRun.latency_ms.is_not(None))
-                .order_by(AIRun.latency_ms.asc())
-                .limit(2000)
+    lat_filters = [*run_filters, AIRun.latency_ms.is_not(None)]
+    n_lat = (
+        await session.execute(select(sa_func.count(AIRun.id)).where(*lat_filters))
+    ).scalar() or 0
+
+    async def _pct(pct: float) -> float | None:
+        if n_lat == 0:
+            return None
+        k = (n_lat - 1) * pct
+        f, c = math.floor(k), math.ceil(k)
+        vals = (
+            (
+                await session.execute(
+                    select(AIRun.latency_ms)
+                    .where(*lat_filters)
+                    .order_by(AIRun.latency_ms.asc())
+                    .offset(f)
+                    .limit(c - f + 1)
+                )
             )
+            .scalars()
+            .all()
         )
-        .scalars()
-        .all()
-    )
-    p50, p95, p99 = compute_percentiles(lat_rows)
+        if not vals:
+            return None
+        if len(vals) == 1 or f == c:
+            return round(float(vals[0]), 1)
+        return round(float(vals[0] * (c - k) + vals[1] * (k - f)), 1)
+
+    p50, p95, p99 = await _pct(0.50), await _pct(0.95), await _pct(0.99)
 
     # Token aggregates & cost
     tok_res = (
@@ -411,6 +430,7 @@ async def get_ai_diagnostics(
             llm_status = (
                 "not_validated" if getattr(llm_prov, "api_key_optional", False) else "degraded"
             )
+        else:
             current_model = (runtime_cfg.get("ai_model") or "gpt-4o-mini").strip()
             # Ensure verification is bound to current configuration timestamp
             ai_cfg_keys = ["ai_api_key_enc", "ai_model", "ai_api_base_url"]
@@ -421,8 +441,10 @@ async def get_ai_diagnostics(
             ).scalar()
 
             verify_query = select(AIRun.id).where(
-                AIRun.model == current_model,
-                AIRun.errors.is_(None),
+                AIRun.model == getattr(llm_prov, "default_model", current_model),
+                (AIRun.traffic_source == "provider_test")
+                | AIRun.errors.is_(None)
+                | (AIRun.errors == ""),
                 AIRun.created_at >= datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=24),
             )
             if last_cfg_update is not None:
@@ -1422,6 +1444,9 @@ async def delete_knowledge_document_nested(
     session: AsyncSession = Depends(get_session),
     admin: AdminUser = Depends(get_current_admin),
 ):
+    doc = await session.get(KnowledgeDocument, document_id)
+    if not doc or doc.source_id != source_id:
+        raise HTTPException(status_code=404, detail="Knowledge document not found in source")
     return await delete_knowledge_document(
         document_id=document_id,
         http_request=http_request,
@@ -1972,7 +1997,7 @@ async def toggle_mcp_server(
 @router.patch("/mcp/servers/{server_id}")
 async def update_mcp_server(
     server_id: int,
-    payload: dict[str, Any],
+    payload: UpdateMCPServerRequest,
     session: AsyncSession = Depends(get_session),
     _admin: AdminUser = Depends(get_current_admin),
 ):
@@ -1980,8 +2005,8 @@ async def update_mcp_server(
     server = await session.get(MCPServerConfig, server_id)
     if not server:
         raise HTTPException(status_code=404, detail="MCP server not found")
-    if "is_enabled" in payload:
-        new_val = bool(payload["is_enabled"])
+    if payload.is_enabled is not None:
+        new_val = payload.is_enabled
         if server.is_enabled != new_val:
             server.is_enabled = new_val
             if not new_val:
@@ -2120,6 +2145,12 @@ async def promote_candidate(
                 candidate_id=candidate_id,
                 reviewer_name=admin.username,
             )
+        except IntegrityError:
+            await session.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail=f"Candidate #{candidate_id} has already been promoted to training.",
+            )
         except ValueError as e:
             raise HTTPException(status_code=409, detail=str(e))
         if not ok:
@@ -2149,6 +2180,12 @@ async def promote_candidate(
                 scope_type=payload.scope_type,
                 scope_id=payload.scope_id,
                 confirm_global_privacy=payload.confirm_global_privacy,
+            )
+        except IntegrityError:
+            await session.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail=f"Candidate #{candidate_id} has already been promoted.",
             )
         except ValueError as e:
             err_msg = str(e)

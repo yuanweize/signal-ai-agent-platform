@@ -4,6 +4,7 @@ Structured LLM Token Usage, Model Call Records, and Provider-Neutral Results.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -31,6 +32,16 @@ class TokenUsage:
             self.usage_source in ("provider", "estimated", "legacy_total_only", "partial")
             and self.total_tokens is not None
         )
+
+    @classmethod
+    def combine(cls, usages: Iterable[TokenUsage | None]) -> TokenUsage:
+        """Fold real per-call usages without an artificial 'unavailable' seed."""
+        result: TokenUsage | None = None
+        for u in usages:
+            if u is None:
+                continue
+            result = u if result is None else result.add(u)
+        return result if result is not None else cls(usage_source="unavailable")
 
     def add(self, other: TokenUsage | None) -> TokenUsage:
         """Combine two token usages safely with truthful provenance."""

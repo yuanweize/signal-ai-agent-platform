@@ -747,8 +747,8 @@ class ApiClient {
   }
 
   async toggleMCPServer(serverId: number, isEnabled: boolean) {
-    return this.request<{ ok: boolean; is_enabled: boolean }>(`/ai-studio/mcp/servers/${serverId}/toggle`, {
-      method: 'POST',
+    return this.request<{ ok: boolean; is_enabled: boolean; status?: string }>(`/ai-studio/mcp/servers/${serverId}`, {
+      method: 'PATCH',
       body: { is_enabled: isEnabled },
     });
   }

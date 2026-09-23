@@ -125,8 +125,21 @@ def upgrade() -> None:
     with op.batch_alter_table("evaluation_case_results", schema=None) as batch_op:
         batch_op.create_index(batch_op.f("ix_evaluation_case_results_run_id"), ["run_id"], unique=False)
 
+    # 5. Enforce unique constraint on training_examples.source_candidate_id
+    op.execute(
+        "DELETE FROM training_examples WHERE source_candidate_id IS NOT NULL AND id NOT IN ("
+        "SELECT MIN(id) FROM training_examples WHERE source_candidate_id IS NOT NULL "
+        "GROUP BY source_candidate_id)"
+    )
+    with op.batch_alter_table("training_examples", schema=None) as batch_op:
+        batch_op.create_unique_constraint(
+            "uq_training_examples_source_candidate_id", ["source_candidate_id"]
+        )
+
 
 def downgrade() -> None:
+    with op.batch_alter_table("training_examples", schema=None) as batch_op:
+        batch_op.drop_constraint("uq_training_examples_source_candidate_id", type_="unique")
     op.drop_table("evaluation_case_results")
     op.drop_table("evaluation_runs")
     op.drop_table("ai_model_calls")

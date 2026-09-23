@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, StrictBool, model_validator
 
 # --- Copilot & Suggestions ---
 
@@ -258,17 +258,28 @@ class CreateMCPServerRequest(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def normalize_fields(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            transport = (data.get("transport") or data.get("transport_type") or "stdio").lower()
-            if transport not in ("stdio", "http", "sse"):
-                transport = "stdio"
-            data["transport"] = transport
-            if not data.get("command_or_url"):
-                if transport == "stdio":
-                    data["command_or_url"] = data.get("command") or ""
-                else:
-                    data["command_or_url"] = data.get("endpoint_url") or data.get("command") or ""
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        raw = data.get("transport") or data.get("transport_type") or "stdio"
+        if not isinstance(raw, str):
+            raise ValueError("transport must be a string")
+        transport = raw.strip().lower()
+        if transport not in ("stdio", "http", "sse"):
+            raise ValueError(f"Unsupported transport '{raw}'. Expected stdio, http, or sse.")
+        data["transport"] = transport
+        if not data.get("command_or_url"):
+            if transport == "stdio":
+                data["command_or_url"] = data.get("command") or ""
+            else:
+                data["command_or_url"] = data.get("endpoint_url") or data.get("command") or ""
+        if not str(data.get("command_or_url") or "").strip():
+            raise ValueError("command_or_url (or command/endpoint_url) is required")
         return data
+
+
+class UpdateMCPServerRequest(BaseModel):
+    is_enabled: StrictBool | None = None
 
 
 # --- Learning Loop ---

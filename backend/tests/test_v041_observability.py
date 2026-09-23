@@ -360,3 +360,80 @@ async def test_evaluation_run_persistence_and_traffic_isolation(session):
         prod_run_count = sum(1 for r in all_runs if r.traffic_source == "production")
         assert eval_run_count >= 2
         assert overview["total_runs"] == prod_run_count
+
+
+def test_token_usage_combine_seedless_provenance():
+    u1 = TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15, usage_source="provider")
+    u2 = TokenUsage(input_tokens=20, output_tokens=10, total_tokens=30, usage_source="provider")
+    combined = TokenUsage.combine([u1, u2])
+    assert combined.total_tokens == 45
+    assert combined.usage_source == "provider"
+
+    # With unavailable call
+    u3 = TokenUsage(usage_source="unavailable")
+    combined_partial = TokenUsage.combine([u1, u3])
+    assert combined_partial.usage_source == "partial"
+
+    # Empty list
+    empty = TokenUsage.combine([])
+    assert empty.usage_source == "unavailable"
+
+
+def test_pricing_dated_snapshots_vs_variants():
+    # Dated snapshot resolves to family pricing
+    cost, curr = calculate_cost("gpt-4o-2024-08-06", 1_000_000, 1_000_000)
+    assert cost == 12.50
+    assert curr == "USD"
+
+    cost_mini, _ = calculate_cost("gpt-4o-mini-2024-07-18", 1_000_000, 1_000_000)
+    assert cost_mini == 0.75
+
+    # Distinct variants are NOT aliased
+    cost_rt, _ = calculate_cost("gpt-4o-realtime-preview", 1000, 1000)
+    assert cost_rt is None
+
+    cost_audio, _ = calculate_cost("gpt-4o-audio-preview", 1000, 1000)
+    assert cost_audio is None
+
+
+def test_tool_registry_duplicate_mcp_tool_protection():
+    from app.ai.tools.registry import ToolRegistry
+
+    registry = ToolRegistry()
+    registry.register(
+        name="search",
+        description="Server A search",
+        func=lambda: "A",
+        is_mcp=True,
+        mcp_server_name="server_a",
+    )
+    # Server B tries to register same tool name
+    registry.register(
+        name="search",
+        description="Server B search",
+        func=lambda: "B",
+        is_mcp=True,
+        mcp_server_name="server_b",
+    )
+    # Must preserve server A tool
+    tool = registry.get_tool("search")
+    assert tool is not None
+    assert tool.mcp_server_name == "server_a"
+    assert tool.description == "Server A search"
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_endpoint_configured_provider_no_unbound_error(session):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/ai-studio/diagnostics")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "llm" in data
+        assert data["llm"]["status"] in (
+            "configured",
+            "not_validated",
+            "degraded",
+            "disabled",
+            "live_verified",
+        )

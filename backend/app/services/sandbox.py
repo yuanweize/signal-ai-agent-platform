@@ -23,8 +23,13 @@ async def get_or_create_sandbox_conversation(
     Ensure a dedicated internal system sandbox conversation exists and return its database ID.
     Never creates synthetic fake IDs or contaminates real customer conversation threads.
     """
-    stmt = select(Conversation.id).where(Conversation.signal_id == signal_id)
-    conv_id = (await session.execute(stmt)).scalar_one_or_none()
+    stmt = (
+        select(Conversation.id)
+        .where(Conversation.signal_id == signal_id)
+        .order_by(Conversation.id)
+        .limit(1)
+    )
+    conv_id = (await session.execute(stmt)).scalars().first()
     if conv_id is not None:
         return conv_id
 
@@ -34,7 +39,15 @@ async def get_or_create_sandbox_conversation(
         mode=ConversationMode.auto.value,
         is_active=False,
     )
-    session.add(conv)
-    await session.flush()
+    try:
+        async with session.begin_nested():
+            session.add(conv)
+            await session.flush()
+    except Exception:
+        conv_id = (await session.execute(stmt)).scalars().first()
+        if conv_id is None:
+            raise
+        return conv_id
+
     logger.info(f"Created dedicated system sandbox conversation #{conv.id} (signal_id={signal_id})")
     return conv.id

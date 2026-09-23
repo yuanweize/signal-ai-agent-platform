@@ -325,10 +325,9 @@ def build_agent_graph(
             w in text for w in ["human", "agent", "representative", "manager", "person", "staff"]
         ):
             # Aggregate any planner model calls already made
-            agg_handoff = TokenUsage(usage_source="unavailable")
-            for mc in model_call_records:
-                u_dict = mc.get("usage") or {}
-                agg_handoff = agg_handoff.add(TokenUsage(**u_dict))
+            agg_handoff = TokenUsage.combine(
+                TokenUsage(**(mc.get("usage") or {})) for mc in model_call_records
+            )
             return {
                 "draft": "I understand you would like to speak to a representative. I am notifying our support team now.",
                 "decision": AgentDecision.handoff.value,
@@ -419,18 +418,17 @@ def build_agent_graph(
             model_call_records.append(rec.to_dict())
 
         # Aggregate tokens across ALL model calls in this turn
-        aggregated_usage = TokenUsage(usage_source="unavailable")
-        for mc in model_call_records:
-            u_dict = mc.get("usage") or {}
-            mc_usage = TokenUsage(
-                input_tokens=u_dict.get("input_tokens"),
-                output_tokens=u_dict.get("output_tokens"),
-                total_tokens=u_dict.get("total_tokens"),
-                cached_input_tokens=u_dict.get("cached_input_tokens"),
-                reasoning_tokens=u_dict.get("reasoning_tokens"),
-                usage_source=u_dict.get("usage_source", "unavailable"),
+        aggregated_usage = TokenUsage.combine(
+            TokenUsage(
+                input_tokens=(mc.get("usage") or {}).get("input_tokens"),
+                output_tokens=(mc.get("usage") or {}).get("output_tokens"),
+                total_tokens=(mc.get("usage") or {}).get("total_tokens"),
+                cached_input_tokens=(mc.get("usage") or {}).get("cached_input_tokens"),
+                reasoning_tokens=(mc.get("usage") or {}).get("reasoning_tokens"),
+                usage_source=(mc.get("usage") or {}).get("usage_source", "unavailable"),
             )
-            aggregated_usage = aggregated_usage.add(mc_usage)
+            for mc in model_call_records
+        )
 
         # 3. Determine decision & reason
         mode = state.get("mode", "auto")

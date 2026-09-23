@@ -5,6 +5,7 @@ Never guesses pricing for unknown models; strictly returns None if pricing is un
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 # Default well-known official model pricing tables (USD per 1,000,000 tokens)
@@ -24,14 +25,13 @@ DEFAULT_MODEL_PRICING: dict[str, dict[str, Any]] = {
     },
 }
 
+_SNAPSHOT_RE = re.compile(r"^(gpt-4o(?:-mini)?)-\d{4}-\d{2}-\d{2}$")
+
 
 def _normalize_model_alias(m: str) -> str:
     norm = m.strip().lower()
-    if norm.startswith("gpt-4o-mini-"):
-        return "gpt-4o-mini"
-    if norm.startswith("gpt-4o-") and not norm.startswith("gpt-4o-mini"):
-        return "gpt-4o"
-    return norm
+    match = _SNAPSHOT_RE.match(norm)
+    return match.group(1) if match else norm
 
 
 def calculate_cost(

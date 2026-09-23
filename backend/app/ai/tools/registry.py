@@ -61,6 +61,20 @@ class ToolRegistry:
             "properties": {},
             "required": [],
         }
+        existing = self._tools.get(name)
+        if existing is not None:
+            if existing.is_mcp and is_mcp and existing.mcp_server_name != mcp_server_name:
+                logger.warning(
+                    f"Tool '{name}' already registered by MCP server '{existing.mcp_server_name}'. "
+                    f"Skipping duplicate registration from server '{mcp_server_name}'."
+                )
+                return
+            if not existing.is_mcp and is_mcp:
+                logger.warning(
+                    f"Tool '{name}' is a built-in tool. Cannot overwrite with MCP tool from '{mcp_server_name}'."
+                )
+                return
+
         self._tools[name] = RegisteredTool(
             name=name,
             description=description,

@@ -58,7 +58,7 @@ class EvaluationRunner:
 
         # Resolve active prompt version
         try:
-            active_version, _ = await prompt_manager.get_active_prompt(session)
+            _, active_version = await prompt_manager.get_active_prompt(session)
         except Exception:
             active_version = "v1.0"
 

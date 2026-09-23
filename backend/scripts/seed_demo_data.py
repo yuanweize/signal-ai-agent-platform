@@ -55,22 +55,30 @@ async def seed():
             KEY_ADMIN_PASSWORD_HASH: admin_pass_hash,
             KEY_ADMIN_TOTP_SECRET: "",
             KEY_JWT_SIGNING_SECRET: jwt_secret,
-            "ai.enabled": "true",
+            "is_ai_enabled": "true",
             "ai.provider": "openai",
-            "ai.model": "gpt-4o-mini",
-            "ai.base_url": "https://api.openai.com/v1",
+            "ai_model": "gpt-4o-mini",
+            "ai_api_base_url": "https://api.openai.com/v1",
             "ai.embedding_model": "text-embedding-3-small",
             "qdrant.enabled": "true",
             "qdrant.url": "http://localhost:6333",
-            "signal.phone_number": "+420 700 000 000",
-            "signal.api_url": "http://localhost:8080",
+            "signal_phone_number": "+420 700 000 000",
+            "signal_api_url": "http://localhost:8080",
+        }
+        critical_admin_keys = {
+            KEY_BOOTSTRAP_COMPLETED,
+            KEY_ADMIN_USERNAME,
+            KEY_ADMIN_PASSWORD_HASH,
+            KEY_ADMIN_TOTP_SECRET,
+            KEY_JWT_SIGNING_SECRET,
         }
         for k, v in configs.items():
             row = (
                 await session.execute(select(BotConfig).where(BotConfig.key == k))
             ).scalar_one_or_none()
             if row:
-                row.value = v
+                if k not in critical_admin_keys:
+                    row.value = v
             else:
                 session.add(
                     BotConfig(key=k, value=v, category="system", description=f"Config: {k}")
@@ -184,7 +192,30 @@ async def seed():
                 timestamp=now - timedelta(minutes=5),
                 delivery_status=MessageDeliveryStatus.received.value,
             )
-            session.add_all([m1, m2, m3])
+            m_c2_1 = Message(
+                conversation_id=conv2.id,
+                role="user",
+                sender_id=u2.signal_id,
+                sender_user_id=u2.id,
+                direction=MessageDirection.inbound.value,
+                actor=MessageActor.customer.value,
+                origin=MessageOrigin.customer.value,
+                content="Dobrý den, do kolika máte dnes otevřeno?",
+                timestamp=now - timedelta(minutes=30),
+                delivery_status=MessageDeliveryStatus.read.value,
+            )
+            m_c2_2 = Message(
+                conversation_id=conv2.id,
+                role="assistant",
+                sender_id="bot",
+                direction=MessageDirection.outbound.value,
+                actor=MessageActor.bot.value,
+                origin=MessageOrigin.bot.value,
+                content="Dobrý den! Máme otevřeno do 18:00. Můžeme vám ještě s něčím poradit?",
+                timestamp=now - timedelta(minutes=29),
+                delivery_status=MessageDeliveryStatus.read.value,
+            )
+            session.add_all([m1, m2, m3, m_c2_1, m_c2_2])
             await session.flush()
 
             # 6. Active Prompt Version
@@ -304,14 +335,14 @@ async def seed():
                 source_id=ks.id,
                 title="Return & Refund Window FAQ",
                 scope_type="global",
-                chunk_count=2,
+                chunk_count=0,
                 content="Unopened coffee beans and equipment in original packaging may be returned within 14 days of purchase with receipt.",
             )
             kd2 = KnowledgeDocument(
                 source_id=ks.id,
                 title="Store Locations & Working Hours",
                 scope_type="global",
-                chunk_count=2,
+                chunk_count=0,
                 content="Prague Central Store: Monday to Saturday, 8:00 AM - 6:00 PM. Order pickups ready within 2 hours.",
             )
             session.add_all([kd1, kd2])

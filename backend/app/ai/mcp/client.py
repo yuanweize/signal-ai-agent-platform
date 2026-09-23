@@ -327,7 +327,7 @@ class MCPClientManager:
                 logger.info(
                     f"Auto-connected enabled MCP server '{server.name}' ({len(tools)} tools)"
                 )
-            except (Exception, BaseExceptionGroup) as e:
+            except Exception as e:
                 server.status = "error"
                 server.error_message = str(e)
                 results[server.name] = 0
