@@ -31,6 +31,7 @@ import { Button } from './components/ui/Button';
 import { ProvenanceBadge } from './components/ProvenanceBadge';
 import { ExplainabilityDrawer } from './components/ExplainabilityDrawer';
 import { CopilotDraftCard } from './components/CopilotDraftCard';
+import { TakeoverModeSelector } from './components/TakeoverModeSelector';
 
 export default function InboxPage() {
   // Conversations list state
@@ -411,14 +412,15 @@ export default function InboxPage() {
                 <span>Mode:</span>
               </div>
               <select
-                className="px-2 py-1 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] cursor-pointer"
+                className="select-custom px-2.5 py-1 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] cursor-pointer"
                 value={modeFilter}
                 onChange={e => setModeFilter(e.target.value as 'all' | ConversationMode)}
               >
-                <option value="all" className="bg-[#1a1a2e]">Any Mode</option>
-                <option value="auto" className="bg-[#1a1a2e]">Auto</option>
-                <option value="manual" className="bg-[#1a1a2e]">Manual</option>
-                <option value="paused" className="bg-[#1a1a2e]">Paused</option>
+                <option value="all">Any Mode</option>
+                <option value="auto">Auto (AI)</option>
+                <option value="copilot">Copilot</option>
+                <option value="manual">Manual</option>
+                <option value="paused">Paused</option>
               </select>
             </div>
           </div>
@@ -565,21 +567,11 @@ export default function InboxPage() {
                 </div>
 
                 <div className="flex items-center gap-3">
-                  {/* Mode switcher */}
-                  <div className="flex items-center gap-2 bg-[var(--bg-input)] px-3 py-1.5 rounded-lg border border-[var(--border)]">
-                    <span className="text-xs font-medium text-[var(--text-secondary)]">Takeover:</span>
-                    <select
-                      aria-label="Takeover mode"
-                      className="bg-transparent text-xs font-semibold text-[var(--text-primary)] outline-none cursor-pointer"
-                      value={activeConv.mode}
-                      onChange={e => handleModeChange(e.target.value as ConversationMode)}
-                    >
-                      <option value="auto" className="bg-[#1a1a2e] text-white">Auto (AI)</option>
-                      <option value="copilot" className="bg-[#1a1a2e] text-white">Copilot (Human + AI)</option>
-                      <option value="manual" className="bg-[#1a1a2e] text-white">Manual (Human)</option>
-                      <option value="paused" className="bg-[#1a1a2e] text-white">Paused (Mute)</option>
-                    </select>
-                  </div>
+                  {/* Modern Takeover Mode Selector */}
+                  <TakeoverModeSelector
+                    mode={activeConv.mode}
+                    onChange={handleModeChange}
+                  />
 
                   <button
                     type="button"

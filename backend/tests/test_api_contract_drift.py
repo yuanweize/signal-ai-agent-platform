@@ -187,5 +187,111 @@ async def test_frontend_backend_integration_smoke(session):
             assert "llm" in data_diag
             assert "signal_gateway" in data_diag
 
+            # 9. GET runs with filters (has_rag=false / used_rag=false, has_tools=false / used_tools=false)
+            r_runs = await client.get("/api/ai-studio/runs?has_rag=false&has_tools=false")
+            assert r_runs.status_code == 200, f"GET runs with has_rag=false failed: {r_runs.text}"
+            assert isinstance(r_runs.json(), list)
+
+            r_runs_compat = await client.get("/api/ai-studio/runs?used_rag=false&used_tools=false")
+            assert r_runs_compat.status_code == 200, (
+                f"GET runs with used_rag=false failed: {r_runs_compat.text}"
+            )
+            assert isinstance(r_runs_compat.json(), list)
+
+            # 10. Usage endpoints and wrapper envelopes
+            r_usage_sum = await client.get("/api/ai-studio/usage/summary")
+            assert r_usage_sum.status_code == 200, f"GET usage/summary failed: {r_usage_sum.text}"
+            data_usage_sum = r_usage_sum.json()
+            assert "total_model_calls" in data_usage_sum
+            assert "cost_currency" in data_usage_sum
+            assert "currency" in data_usage_sum
+
+            r_usage_ts = await client.get("/api/ai-studio/usage/timeseries")
+            assert r_usage_ts.status_code == 200, f"GET usage/timeseries failed: {r_usage_ts.text}"
+            data_usage_ts = r_usage_ts.json()
+            assert "points" in data_usage_ts
+            assert isinstance(data_usage_ts["points"], list)
+
+            r_usage_models = await client.get("/api/ai-studio/usage/models")
+            assert r_usage_models.status_code == 200, (
+                f"GET usage/models failed: {r_usage_models.text}"
+            )
+            data_usage_models = r_usage_models.json()
+            assert "models" in data_usage_models
+            assert isinstance(data_usage_models["models"], list)
+
+            # 11. Knowledge document lifecycle & search
+            r_ks_create = await client.post(
+                "/api/ai-studio/knowledge/sources",
+                json={"title": "Contract Smoke Source", "source_type": "faq"},
+            )
+            assert r_ks_create.status_code == 200, (
+                f"POST knowledge source failed: {r_ks_create.text}"
+            )
+            source_id = r_ks_create.json()["id"]
+
+            r_doc_create = await client.post(
+                f"/api/ai-studio/knowledge/sources/{source_id}/documents",
+                json={
+                    "title": "Doc Smoke",
+                    "content": "Sample content for testing contract drift.",
+                },
+            )
+            assert r_doc_create.status_code == 200, f"POST document failed: {r_doc_create.text}"
+            doc_id = r_doc_create.json()["document_id"]
+
+            r_reindex = await client.post(f"/api/ai-studio/knowledge/sources/{source_id}/reindex")
+            assert r_reindex.status_code == 200, f"POST reindex failed: {r_reindex.text}"
+            assert "documents_count" in r_reindex.json() or "indexed_documents" in r_reindex.json()
+
+            r_search = await client.get(
+                "/api/ai-studio/knowledge/search?query=test&scope_type=global"
+            )
+            assert r_search.status_code == 200, f"GET knowledge search failed: {r_search.text}"
+            assert isinstance(r_search.json(), list)
+
+            r_doc_del = await client.delete(f"/api/ai-studio/knowledge/documents/{doc_id}")
+            assert r_doc_del.status_code == 200, f"DELETE document failed: {r_doc_del.text}"
+
+            # 12. MCP lifecycle: create, detail, toggle, delete
+            r_mcp_create = await client.post(
+                "/api/ai-studio/mcp/servers",
+                json={
+                    "name": "Contract Test Server",
+                    "transport": "stdio",
+                    "command_or_url": "python3",
+                    "args": ["-m", "echo"],
+                },
+            )
+            assert r_mcp_create.status_code == 200, f"POST mcp create failed: {r_mcp_create.text}"
+            mcp_id = r_mcp_create.json()["id"]
+
+            r_mcp_detail = await client.get(f"/api/ai-studio/mcp/servers/{mcp_id}")
+            assert r_mcp_detail.status_code == 200, f"GET mcp detail failed: {r_mcp_detail.text}"
+            data_mcp = r_mcp_detail.json()
+            assert "server" in data_mcp
+            assert "discovered_tools" in data_mcp
+            assert "name" in data_mcp  # flattened convenience
+
+            r_mcp_toggle = await client.post(
+                f"/api/ai-studio/mcp/servers/{mcp_id}/toggle",
+                json={"is_enabled": False},
+            )
+            assert r_mcp_toggle.status_code == 200, f"POST mcp toggle failed: {r_mcp_toggle.text}"
+            assert r_mcp_toggle.json()["is_enabled"] is False
+
+            r_mcp_del = await client.delete(f"/api/ai-studio/mcp/servers/{mcp_id}")
+            assert r_mcp_del.status_code == 200, f"DELETE mcp delete failed: {r_mcp_del.text}"
+
+            # 13. Provider live test probe
+            r_prov_test = await client.post(
+                "/api/ai-studio/diagnostics/test-provider",
+                json={"test_tools": False, "test_embeddings": False},
+            )
+            assert r_prov_test.status_code == 200, f"POST test-provider failed: {r_prov_test.text}"
+            data_prov = r_prov_test.json()
+            assert "connection_status" in data_prov
+            assert "latency_ms" in data_prov
+
     finally:
         app.dependency_overrides.clear()

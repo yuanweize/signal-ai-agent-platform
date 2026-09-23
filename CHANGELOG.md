@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.4.1] - 2026-09-23
+
+### AI Studio Product Completion & Observability (v0.4.1 Release)
+
+#### Highlights
+- **Truthful Runtime Observability**: Eliminated decorative zeroes and arbitrary status labels. Operational metrics and readiness states are strictly derived from live component health checks, database diagnostics, and execution records.
+- **Multi-Source Token Provenance & Telemetry**: Added exact usage breakdowns (`input_tokens`, `output_tokens`, `total_tokens`, `cached_input_tokens`, `reasoning_tokens`) across LLM providers, graph orchestration nodes, and persisted traces (`ai_runs` and `ai_model_calls`). Introduced strict provenance taxonomy (`provider`, `estimated`, `unavailable`, `partial`) and eliminated synthetic token estimates masquerading as provider telemetry.
+- **Provider-Test & Eval Sandbox Isolation**: Test probes and benchmark suites now execute in dedicated internal sandbox conversations (`__system_eval_sandbox__`, `__system_provider_probe__`) with `message_id=None`, completely eliminating pollution or metric fabrication in customer conversation threads.
+- **Truthful Pricing Engine**: Realistic cost calculation with model-family snapshot aliases (e.g. `gpt-4o-mini-2024-07-18`) and graceful fallback to `None` for unconfigured models.
+- **MCP Lifecycle Cleanup**: Disconnecting or deleting an MCP server immediately unregisters all its registered tools from `ToolRegistry`, preventing stale tool execution.
+- **Learning Curation Idempotency**: Enforced database-level unique constraint on `TrainingExample.source_candidate_id` and strict state transitions on `LearningCandidate` to prevent duplicate FAQ or training dataset generation on rapid clicks.
+- **Runs & Traces Explorer**: Comprehensive execution tracing with decision filtering, error filtering, RAG/tool usage filters, pagination, and slide-over execution inspector with per-model-call execution traces and citations.
+- **Responsive 4-Group Information Architecture**: Reorganized AI Studio console into **Operate** (Overview, Runs & Traces, Diagnostics), **Knowledge** (RAG Knowledge, Scoped Memory, Progressive Skills), **Automation** (Tools & MCP Governance), and **Improve** (Learning Loop, Prompt Versions, Evaluation Suite).
+- **Linear Migration `f3b4c5d6e7f8`**: Upgrades `ai_runs` with token breakdowns, traffic sources, and cost estimates, and creates `ai_model_calls`, `evaluation_runs`, and `evaluation_case_results`.
+
+#### Known Limitations
+- **Signal Hardware Gateway E2E**: Real end-to-end Signal messaging requires a reachable external `signal-cli-rest-api` daemon and a registered phone number. In environments without an active external Signal gateway, AI Studio, Copilot drafts, Knowledge RAG, Scoped Memory, and MCP execution remain fully functional and validated locally.
+
+---
+
 ## [v0.4.0] - 2026-09-23
 
 ### AI Customer Service & Conversational Commerce Platform (v0.4.0 Final Release)

@@ -102,7 +102,7 @@ async def lifespan(app: FastAPI):
             await skill_registry.sync_persisted_states(startup_session)
             await mcp_manager.connect_enabled_servers(startup_session)
         logger.info("✅ Unified AgentRuntime & MCP lifecycle active")
-    except Exception as e:
+    except (Exception, BaseExceptionGroup) as e:
         logger.warning(f"⚠️  AI lifecycle warmup partial: {e}")
 
     yield

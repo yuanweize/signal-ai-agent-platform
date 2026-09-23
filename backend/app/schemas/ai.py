@@ -5,9 +5,9 @@ Pydantic schemas for AI Platform v0.4: Copilot, Knowledge, Memory, Skills, MCP, 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool, model_validator
 
 # --- Copilot & Suggestions ---
 
@@ -55,15 +55,37 @@ class AIRunDTO(BaseModel):
     prompt_version: str | None = None
     skills: list[str] = Field(default_factory=list)
     retrieval: list[dict[str, Any]] = Field(default_factory=list)
+    citations: list[dict[str, Any]] = Field(default_factory=list)
     memory: list[dict[str, Any]] = Field(default_factory=list)
+    memories: list[dict[str, Any]] = Field(default_factory=list)
     tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    rag_hit_count: int = 0
+    tool_call_count: int = 0
     decision: str
     confidence: float | None = None
     latency_ms: int | None = None
     tokens: int | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+    cached_input_tokens: int | None = None
+    reasoning_tokens: int | None = None
+    llm_call_count: int | None = None
+    usage_source: str = "unavailable"
+    estimated_cost: float | None = None
+    cost_currency: str = "USD"
+    traffic_source: str = "production"
     errors: str | None = None
     final_message_id: int | None = None
     created_at: datetime
+    model_calls: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class AIRunListResponse(BaseModel):
+    items: list[AIRunDTO]
+    total: int
+    limit: int
+    offset: int
 
 
 # --- Knowledge Base & RAG ---
@@ -94,6 +116,11 @@ class KnowledgeDocumentDTO(BaseModel):
     chunk_count: int = 0
     created_at: datetime
     updated_at: datetime
+
+
+class KnowledgeSourceDetailDTO(BaseModel):
+    source: KnowledgeSourceDTO
+    documents: list[KnowledgeDocumentDTO] = Field(default_factory=list)
 
 
 class CreateKnowledgeSourceRequest(BaseModel):
@@ -203,12 +230,56 @@ class MCPServerDTO(BaseModel):
     last_health_check: datetime | None = None
 
 
+class MCPServerDetailDTO(BaseModel):
+    server: MCPServerDTO
+    discovered_tools: list[dict[str, Any]] = Field(default_factory=list)
+    # Convenience flattened fields for UI compatibility
+    id: int | None = None
+    name: str | None = None
+    transport: str | None = None
+    transport_type: str | None = None
+    endpoint_url: str | None = None
+    command: str | None = None
+    is_enabled: bool | None = None
+    status: str | None = None
+    tools: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class CreateMCPServerRequest(BaseModel):
     name: str = Field(min_length=1, max_length=128)
-    transport: str = Field(default="stdio", pattern="^(stdio|http|sse)$")
-    command_or_url: str = Field(min_length=1, max_length=512)
+    transport: str = Field(default="stdio")
+    transport_type: str | None = None
+    command_or_url: str = Field(default="", max_length=512)
+    command: str | None = None
+    endpoint_url: str | None = None
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_fields(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        raw = data.get("transport") or data.get("transport_type") or "stdio"
+        if not isinstance(raw, str):
+            raise ValueError("transport must be a string")
+        transport = raw.strip().lower()
+        if transport not in ("stdio", "http", "sse"):
+            raise ValueError(f"Unsupported transport '{raw}'. Expected stdio, http, or sse.")
+        data["transport"] = transport
+        if not data.get("command_or_url"):
+            if transport == "stdio":
+                data["command_or_url"] = data.get("command") or ""
+            else:
+                data["command_or_url"] = data.get("endpoint_url") or data.get("command") or ""
+        if not str(data.get("command_or_url") or "").strip():
+            raise ValueError("command_or_url (or command/endpoint_url) is required")
+        return data
+
+
+class UpdateMCPServerRequest(BaseModel):
+    is_enabled: StrictBool | None = None
 
 
 # --- Learning Loop ---
@@ -231,13 +302,34 @@ class LearningCandidateDTO(BaseModel):
 
 
 class PromoteCandidateRequest(BaseModel):
-    action: str | None = None
+    action: Literal["knowledge", "training"] = "knowledge"
     faq_question: str | None = None
     faq_answer: str | None = None
     category: str = "general"
     scope_type: str = Field(default="global", pattern="^(global|group|user)$")
     scope_id: str | None = None
     confirm_global_privacy: bool = False
+
+
+# --- Prompts ---
+
+
+class PromptVersionDTO(BaseModel):
+    id: int
+    version: str
+    name: str
+    template: str
+    is_active: bool
+    created_by: str
+    created_at: datetime
+    activated_at: datetime | None = None
+
+
+class CreatePromptVersionRequest(BaseModel):
+    version: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=128)
+    template: str = Field(min_length=10, max_length=50000)
+    set_active: bool = False
 
 
 # --- Evaluation & Overview ---
@@ -249,13 +341,123 @@ class EvaluationSuiteResultDTO(BaseModel):
     pass_rate: float
     decision_accuracy: float
     average_latency_ms: float
-    total_tokens: int
+    total_tokens: int | None = None
     results: list[dict[str, Any]]
+    run_id: int | None = None
+    eval_type: str = "deterministic"
+
+
+class EvaluationRunDTO(BaseModel):
+    id: int
+    eval_type: str
+    provider: str | None = None
+    model: str | None = None
+    prompt_version: str | None = None
+    dataset_version: str | None = None
+    total_cases: int
+    passed_cases: int
+    pass_rate: float
+    decision_accuracy: float
+    average_latency_ms: float
+    total_tokens: int | None = None
+    estimated_cost: float | None = None
+    status: str
+    started_at: datetime
+    completed_at: datetime | None = None
+    results: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ProviderLiveTestRequest(BaseModel):
+    test_tools: bool = True
+    test_embeddings: bool = True
+
+
+class ProviderLiveTestResponse(BaseModel):
+    connected: bool
+    connection_status: str = "connected"
+    provider: str
+    provider_detected: str = "openai_compatible"
+    model: str
+    endpoint: str
+    latency_ms: int = 0
+    preview: str = ""
+    response_preview: str = ""
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+    cached_tokens: int | None = None
+    reasoning_tokens: int | None = None
+    usage_source: str = "unavailable"
+    finish_reason: str | None = None
+    tool_calling_status: str = "not_verified"
+    native_tool_calling: str = "not_verified"
+    embedding_status: str = "not_configured"
+    embeddings: str = "not_configured"
+    tested_at: datetime
+    error: str | None = None
+    error_message: str | None = None
+
+
+# --- Usage Telemetry ---
+
+
+class UsageSummaryDTO(BaseModel):
+    time_range: str
+    total_runs: int = 0
+    total_tokens: int = 0
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cached_input_tokens: int | None = None
+    reasoning_tokens: int | None = None
+    estimated_cost: float | None = None
+    currency: str = "USD"
+    cost_currency: str = "USD"
+    total_model_calls: int = 0
+    avg_latency_ms: float = 0.0
+    errors: int = 0
+    error_rate: float = 0.0
+
+
+class UsageTimeseriesPointDTO(BaseModel):
+    timestamp: str
+    runs: int = 0
+    errors: int = 0
+    total_tokens: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    avg_latency_ms: float = 0.0
+
+
+class UsageTimeseriesResponseDTO(BaseModel):
+    points: list[UsageTimeseriesPointDTO]
+    time_range: str
+    timezone: str = "UTC"
+
+
+class ModelUsageItemDTO(BaseModel):
+    provider: str
+    model: str
+    runs: int
+    errors: int
+    error_rate: float
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    avg_latency_ms: float
+    estimated_cost: float | None = None
+    currency: str = "USD"
+
+
+class ModelUsageResponseDTO(BaseModel):
+    models: list[ModelUsageItemDTO]
 
 
 class AIOverviewMetricsDTO(BaseModel):
     total_ai_runs: int = 0
     total_runs: int = 0
+    successful_runs: int = 0
+    error_runs: int = 0
+    error_rate: float = 0.0
     automation_rate: float = 0.0
     copilot_rate: float = 0.0
     human_takeover_rate: float = 0.0
@@ -266,11 +468,25 @@ class AIOverviewMetricsDTO(BaseModel):
     copilot_avg_edit_ratio: float = 0.0
     suggestion_rejection_rate: float = 0.0
     rag_hit_rate: float = 0.0
+    tool_call_success_rate: float = 0.0
+    tool_approval_rate: float = 0.0
     memory_items_count: int = 0
     knowledge_documents_count: int = 0
     knowledge_sources_count: int = 0
     knowledge_chunks_count: int = 0
     average_latency_ms: float = 0.0
     avg_latency_ms: float = 0.0
+    p50_latency_ms: float | None = None
+    p95_latency_ms: float | None = None
+    p99_latency_ms: float | None = None
     total_tokens_used: int = 0
     total_tokens: int = 0
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cached_input_tokens: int | None = None
+    reasoning_tokens: int | None = None
+    tokens_source: str = "unavailable"
+    estimated_cost: float | None = None
+    cost_currency: str = "USD"
+    time_range: str = "all"
+    timezone: str = "UTC"

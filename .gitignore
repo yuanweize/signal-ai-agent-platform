@@ -65,3 +65,6 @@ htmlcov/
 # ===== Logs =====
 *.log
 logs/
+
+# ===== Temporary Screenshots =====
+.tmp_screenshots/

@@ -61,6 +61,20 @@ class ToolRegistry:
             "properties": {},
             "required": [],
         }
+        existing = self._tools.get(name)
+        if existing is not None:
+            if existing.is_mcp and is_mcp and existing.mcp_server_name != mcp_server_name:
+                logger.warning(
+                    f"Tool '{name}' already registered by MCP server '{existing.mcp_server_name}'. "
+                    f"Skipping duplicate registration from server '{mcp_server_name}'."
+                )
+                return
+            if not existing.is_mcp and is_mcp:
+                logger.warning(
+                    f"Tool '{name}' is a built-in tool. Cannot overwrite with MCP tool from '{mcp_server_name}'."
+                )
+                return
+
         self._tools[name] = RegisteredTool(
             name=name,
             description=description,
@@ -79,6 +93,17 @@ class ToolRegistry:
 
     def unregister(self, name: str) -> None:
         self._tools.pop(name, None)
+
+    def unregister_server_tools(self, mcp_server_name: str) -> int:
+        """Remove all registered tools belonging to a disconnected MCP server."""
+        to_remove = [
+            name
+            for name, tool in self._tools.items()
+            if tool.is_mcp and tool.mcp_server_name == mcp_server_name
+        ]
+        for name in to_remove:
+            self._tools.pop(name, None)
+        return len(to_remove)
 
     def list_tools(self) -> list[RegisteredTool]:
         return list(self._tools.values())

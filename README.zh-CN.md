@@ -17,15 +17,42 @@
 
 ---
 
+---
+
 <div align="center">
-  <img src="assets/admin_overview.png" width="900" alt="Signal Market Bot 管理控制台概览" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
-  <p><em>Signal Market Bot 运营全景看板 — 实时业务指标、消息流量统计、群发活动追踪与商品目录分析</em></p>
+  <img src="assets/screenshots/admin-overview.png" width="900" alt="Signal Market Bot 管理控制台概览" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
+  <p><em>Signal Market Bot 运营全景看板 — 实时业务指标、消息流量统计、核心模块健康度与商品目录分析</em></p>
 </div>
 
 <div align="center">
-  <img src="assets/ai_engine_setting.png" width="900" alt="Signal Market Bot AI 引擎配置面板" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
-  <p><em>运行时 AI 引擎中台 — 多大模型提供商通用适配、温度采样调节、动态 Prompt 上下文注入与全热重载</em></p>
+  <img src="assets/screenshots/ai-studio-overview.png" width="900" alt="Signal Market Bot AI Studio v0.4.1" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
+  <p><em>AI Studio 可观测性与运营控制台 (v0.4.1) — 真实运行时 Token 消耗分解、分位耗时统计、结构化用量看板与四大业务分组中台</em></p>
 </div>
+
+### 📸 产品导览 (Product Tour)
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="assets/screenshots/ai-studio-trace.png" alt="Runs & Trace 链路分析" style="border-radius: 8px;">
+      <br><strong>Runs & Trace 链路执行分析器</strong><br><em>抽屉式链路追踪面板，呈现单次 Turn 模型调用明细、决策归因与 Token 分解</em>
+    </td>
+    <td width="50%" align="center">
+      <img src="assets/screenshots/inbox-copilot.png" alt="客服工作台 Copilot 模式" style="border-radius: 8px;">
+      <br><strong>客服工作台 Copilot 协同与接管</strong><br><em>人机协同草稿审核、知识证据溯源链条与 4 态接管模式无缝切换</em>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="assets/screenshots/ai-settings.png" alt="AI 引擎设置" style="border-radius: 8px;">
+      <br><strong>运行时 AI 引擎参数配置</strong><br><em>通用 OpenAI 兼容接口配置、在线模型探测探针与加密凭据存储</em>
+    </td>
+    <td width="50%" align="center">
+      <img src="assets/screenshots/campaigns.png" alt="群发与营销广播" style="border-radius: 8px;">
+      <br><strong>群发活动与社群营销广播</strong><br><em>目标群组广播编辑器、静默期与防打扰策略、演练试跑验证与投递日志</em>
+    </td>
+  </tr>
+</table>
 
 ---
 
@@ -50,6 +77,14 @@
 - **受控工具与官方 MCP SDK 集成**：使用官方 Python `mcp` SDK 实现 stdio 客户端会话与工具动态发现；敏感/写操作（如退款）强制触发主管审核草稿（`draft_for_human`），禁止模型擅自执行。
 - **持续学习闭环**：捕获人工坐席对 AI 草稿的修改，自动聚合并推荐高质量知识候选，支持一键沉淀为标准 FAQ 或导出微调 JSONL 数据集。
 - **确定性契约评测套件**：内置 32 项确定性契约测试案例（`python evals/run_evals.py`），覆盖 Prompt 注入防御、人工转接、退款审批、跨语言支持与隐私隔离边界，CI 准确率保持 100%。
+
+### 🎛️ AI Studio 可观测性与运营控制台 (v0.4.1)
+- **真实运行时度量**：杜绝虚假演示数据与装饰性 0 值，看板指标、组件就绪徽章与 Token 消耗严格来源于真实运行时健康诊断与执行记录。
+- **中立多维度 Token 遥测**：完整追踪与展示 Prompt 输入、输出、缓存复用与推理思考 Token 细分，配合中立定价矩阵真实核算成本（未配置模型严谨显示未配置，不报虚假 0 元）。
+- **层级化信息架构 (IA)**：构建 4 大功能模块响应式布局：**Operate 运营**（总览、运行与轨迹、健康诊断）、**Knowledge 知识**（RAG 知识库与测试场、记忆隔离、渐进式技能）、**Automation 自动化**（工具与 MCP 治理）、**Improve 调优**（学习闭环、Prompt 版本、评测套件）。
+- **执行轨迹与单次模型调用深度排查**：完整执行日志下钻，支持决策/错误/RAG/工具多维筛选与分页，滑动抽屉呈现包含每次底层模型调用（`ai_model_calls`）的精确遥测与引用事实。
+- **实时模型连接探针与一键连通性测试**：一键发起真实探测，核验大模型往返耗时、工具调用能力、Embedding 连通性与回复预览，杜绝 Mock 伪装。
+- **评测套件持久化运行**：支持 32 项确定性契约测试与真实大模型黄金案例抽样评测（支持自定义样本量），评测历史全量落库可供比对。
 
 ### 📥 现代客服收件箱与接管
 - **双栏客服控制台**：全量会话可视化视图，支持未读计数徽标、全局会话检索与多维筛选（单聊 / 群聊 / 未读）。

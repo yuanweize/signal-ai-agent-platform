@@ -190,9 +190,9 @@ describe('AI Platform v0.4 UI Components', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('AI Platform v0.4 Studio')).toBeInTheDocument();
+      expect(screen.getByText('AI Studio v0.4.1')).toBeInTheDocument();
       expect(screen.getByText('125')).toBeInTheDocument();
-      expect(screen.getByText('82.0%')).toBeInTheDocument();
+      expect(screen.getByText('82%')).toBeInTheDocument();
     });
 
     // Switch to Progressive Skills tab

@@ -17,15 +17,42 @@
 
 ---
 
+---
+
 <div align="center">
-  <img src="assets/admin_overview.png" width="900" alt="Signal Market Bot Admin Overview" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
-  <p><em>Signal Market Bot Executive Console — Real-time operational telemetry, messaging volume, marketing broadcasts, and product metrics</em></p>
+  <img src="assets/screenshots/admin-overview.png" width="900" alt="Signal Market Bot Admin Overview" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
+  <p><em>Signal Market Bot Executive Console — Real-time operational telemetry, messaging volume, module health, and catalog metrics</em></p>
 </div>
 
 <div align="center">
-  <img src="assets/ai_engine_setting.png" width="900" alt="Signal Market Bot AI Engine Configuration" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
-  <p><em>Runtime AI Engine Configuration — Universal OpenAI-compatible endpoint integration, temperature tuning, dynamic prompt injection, and hot reloading</em></p>
+  <img src="assets/screenshots/ai-studio-overview.png" width="900" alt="Signal Market Bot AI Studio v0.4.1" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
+  <p><em>AI Studio Observability & Operations Console (v0.4.1) — Truthful token telemetry, latency percentiles, structured usage breakdown, and 4-group management workflow</em></p>
 </div>
+
+### 📸 Product Tour
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="assets/screenshots/ai-studio-trace.png" alt="Runs & Trace Inspector" style="border-radius: 8px;">
+      <br><strong>Runs & Trace Inspector</strong><br><em>Slide-over execution inspector with per-call model telemetry & token breakdown</em>
+    </td>
+    <td width="50%" align="center">
+      <img src="assets/screenshots/inbox-copilot.png" alt="Inbox Copilot & Takeover" style="border-radius: 8px;">
+      <br><strong>Inbox Copilot & Takeover</strong><br><em>Human-in-the-loop assisted draft review, provenance tracking, and takeover controls</em>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="assets/screenshots/ai-settings.png" alt="AI Engine Configuration" style="border-radius: 8px;">
+      <br><strong>Runtime AI Engine Settings</strong><br><em>Universal OpenAI-compatible configuration, model probing, and encrypted storage</em>
+    </td>
+    <td width="50%" align="center">
+      <img src="assets/screenshots/campaigns.png" alt="Targeted Broadcast Campaigns" style="border-radius: 8px;">
+      <br><strong>Targeted Broadcast Campaigns</strong><br><em>Smart group broadcasting composer with dry-run verification and delivery analytics</em>
+    </td>
+  </tr>
+</table>
 
 ---
 
@@ -50,6 +77,14 @@ With **AI Platform v0.4**, the system introduces an agentic architecture powered
 - **Governed Tools & Model Context Protocol (MCP)**: Official Python `mcp` SDK stdio client integration. Sensitive tools (e.g. refunds) trigger supervisor drafts (`draft_for_human`) rather than autonomous execution.
 - **Human-in-the-Loop Learning Loop**: Detects operator edits, curates learning candidates, allows one-click FAQ promotion, and exports fine-tuning JSONL datasets.
 - **Deterministic Contract Evaluation**: 32-case deterministic evaluation suite (`python evals/run_evals.py`) scoring pass rate, decision accuracy, keyword recall, and latency with 100% CI pass rate.
+
+### 🎛️ AI Studio Observability & Operations Console (v0.4.1)
+- **Truthful Runtime Telemetry**: Zero mock data, zero placeholder metrics. Dashboard metrics, component status badges, and token usage reflect real runtime diagnostics.
+- **Provider-Neutral Token Telemetry**: Complete token breakdowns (`input`, `output`, `cached`, `reasoning`) and realistic pricing estimation with fallback for unconfigured models.
+- **Hierarchical Information Architecture**: Streamlined 4-group workflow: **Operate** (Overview, Runs & Traces, Diagnostics), **Knowledge** (RAG Knowledge, Memory, Skills), **Automation** (Tools & MCP), and **Improve** (Learning Loop, Prompts, Evaluations).
+- **Runs & Model-Call Trace Explorer**: Full execution tracing with decision/error filters, token inspection, and per-turn model call breakdown (`ai_model_calls`).
+- **Interactive Live Diagnostics**: Instant probe testing for live LLM providers verifying connection latency, tool execution, embeddings, and token consumption.
+- **Golden Evaluation Suite**: Persisted evaluation runs with dual-mode benchmark support (32 deterministic invariant test cases + configurable live LLM evaluations).
 
 ### 📥 Support Inbox & Takeover
 - **Dual-Pane Conversation Console**: Complete customer conversation visibility with unread counters, message search, and type filters (DMs / Groups / Unread).

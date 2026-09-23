@@ -17,6 +17,7 @@ from app.ai.runtime.decisions import AgentDecision
 from app.ai.skills.registry import skill_registry
 from app.ai.tools import builtin as _builtin_tools  # noqa: F401
 from app.ai.tools.registry import tool_registry
+from app.ai.types.usage import LLMResult, LLMToolResult, ModelCallRecord, TokenUsage
 
 logger = logging.getLogger("ai.orchestration.graph")
 
@@ -118,17 +119,49 @@ def build_agent_graph(
         text = (state.get("text") or "").lower()
         results: list[dict[str, Any]] = []
         proposed_calls: list[dict[str, Any]] = []
+        model_call_records: list[dict[str, Any]] = list(state.get("model_calls") or [])
 
         allowed_schemas = tool_registry.get_openai_tools()
 
         # 1. Attempt model/tool planner selection via native tool calling if supported (Section 8, 11)
         if hasattr(llm, "tool_generate") and allowed_schemas:
+            import time
+
+            t_plan_start = time.perf_counter()
             try:
                 user_msg = [{"role": "user", "content": state.get("text") or ""}]
-                _, model_calls, _ = await asyncio.wait_for(
+                call_res = await asyncio.wait_for(
                     llm.tool_generate(user_msg, allowed_schemas),
                     timeout=8.0,
                 )
+                if isinstance(call_res, LLMToolResult):
+                    model_calls = call_res.tool_calls
+                    rec = ModelCallRecord(
+                        phase="tool_planner",
+                        provider=getattr(llm, "provider_name", "unknown"),
+                        model=call_res.model or getattr(llm, "default_model", "default"),
+                        latency_ms=call_res.latency_ms,
+                        usage=call_res.usage,
+                        finish_reason=call_res.finish_reason,
+                        provider_request_id=call_res.provider_request_id,
+                        success=True,
+                    )
+                    model_call_records.append(rec.to_dict())
+                else:
+                    _, model_calls, t_tokens = call_res
+                    rec = ModelCallRecord(
+                        phase="tool_planner",
+                        provider=getattr(llm, "provider_name", "unknown"),
+                        model=getattr(llm, "default_model", "default"),
+                        latency_ms=round((time.perf_counter() - t_plan_start) * 1000),
+                        usage=TokenUsage(
+                            total_tokens=t_tokens,
+                            usage_source="provider" if t_tokens else "unavailable",
+                        ),
+                        success=True,
+                    )
+                    model_call_records.append(rec.to_dict())
+
                 if model_calls:
                     for mc in model_calls:
                         proposed_calls.append(
@@ -138,9 +171,21 @@ def build_agent_graph(
                             }
                         )
             except Exception as e:
+                plan_latency = round((time.perf_counter() - t_plan_start) * 1000)
+                err_msg = str(e)[:256]
                 logger.debug(
-                    f"Model tool calling unavailable or failed ({e}); falling back to deterministic intent routing."
+                    f"Model tool calling unavailable or failed ({err_msg}); falling back to deterministic intent routing."
                 )
+                failed_rec = ModelCallRecord(
+                    phase="tool_planner",
+                    provider=getattr(llm, "provider_name", "unknown"),
+                    model=getattr(llm, "default_model", "default"),
+                    latency_ms=plan_latency,
+                    usage=TokenUsage(usage_source="unavailable"),
+                    success=False,
+                    error=err_msg,
+                )
+                model_call_records.append(failed_rec.to_dict())
 
         # 2. Fallback deterministic business routing for critical built-in & MCP flows (Section 11)
         if not proposed_calls:
@@ -262,6 +307,7 @@ def build_agent_graph(
         return {
             "tool_calls": executed_calls,
             "tool_results": results,
+            "model_calls": model_call_records,
         }
 
     async def generate_response_node(state: AgentState) -> dict[str, Any]:
@@ -273,15 +319,23 @@ def build_agent_graph(
             r.get("output", {}).get("status") == "requires_approval" for r in tool_results
         )
 
+        model_call_records: list[dict[str, Any]] = list(state.get("model_calls") or [])
+
         if "human-handoff" in (state.get("selected_skills") or []) or any(
             w in text for w in ["human", "agent", "representative", "manager", "person", "staff"]
         ):
+            # Aggregate any planner model calls already made
+            agg_handoff = TokenUsage.combine(
+                TokenUsage(**(mc.get("usage") or {})) for mc in model_call_records
+            )
             return {
                 "draft": "I understand you would like to speak to a representative. I am notifying our support team now.",
                 "decision": AgentDecision.handoff.value,
                 "decision_reason": "user_requested_human",
                 "confidence": None,
-                "tokens": 25,
+                "tokens": agg_handoff.total_tokens or 0,
+                "model_calls": model_call_records,
+                "usage": agg_handoff.to_dict(),
             }
 
         # 2. Build prompt context
@@ -335,7 +389,46 @@ def build_agent_graph(
             current_user_msg = text
         messages.append({"role": "user", "content": current_user_msg})
 
-        reply, tokens = await llm.generate(messages)
+        gen_res = await llm.generate(messages)
+        if isinstance(gen_res, LLMResult):
+            reply = gen_res.content
+            rec = ModelCallRecord(
+                phase="response_generation",
+                provider=getattr(llm, "provider_name", "unknown"),
+                model=gen_res.model or getattr(llm, "default_model", "default"),
+                latency_ms=gen_res.latency_ms,
+                usage=gen_res.usage,
+                finish_reason=gen_res.finish_reason,
+                provider_request_id=gen_res.provider_request_id,
+                success=True,
+            )
+            model_call_records.append(rec.to_dict())
+        else:
+            reply, tokens = gen_res
+            rec = ModelCallRecord(
+                phase="response_generation",
+                provider=getattr(llm, "provider_name", "unknown"),
+                model=getattr(llm, "default_model", "default"),
+                latency_ms=0,
+                usage=TokenUsage(
+                    total_tokens=tokens, usage_source="provider" if tokens else "unavailable"
+                ),
+                success=True,
+            )
+            model_call_records.append(rec.to_dict())
+
+        # Aggregate tokens across ALL model calls in this turn
+        aggregated_usage = TokenUsage.combine(
+            TokenUsage(
+                input_tokens=(mc.get("usage") or {}).get("input_tokens"),
+                output_tokens=(mc.get("usage") or {}).get("output_tokens"),
+                total_tokens=(mc.get("usage") or {}).get("total_tokens"),
+                cached_input_tokens=(mc.get("usage") or {}).get("cached_input_tokens"),
+                reasoning_tokens=(mc.get("usage") or {}).get("reasoning_tokens"),
+                usage_source=(mc.get("usage") or {}).get("usage_source", "unavailable"),
+            )
+            for mc in model_call_records
+        )
 
         # 3. Determine decision & reason
         mode = state.get("mode", "auto")
@@ -357,7 +450,9 @@ def build_agent_graph(
             "decision": decision,
             "decision_reason": decision_reason,
             "confidence": None,
-            "tokens": tokens,
+            "tokens": aggregated_usage.total_tokens or 0,
+            "model_calls": model_call_records,
+            "usage": aggregated_usage.to_dict(),
         }
 
     # Assemble Graph

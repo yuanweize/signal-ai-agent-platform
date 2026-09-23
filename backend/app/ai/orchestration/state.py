@@ -39,3 +39,7 @@ class AgentState(TypedDict, total=False):
     citations: list[dict[str, Any]]
     tokens: int
     error: str | None
+
+    # Telemetry & per-call model execution records
+    model_calls: list[dict[str, Any]]
+    usage: dict[str, Any]

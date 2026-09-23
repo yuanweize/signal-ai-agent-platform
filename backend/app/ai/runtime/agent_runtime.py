@@ -235,13 +235,14 @@ class AgentRuntime:
 
             error_msg: str | None = None
             try:
+                graph_timeout = max(45.0, float(getattr(self.llm, "timeout", 30.0)) + 15.0)
                 output_state = await asyncio.wait_for(
                     self.graph.ainvoke(initial_state),
-                    timeout=15.0,
+                    timeout=graph_timeout,
                 )
             except TimeoutError:
                 logger.error(f"Agent graph execution timed out for conv #{context.conversation_id}")
-                error_msg = "Agent execution timed out (15s limit reached)"
+                error_msg = "Agent execution timed out (limit reached)"
                 output_state = {
                     "draft": "I am looking into this for you. A customer service representative will assist you shortly.",
                     "decision": AgentDecision.handoff.value,
@@ -295,6 +296,10 @@ class AgentRuntime:
             model_name = getattr(self.llm_provider, "default_model", "default")
             provider_name = getattr(self.llm_provider, "provider_name", "unknown")
 
+            usage_dict = output_state.get("usage") or {}
+            model_calls = output_state.get("model_calls") or []
+            traffic_source = getattr(context, "traffic_source", "production")
+
             # 7. Record AIRun trace
             run_record = await local_tracer.record_run(
                 session=session,
@@ -313,6 +318,15 @@ class AgentRuntime:
                 latency_ms=latency_ms,
                 tokens=output_state.get("tokens", 0),
                 errors=error_msg,
+                input_tokens=usage_dict.get("input_tokens"),
+                output_tokens=usage_dict.get("output_tokens"),
+                total_tokens=usage_dict.get("total_tokens") or output_state.get("tokens"),
+                cached_input_tokens=usage_dict.get("cached_input_tokens"),
+                reasoning_tokens=usage_dict.get("reasoning_tokens"),
+                llm_call_count=len(model_calls),
+                usage_source=usage_dict.get("usage_source", "unavailable"),
+                traffic_source=traffic_source,
+                model_calls=model_calls,
             )
             run_id = run_record.id
 
@@ -394,7 +408,16 @@ class AgentRuntime:
                 tools_called=enriched_tool_calls,
                 citations=citations,
                 latency_ms=latency_ms,
-                tokens=output_state.get("tokens", 0),
+                tokens=run_record.total_tokens or output_state.get("tokens", 0),
+                input_tokens=run_record.input_tokens,
+                output_tokens=run_record.output_tokens,
+                total_tokens=run_record.total_tokens,
+                cached_input_tokens=run_record.cached_input_tokens,
+                reasoning_tokens=run_record.reasoning_tokens,
+                usage_source=run_record.usage_source,
+                estimated_cost=run_record.estimated_cost,
+                cost_currency=run_record.cost_currency,
+                model_calls=model_calls,
                 trace_id=trace_id,
                 ai_run_id=run_id,
                 ai_suggestion_id=sug_id,

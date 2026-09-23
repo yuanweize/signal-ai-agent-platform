@@ -253,12 +253,38 @@ class MCPClientManager:
             "transport": transport,
             "command_or_url": command_or_url,
             "tools_count": len(tools),
+            "tools": tools,
             "session": session,
             "ctx": ctx,
+            "last_connected_at": datetime.now(UTC).replace(tzinfo=None),
         }
         return tools
 
+    def get_server_tools(self, name: str) -> list[dict[str, Any]]:
+        srv = self._active_servers.get(name)
+        if not srv:
+            return []
+        tools: list[DiscoveredMCPTool] = srv.get("tools") or []
+        return [
+            {
+                "name": t.name,
+                "description": t.description,
+                "parameters_schema": t.parameters_schema,
+                "server_name": t.server_name,
+                "read_only": t.read_only,
+                "requires_approval": t.requires_approval,
+            }
+            for t in tools
+        ]
+
     async def disconnect_server(self, name: str) -> bool:
+        from app.ai.tools.registry import tool_registry
+
+        # Lifecycle guarantee: Unregister all tools belonging to this MCP server
+        removed_count = tool_registry.unregister_server_tools(name)
+        if removed_count:
+            logger.info(f"Unregistered {removed_count} tool(s) for MCP server '{name}'")
+
         if name in self._active_servers:
             server_info = self._active_servers.pop(name)
             session = server_info.get("session")
