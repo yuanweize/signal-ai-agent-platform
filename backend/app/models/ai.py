@@ -93,9 +93,26 @@ class AIRun(Base):
         DateTime, server_default=func.now(), nullable=False, index=True
     )
 
+    # Structured token usage & cost telemetry (v0.4.1)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cached_input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reasoning_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    llm_call_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    usage_source: Mapped[str] = mapped_column(String(32), default="unavailable", nullable=False)
+    estimated_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cost_currency: Mapped[str | None] = mapped_column(String(8), default="USD", nullable=True)
+    traffic_source: Mapped[str] = mapped_column(
+        String(32), default="production", nullable=False, index=True
+    )
+
     conversation = relationship("Conversation", foreign_keys=[conversation_id], lazy="selectin")
     suggestions = relationship("AISuggestion", back_populates="ai_run", lazy="selectin")
     tool_invocations = relationship("ToolInvocation", back_populates="ai_run", lazy="selectin")
+    model_calls = relationship(
+        "AIModelCall", back_populates="ai_run", lazy="selectin", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<AIRun(id={self.id}, trace='{self.trace_id}', decision='{self.decision}', model='{self.model}')>"
@@ -292,6 +309,15 @@ class MemoryItem(Base):
         return getattr(self, key)
 
     def to_dict(self) -> dict[str, Any]:
+        imp = self.importance
+        if imp is not None:
+            try:
+                imp = int(round(float(imp)))
+            except Exception:
+                imp = 3
+        else:
+            imp = 3
+
         return {
             "id": self.id,
             "scope_type": self.scope_type,
@@ -299,7 +325,7 @@ class MemoryItem(Base):
             "memory_type": self.memory_type,
             "content": self.content,
             "confidence": self.confidence,
-            "importance": self.importance,
+            "importance": imp,
             "sensitivity": self.sensitivity,
             "status": self.status,
         }
@@ -467,3 +493,103 @@ class ToolInvocation(Base):
 
     def __repr__(self) -> str:
         return f"<ToolInvocation(id={self.id}, tool='{self.tool_name}', status='{self.status}')>"
+
+
+class AIModelCall(Base):
+    """Detailed telemetry record for each individual model invocation during an AI turn."""
+
+    __tablename__ = "ai_model_calls"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    ai_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ai_runs.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    phase: Mapped[str] = mapped_column(
+        String(32), nullable=False
+    )  # tool_planner, response_generation, diagnostics, other
+    provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cached_input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reasoning_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    usage_source: Mapped[str] = mapped_column(String(32), default="unavailable", nullable=False)
+
+    finish_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    provider_request_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    success: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    estimated_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(8), default="USD", nullable=True)
+
+    ai_run = relationship("AIRun", back_populates="model_calls")
+
+    def __repr__(self) -> str:
+        return f"<AIModelCall(id={self.id}, run={self.ai_run_id}, phase='{self.phase}', tokens={self.total_tokens})>"
+
+
+class EvaluationRun(Base):
+    """Historical benchmark and evaluation suite execution run."""
+
+    __tablename__ = "evaluation_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    eval_type: Mapped[str] = mapped_column(String(32), nullable=False)  # deterministic | live
+    provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    dataset_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False, index=True
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    total_cases: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    passed_cases: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    pass_rate: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    decision_accuracy: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    avg_latency_ms: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    estimated_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cost_currency: Mapped[str | None] = mapped_column(String(8), default="USD", nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="completed", nullable=False)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    case_results = relationship(
+        "EvaluationCaseResult",
+        back_populates="run",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+    )
+
+    def __repr__(self) -> str:
+        return f"<EvaluationRun(id={self.id}, type='{self.eval_type}', pass_rate={self.pass_rate})>"
+
+
+class EvaluationCaseResult(Base):
+    """Result of an individual test case in an evaluation run."""
+
+    __tablename__ = "evaluation_case_results"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("evaluation_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    case_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)  # PASS | FAIL | ERROR
+    expected_decision: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    actual_decision: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    run = relationship("EvaluationRun", back_populates="case_results", lazy="selectin")
+
+    def __repr__(self) -> str:
+        return f"<EvaluationCaseResult(id={self.id}, run={self.run_id}, case='{self.case_id}', status='{self.status}')>"

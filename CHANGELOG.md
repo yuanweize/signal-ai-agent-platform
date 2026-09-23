@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.4.1] - 2026-09-23
+
+### AI Studio Product Completion & Observability (v0.4.1 Release)
+
+#### Highlights
+- **Truthful Runtime Observability**: Eliminated all mock metrics, decorative zeroes, and hardcoded 'Enterprise Production' badges. AI Studio operational telemetry and readiness badges are strictly derived from live component health checks, database diagnostics, and execution records.
+- **Provider-Neutral Token Telemetry**: Added exact usage breakdowns (`input_tokens`, `output_tokens`, `total_tokens`, `cached_input_tokens`, `reasoning_tokens`) across LLM providers, graph orchestration nodes, and persisted traces (`ai_runs` and `ai_model_calls`). Removed synthetic `len // 4` token estimates.
+- **Truthful Pricing Engine**: Realistic cost calculation with provider-neutral pricing matrices and graceful fallback to `None` for unconfigured custom models (preventing misleading zero-cost figures).
+- **Responsive 4-Group Information Architecture**: Reorganized AI Studio console into **Operate** (Overview, Runs & Traces, Diagnostics), **Knowledge** (RAG Knowledge, Scoped Memory, Progressive Skills), **Automation** (Tools & MCP Governance), and **Improve** (Learning Loop, Prompt Versions, Evaluation Suite).
+- **Runs & Traces Explorer**: Comprehensive execution tracing with decision filtering, error filtering, RAG/tool usage filters, pagination, and slide-over execution inspector with per-model-call execution traces and citations.
+- **Interactive Provider Diagnostics**: Real-time component health checks and live provider probes measuring latency, tool calling, embeddings, response preview, and token telemetry with zero mock responses.
+- **RAG Vector Search Playground & Scoped Memory**: Interactive vector search testing and memory management supporting scoped isolation across user, group, and global contexts.
+- **Learning Loop & Fine-Tuning Pipeline**: Safe promotion of learning candidates into knowledge sources (requiring explicit privacy confirmation) or exportable training datasets with JSONL download.
+- **Live Evaluation Suite & Run Persistence**: Golden benchmark runner supporting deterministic contract invariants (32 cases) and live provider evaluation with case limits and evaluation history persistence.
+- **Linear Migration `f3b4c5d6e7f8`**: Upgrades `ai_runs` with token breakdowns, traffic sources, and cost estimates, and creates `ai_model_calls`, `evaluation_runs`, and `evaluation_case_results`.
+
+---
+
 ## [v0.4.0] - 2026-09-23
 
 ### AI Customer Service & Conversational Commerce Platform (v0.4.0 Final Release)

@@ -35,6 +35,16 @@ class AgentResponse:
 
     latency_ms: int = 0
     tokens: int = 0
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+    cached_input_tokens: int | None = None
+    reasoning_tokens: int | None = None
+    usage_source: str = "unavailable"
+    estimated_cost: float | None = None
+    cost_currency: str = "USD"
+    model_calls: list[dict] = field(default_factory=list)
+
     trace_id: str = ""
     ai_run_id: int | None = None
     ai_suggestion_id: int | None = None

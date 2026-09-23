@@ -80,4 +80,33 @@ Located in [`backend/app/ai/mcp/client.py`](../backend/app/ai/mcp/client.py):
 Located in [`backend/app/ai/observability/`](../backend/app/ai/observability/):
 - **Trace Persistence**: Every AI interaction logs an `AIRun` record capturing requested model, effective provider, prompt version, retrieved chunks, memories, tool calls, decision reason, tokens, and latency.
 - **No Hardcoded Metrics**: Dashboard metrics (such as RAG hit rate) are dynamically computed from stored traces. If no traces exist, `null` is returned rather than misleading hardcoded numbers.
-- **Diagnostics API**: `GET /api/ai-studio/diagnostics` reports live observable status (`configured`, `connected`, `degraded`, `disabled`) for LLM, Embedding, Qdrant, MCP, and Signal Gateway.
+- **Diagnostics API**: `GET /api/ai-studio/diagnostics` reports live observable status (`configured`, `connected`, `live_verified`, `degraded`, `disabled`, `not_validated`) for LLM, Embedding, Qdrant, MCP, and Signal Gateway.
+
+---
+
+## 7. AI Studio v0.4.1 Product Completion & Observability
+
+### Provider-Neutral Token Telemetry
+Located in [`backend/app/ai/types/usage.py`](../backend/app/ai/types/usage.py) and [`backend/app/ai/telemetry/pricing.py`](../backend/app/ai/telemetry/pricing.py):
+- **Token Telemetry Breakdown**: Standardized `TokenUsage` tracks `input_tokens`, `output_tokens`, `total_tokens`, `cached_input_tokens`, and `reasoning_tokens`.
+- **Elimination of Fallback Estimates**: Removed heuristic `len // 4` token estimates. Unreported usage is recorded strictly with `usage_source='unavailable'`.
+- **Per-Model-Call Trace Persistence**: Individual LLM queries within LangGraph turns (e.g. planner phase, response generation phase) persist dedicated `AIModelCall` records linked to the parent `AIRun`.
+- **Realistic Cost Model**: Truthful pricing matrix covering major model families with graceful fallback to `None` for unconfigured models (no deceptive zero-cost reports).
+
+### Responsive Information Architecture
+Organized into 4 operational groups in `AIStudioPage.tsx`:
+1. **Operate**:
+   - **Overview**: Real-time KPI summary (Total Runs, P50/P95/P99 latency, token split, cost or truthful unconfigured badge, error rate).
+   - **Runs & Traces**: Filterable execution log with pagination, status filters, and trace inspector drawer with per-model-call telemetry and citations.
+   - **Diagnostics & Live Test**: Component health cards and interactive live provider probe measuring roundtrip latency, tool invocation, embeddings, and response preview.
+2. **Knowledge**:
+   - **RAG Knowledge Base & Search Playground**: Document sources, relational-to-vector reindexing, and vector similarity search playground.
+   - **Scoped Durable Memory**: Scope-filtered memory inspector (`all`, `user`, `group`, `global`) with manual deletion and privacy protection.
+   - **Progressive Skills**: Live skill activation toggles persisted to backend.
+3. **Automation**:
+   - **Governed Tools & MCP**: Registered native tools, active MCP stdio servers, tool schemas, and sensitive action approval gates.
+4. **Improve**:
+   - **Learning Loop**: Curation of operator edits into learning candidates, privacy-guarded promotion to knowledge FAQ, and fine-tuning dataset export (JSONL).
+   - **Prompt Management**: Versioned system prompt history and activation.
+   - **Evaluation Suite**: Deterministic 32-case invariant benchmark runner and live LLM golden case evaluator with persistent run history.
+

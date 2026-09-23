@@ -51,6 +51,14 @@ With **AI Platform v0.4**, the system introduces an agentic architecture powered
 - **Human-in-the-Loop Learning Loop**: Detects operator edits, curates learning candidates, allows one-click FAQ promotion, and exports fine-tuning JSONL datasets.
 - **Deterministic Contract Evaluation**: 32-case deterministic evaluation suite (`python evals/run_evals.py`) scoring pass rate, decision accuracy, keyword recall, and latency with 100% CI pass rate.
 
+### 🎛️ AI Studio Observability & Operations Console (v0.4.1)
+- **Truthful Runtime Telemetry**: Zero mock data, zero placeholder metrics. Dashboard metrics, component status badges, and token usage reflect real runtime diagnostics.
+- **Provider-Neutral Token Telemetry**: Complete token breakdowns (`input`, `output`, `cached`, `reasoning`) and realistic pricing estimation with fallback for unconfigured models.
+- **Hierarchical Information Architecture**: Streamlined 4-group workflow: **Operate** (Overview, Runs & Traces, Diagnostics), **Knowledge** (RAG Knowledge, Memory, Skills), **Automation** (Tools & MCP), and **Improve** (Learning Loop, Prompts, Evaluations).
+- **Runs & Model-Call Trace Explorer**: Full execution tracing with decision/error filters, token inspection, and per-turn model call breakdown (`ai_model_calls`).
+- **Interactive Live Diagnostics**: Instant probe testing for live LLM providers verifying connection latency, tool execution, embeddings, and token consumption.
+- **Golden Evaluation Suite**: Persisted evaluation runs with dual-mode benchmark support (32 deterministic invariant test cases + configurable live LLM evaluations).
+
 ### 📥 Support Inbox & Takeover
 - **Dual-Pane Conversation Console**: Complete customer conversation visibility with unread counters, message search, and type filters (DMs / Groups / Unread).
 - **4-State Takeover Engine**: Seamlessly toggle between **Auto (AI)**, **Copilot (Assisted Drafts)**, **Manual (Human Only)**, and **Paused (Mute)** with pre-send state locks.

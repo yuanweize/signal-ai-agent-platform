@@ -20,14 +20,24 @@ import type {
   AISuggestionDTO,
   AIRunExplainabilityDTO,
   AIOverviewMetricsDTO,
+  AIRunDTO,
+  UsageSummaryDTO,
+  UsageTimeseriesPointDTO,
+  ModelUsageItemDTO,
   KnowledgeSourceDTO,
+  KnowledgeSourceDetailDTO,
+  RAGSearchResultDTO,
   MemoryItemDTO,
   SkillDTO,
   MCPServerDTO,
+  MCPServerDetailDTO,
   LearningCandidateDTO,
   EvaluationSummaryDTO,
+  EvaluationRunDTO,
   PromptVersionDTO,
   AIDiagnosticsDTO,
+  ProviderLiveTestResultDTO,
+  TrainingStatsDTO,
 } from './types/ai';
 
 interface ApiOptions {
@@ -488,12 +498,73 @@ class ApiClient {
 
   // --- AI Studio Management Console APIs ---
 
-  async getAIOverview() {
-    return this.request<AIOverviewMetricsDTO>('/ai-studio/overview');
+  async getAIOverview(timeRange = '24h') {
+    return this.request<AIOverviewMetricsDTO>(`/ai-studio/overview?time_range=${encodeURIComponent(timeRange)}`);
+  }
+
+  async getAIRuns(params: {
+    limit?: number;
+    offset?: number;
+    time_range?: string;
+    decision?: string;
+    model?: string;
+    provider?: string;
+    prompt_version?: string;
+    has_error?: boolean;
+    used_rag?: boolean;
+    used_tools?: boolean;
+    conversation_id?: number;
+    traffic_source?: string;
+  } = {}) {
+    const q = new URLSearchParams();
+    if (params.limit !== undefined) q.append('limit', String(params.limit));
+    if (params.offset !== undefined) q.append('offset', String(params.offset));
+    if (params.time_range) q.append('time_range', params.time_range);
+    if (params.decision) q.append('decision', params.decision);
+    if (params.model) q.append('model', params.model);
+    if (params.provider) q.append('provider', params.provider);
+    if (params.prompt_version) q.append('prompt_version', params.prompt_version);
+    if (params.has_error !== undefined) q.append('has_error', String(params.has_error));
+    if (params.used_rag !== undefined) q.append('used_rag', String(params.used_rag));
+    if (params.used_tools !== undefined) q.append('used_tools', String(params.used_tools));
+    if (params.conversation_id !== undefined) q.append('conversation_id', String(params.conversation_id));
+    if (params.traffic_source) q.append('traffic_source', params.traffic_source);
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return this.request<AIRunDTO[]>(`/ai-studio/runs${qs}`);
+  }
+
+  async getAIRunDetail(runId: number) {
+    return this.request<AIRunDTO>(`/ai-studio/runs/${runId}`);
+  }
+
+  async getUsageSummary(params: { time_range?: string; model?: string; provider?: string } = {}) {
+    const q = new URLSearchParams();
+    if (params.time_range) q.append('time_range', params.time_range);
+    if (params.model) q.append('model', params.model);
+    if (params.provider) q.append('provider', params.provider);
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return this.request<UsageSummaryDTO>(`/ai-studio/usage/summary${qs}`);
+  }
+
+  async getUsageTimeseries(params: { time_range?: string; model?: string; provider?: string } = {}) {
+    const q = new URLSearchParams();
+    if (params.time_range) q.append('time_range', params.time_range);
+    if (params.model) q.append('model', params.model);
+    if (params.provider) q.append('provider', params.provider);
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return this.request<UsageTimeseriesPointDTO[]>(`/ai-studio/usage/timeseries${qs}`);
+  }
+
+  async getUsageModels(timeRange = '24h') {
+    return this.request<ModelUsageItemDTO[]>(`/ai-studio/usage/models?time_range=${encodeURIComponent(timeRange)}`);
   }
 
   async getKnowledgeSources() {
     return this.request<KnowledgeSourceDTO[]>('/ai-studio/knowledge/sources');
+  }
+
+  async getKnowledgeSourceDetail(sourceId: number) {
+    return this.request<KnowledgeSourceDetailDTO>(`/ai-studio/knowledge/sources/${sourceId}`);
   }
 
   async createKnowledgeSource(data: { title: string; source_type: string; language?: string }) {
@@ -501,6 +572,19 @@ class ApiClient {
       method: 'POST',
       body: data,
     });
+  }
+
+  async deleteKnowledgeSource(sourceId: number) {
+    return this.request<{ ok: boolean; source_id: number }>(`/ai-studio/knowledge/sources/${sourceId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async reindexKnowledgeSource(sourceId: number) {
+    return this.request<{ ok: boolean; indexed_documents: number; indexed_chunks: number }>(
+      `/ai-studio/knowledge/sources/${sourceId}/reindex`,
+      { method: 'POST' }
+    );
   }
 
   async ingestKnowledgeDoc(
@@ -523,16 +607,46 @@ class ApiClient {
     );
   }
 
+  async deleteKnowledgeDoc(sourceId: number, docId: number) {
+    return this.request<{ ok: boolean; document_id: number }>(
+      `/ai-studio/knowledge/sources/${sourceId}/documents/${docId}`,
+      {
+        method: 'DELETE',
+      }
+    );
+  }
+
+  async searchKnowledge(query: string, scopeType?: string, scopeId?: string, limit = 5) {
+    const q = new URLSearchParams({ query, limit: String(limit) });
+    if (scopeType) q.append('scope_type', scopeType);
+    if (scopeId) q.append('scope_id', scopeId);
+    return this.request<RAGSearchResultDTO[]>(`/ai-studio/knowledge/search?${q.toString()}`);
+  }
+
   async getMemories(scopeType?: string, scopeId?: string) {
     const q = new URLSearchParams();
-    if (scopeType) q.append('scope_type', scopeType);
+    if (scopeType && scopeType !== 'all') q.append('scope_type', scopeType);
     if (scopeId) q.append('scope_id', scopeId);
     const qs = q.toString() ? `?${q.toString()}` : '';
     return this.request<MemoryItemDTO[]>(`/ai-studio/memory${qs}`);
   }
 
+  async createMemory(data: {
+    scope_type: string;
+    scope_id: string;
+    content: string;
+    memory_type: string;
+    importance?: number;
+    sensitivity?: string;
+  }) {
+    return this.request<MemoryItemDTO>('/ai-studio/memory', {
+      method: 'POST',
+      body: data,
+    });
+  }
+
   async deleteMemory(memoryId: number) {
-    return this.request<{ ok: boolean }>(`/ai-studio/memory/${memoryId}`, {
+    return this.request<{ ok: boolean; memory_id?: number }>(`/ai-studio/memory/${memoryId}`, {
       method: 'DELETE',
     });
   }
@@ -555,11 +669,40 @@ class ApiClient {
     return this.request<MCPServerDTO[]>('/ai-studio/mcp/servers');
   }
 
+  async getMCPServerDetail(serverId: number) {
+    return this.request<MCPServerDetailDTO>(`/ai-studio/mcp/servers/${serverId}`);
+  }
+
+  async createMCPServer(data: {
+    name: string;
+    transport_type: string;
+    endpoint_url?: string;
+    command?: string;
+  }) {
+    return this.request<MCPServerDTO>('/ai-studio/mcp/servers', {
+      method: 'POST',
+      body: data,
+    });
+  }
+
   async testMCPServer(serverId: number) {
     return this.request<{ ok: boolean; status: string; latency_ms?: number }>(
       `/ai-studio/mcp/servers/${serverId}/connect`,
       { method: 'POST' }
     );
+  }
+
+  async toggleMCPServer(serverId: number, isEnabled: boolean) {
+    return this.request<{ ok: boolean; is_enabled: boolean }>(`/ai-studio/mcp/servers/${serverId}`, {
+      method: 'PATCH',
+      body: { is_enabled: isEnabled },
+    });
+  }
+
+  async deleteMCPServer(serverId: number) {
+    return this.request<{ ok: boolean; server_id: number }>(`/ai-studio/mcp/servers/${serverId}`, {
+      method: 'DELETE',
+    });
   }
 
   async getLearningCandidates(status?: string) {
@@ -573,9 +716,9 @@ class ApiClient {
     faqQ?: string,
     faqA?: string,
     scopeType = 'global',
-    confirmGlobalPrivacy = true
+    confirmGlobalPrivacy = false
   ) {
-    return this.request<{ ok: boolean; status?: string; promoted_candidate_id?: number }>(
+    return this.request<{ ok: boolean; status?: string; promoted_candidate_id?: number; message?: string }>(
       `/ai-studio/learning/candidates/${candidateId}/promote`,
       {
         method: 'POST',
@@ -590,6 +733,17 @@ class ApiClient {
     );
   }
 
+  async rejectLearningCandidate(candidateId: number) {
+    return this.request<{ ok: boolean; candidate_id: number }>(
+      `/ai-studio/learning/candidates/${candidateId}/reject`,
+      { method: 'POST' }
+    );
+  }
+
+  async getTrainingStats() {
+    return this.request<TrainingStatsDTO>('/ai-studio/learning/training-stats');
+  }
+
   async exportTrainingJSONL() {
     return this.request<{ jsonl: string; count: number } | string>('/ai-studio/learning/training-export');
   }
@@ -601,8 +755,19 @@ class ApiClient {
     });
   }
 
+  async getEvaluationRuns() {
+    return this.request<EvaluationRunDTO[]>('/ai-studio/evals/runs');
+  }
+
   async getPromptVersions() {
     return this.request<PromptVersionDTO[]>('/ai-studio/prompts/versions');
+  }
+
+  async createPromptVersion(data: { version: string; name: string; template: string }) {
+    return this.request<PromptVersionDTO>('/ai-studio/prompts/versions', {
+      method: 'POST',
+      body: data,
+    });
   }
 
   async activatePromptVersion(version: string) {
@@ -614,6 +779,13 @@ class ApiClient {
 
   async getAIDiagnostics() {
     return this.request<AIDiagnosticsDTO>('/ai-studio/diagnostics');
+  }
+
+  async testLiveProvider(testTools = true, testEmbeddings = true) {
+    return this.request<ProviderLiveTestResultDTO>('/ai-studio/diagnostics/test-provider', {
+      method: 'POST',
+      body: { test_tools: testTools, test_embeddings: testEmbeddings },
+    });
   }
 }
 

@@ -253,10 +253,29 @@ class MCPClientManager:
             "transport": transport,
             "command_or_url": command_or_url,
             "tools_count": len(tools),
+            "tools": tools,
             "session": session,
             "ctx": ctx,
+            "last_connected_at": datetime.now(UTC).replace(tzinfo=None),
         }
         return tools
+
+    def get_server_tools(self, name: str) -> list[dict[str, Any]]:
+        srv = self._active_servers.get(name)
+        if not srv:
+            return []
+        tools: list[DiscoveredMCPTool] = srv.get("tools") or []
+        return [
+            {
+                "name": t.name,
+                "description": t.description,
+                "parameters_schema": t.parameters_schema,
+                "server_name": t.server_name,
+                "read_only": t.read_only,
+                "requires_approval": t.requires_approval,
+            }
+            for t in tools
+        ]
 
     async def disconnect_server(self, name: str) -> bool:
         if name in self._active_servers:

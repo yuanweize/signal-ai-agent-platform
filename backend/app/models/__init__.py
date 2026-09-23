@@ -7,9 +7,12 @@ Usage:
 
 from app.models.ai import (
     AIDecisionType,
+    AIModelCall,
     AIRun,
     AISuggestion,
     AISuggestionStatus,
+    EvaluationCaseResult,
+    EvaluationRun,
     FeedbackEvent,
     KnowledgeChunk,
     KnowledgeDocument,
@@ -80,4 +83,8 @@ __all__ = [
     "PromptVersion",
     "MCPServerConfig",
     "ToolInvocation",
+    # AI Platform v0.4.1 Observability
+    "AIModelCall",
+    "EvaluationRun",
+    "EvaluationCaseResult",
 ]

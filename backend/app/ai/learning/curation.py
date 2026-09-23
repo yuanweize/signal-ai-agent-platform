@@ -156,6 +156,7 @@ class LearningCandidateService:
         session: AsyncSession,
         candidate_id: int,
         system_instruction: str | None = None,
+        reviewer_name: str = "admin",
     ) -> TrainingExample | None:
         """Add candidate to offline fine-tuning dataset."""
         cand = await session.get(LearningCandidate, candidate_id)
@@ -172,6 +173,7 @@ class LearningCandidateService:
         )
         session.add(example)
         cand.status = "approved"
+        cand.reviewed_by = reviewer_name
         cand.reviewed_at = datetime.now(UTC).replace(tzinfo=None)
         await session.commit()
         await session.refresh(example)

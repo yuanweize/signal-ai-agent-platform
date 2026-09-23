@@ -56,7 +56,7 @@ class TestFreshDBMigration:
 
             # Check alembic revision is at head
             ver = cur.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-            assert ver == "e1f2a3b4c5d6", f"Expected revision e1f2a3b4c5d6, got {ver}"
+            assert ver == "f3b4c5d6e7f8", f"Expected revision f3b4c5d6e7f8, got {ver}"
 
             # Check all tables exist (16 base + 12 AI platform = 28 tables)
             tables = {
@@ -95,9 +95,21 @@ class TestFreshDBMigration:
                 "prompt_versions",
                 "mcp_servers",
                 "tool_invocations",
+                # AI Studio v0.4.1 Observability
+                "ai_model_calls",
+                "evaluation_runs",
+                "evaluation_case_results",
             }
             missing = expected_tables - tables
             assert not missing, f"Missing tables after fresh migration: {missing}"
+
+            # Verify crucial ai_runs telemetry columns
+            airun_cols = {row[1] for row in cur.execute("PRAGMA table_info(ai_runs)").fetchall()}
+            assert "input_tokens" in airun_cols
+            assert "output_tokens" in airun_cols
+            assert "total_tokens" in airun_cols
+            assert "traffic_source" in airun_cols
+            assert "usage_source" in airun_cols
 
             # Verify crucial columns and constraints
             msg_cols = {row[1] for row in cur.execute("PRAGMA table_info(messages)").fetchall()}
@@ -325,7 +337,7 @@ class TestLegacy112aa6eMigration:
             cur2 = con2.cursor()
 
             ver = cur2.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-            assert ver == "e1f2a3b4c5d6"
+            assert ver == "f3b4c5d6e7f8"
 
             # Check rows and IDs preserved
             assert cur2.execute(
@@ -437,7 +449,7 @@ class TestV03ToV04Migration:
             cur2 = con2.cursor()
             assert (
                 cur2.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-                == "e1f2a3b4c5d6"
+                == "f3b4c5d6e7f8"
             )
 
             # Check pre-existing data preserved and origin column backfilled
@@ -459,6 +471,71 @@ class TestV03ToV04Migration:
             cur2.execute("SELECT count(*) FROM memory_items")
             cur2.execute("SELECT count(*) FROM mcp_servers")
             cur2.execute("SELECT count(*) FROM prompt_versions")
+            cur2.execute("SELECT count(*) FROM ai_model_calls")
+            cur2.execute("SELECT count(*) FROM evaluation_runs")
+            cur2.execute("SELECT count(*) FROM evaluation_case_results")
+
+            con2.close()
+        finally:
+            if os.path.exists(db_path):
+                os.remove(db_path)
+
+
+class TestV04ToV041Migration:
+    """Test D: Database at v0.4 (e1f2a3b4c5d6) upgrades to v0.4.1 (f3b4c5d6e7f8) with clean backfill."""
+
+    def test_v04_to_v041_migration(self):
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+
+        try:
+            # 1. Upgrade to v0.4
+            res1 = _run_alembic_upgrade(db_path, "e1f2a3b4c5d6")
+            assert res1.returncode == 0, f"Upgrade to v0.4 failed: {res1.stderr}"
+
+            # 2. Insert representative v0.4 data
+            con = sqlite3.connect(db_path)
+            cur = con.cursor()
+            cur.execute(
+                "INSERT INTO conversations (id, type, signal_id, mode) VALUES (1, 'dm', '+100', 'auto')"
+            )
+            cur.execute(
+                "INSERT INTO ai_runs (id, trace_id, conversation_id, decision, tokens) VALUES (1, 'tr_old1', 1, 'reply', 350)"
+            )
+            cur.execute(
+                "INSERT INTO ai_runs (id, trace_id, conversation_id, decision, tokens) VALUES (2, 'tr_old2', 1, 'reply', NULL)"
+            )
+            con.commit()
+            con.close()
+
+            # 3. Upgrade to v0.4.1 head
+            res2 = _run_alembic_upgrade_head(db_path)
+            assert res2.returncode == 0, f"Upgrade to v0.4.1 head failed: {res2.stderr}"
+
+            # 4. Verify backfill semantics
+            con2 = sqlite3.connect(db_path)
+            cur2 = con2.cursor()
+            ver = cur2.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+            assert ver == "f3b4c5d6e7f8"
+
+            r1 = cur2.execute(
+                "SELECT total_tokens, usage_source, traffic_source FROM ai_runs WHERE id=1"
+            ).fetchone()
+            assert r1[0] == 350
+            assert r1[1] == "legacy_total_only"
+            assert r1[2] == "production"
+
+            r2 = cur2.execute(
+                "SELECT total_tokens, usage_source, traffic_source FROM ai_runs WHERE id=2"
+            ).fetchone()
+            assert r2[0] is None
+            assert r2[1] == "unavailable"
+            assert r2[2] == "production"
+
+            # Check new tables exist
+            cur2.execute("SELECT count(*) FROM ai_model_calls")
+            cur2.execute("SELECT count(*) FROM evaluation_runs")
+            cur2.execute("SELECT count(*) FROM evaluation_case_results")
 
             con2.close()
         finally:
