@@ -42,8 +42,11 @@ class OpenAICompatibleEmbeddingProvider:
 
     def _get_client(self) -> AsyncOpenAI:
         if self._client is None:
+            effective_base_url = self.base_url or "https://api.openai.com/v1"
+            if effective_base_url and not effective_base_url.endswith("/v1"):
+                effective_base_url = f"{effective_base_url}/v1"
             self._client = AsyncOpenAI(
-                base_url=self.base_url,
+                base_url=effective_base_url,
                 api_key=self.api_key,
                 timeout=self.timeout,
                 max_retries=2,
@@ -63,6 +66,8 @@ class OpenAICompatibleEmbeddingProvider:
             input=texts,
         )
         return [item.embedding for item in response.data]
+
+    embed = embed_documents
 
 
 class FakeEmbeddingProvider:

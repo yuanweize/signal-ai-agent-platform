@@ -41,6 +41,7 @@ from app.models.ai import (
     ToolInvocation,
     TrainingExample,
 )
+from app.models.conversation import Conversation
 from app.schemas.ai import (
     AIOverviewMetricsDTO,
     AIRunDTO,
@@ -648,25 +649,27 @@ async def test_live_provider(
     # Persist an AIRun with traffic_source="provider_test" so telemetry is recorded without polluting production stats
     if connected:
         try:
-            test_run = AIRun(
-                trace_id=f"tr_test_{uuid.uuid4().hex[:8]}",
-                conversation_id=0,
-                model=model,
-                provider="openai_compatible",
-                prompt_version="probe",
-                decision="provider_test",
-                latency_ms=lat_ms,
-                tokens=u_tot or 0,
-                input_tokens=u_in,
-                output_tokens=u_out,
-                total_tokens=u_tot,
-                cached_input_tokens=u_cached,
-                reasoning_tokens=u_reasoning,
-                usage_source=u_source,
-                traffic_source="provider_test",
-            )
-            session.add(test_run)
-            await session.commit()
+            conv_id = (await session.execute(select(Conversation.id).limit(1))).scalar_one_or_none()
+            if conv_id is not None:
+                test_run = AIRun(
+                    trace_id=f"tr_test_{uuid.uuid4().hex[:8]}",
+                    conversation_id=conv_id,
+                    model=model,
+                    provider="openai_compatible",
+                    prompt_version="probe",
+                    decision="provider_test",
+                    latency_ms=lat_ms,
+                    tokens=u_tot or 0,
+                    input_tokens=u_in,
+                    output_tokens=u_out,
+                    total_tokens=u_tot,
+                    cached_input_tokens=u_cached,
+                    reasoning_tokens=u_reasoning,
+                    usage_source=u_source,
+                    traffic_source="provider_test",
+                )
+                session.add(test_run)
+                await session.commit()
         except Exception:
             pass
 
