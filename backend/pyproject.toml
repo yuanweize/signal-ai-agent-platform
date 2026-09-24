@@ -34,7 +34,7 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     # Database
-    "sqlalchemy[asyncio]>=2.0.35",
+    "sqlalchemy[asyncio]>=2.0.35,<2.1.0",
     "aiosqlite>=0.20.0",
     "alembic>=1.14.0",
     # AI — OpenAI-compatible SDK (works with any compatible provider)
