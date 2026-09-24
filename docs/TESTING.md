@@ -14,7 +14,7 @@ Command:
 cd backend
 .venv/bin/pytest -v
 ```
-- **Total Test Cases**: 91 passing tests.
+- **Current Release Baseline**: 141 backend passing tests.
 - **Coverage Highlights**:
   - `tests/test_v04_final_production_hardening.py` (15 tests):
     - `test_real_app_startup_routes_ai_through_agent_runtime_factory`: Asserts real app lifespan routes all AI traffic via AgentRuntime.
@@ -81,7 +81,7 @@ Verified across 5 distinct lifecycles (`backend/tests/test_migrations.py`):
 
 Every push and pull request validates the following sequential pipeline:
 1. **Backend Lint & Format**: `ruff check app tests evals` and `ruff format --check app tests evals`.
-2. **Backend Unit & Integration**: `pytest -q` (117+ tests).
+2. **Backend Unit & Integration**: `pytest -q` (141 tests).
 3. **Deterministic Evaluation Suite**: `python evals/run_evals.py` (32 invariant cases).
 4. **Database Migrations**: Verification of full linear revision upgrade and downgrade chain.
 5. **Frontend Lint & Build**: `npm run lint`, `npx tsc --noEmit`, `npm test -- --run`, `npm run build`.

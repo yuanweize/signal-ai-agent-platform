@@ -190,7 +190,7 @@ describe('AI Platform v0.4 UI Components', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('AI Studio v0.4.1')).toBeInTheDocument();
+      expect(screen.getAllByText('AI Studio').length).toBeGreaterThanOrEqual(1);
       expect(screen.getByText('125')).toBeInTheDocument();
       expect(screen.getByText('82%')).toBeInTheDocument();
     });

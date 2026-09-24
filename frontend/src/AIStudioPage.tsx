@@ -631,7 +631,7 @@ export default function AIStudioPage({ initialTab = 'overview' }: { initialTab?:
                 <Sparkles className="w-5 h-5" />
               </div>
               <h1 className="text-xl font-extrabold text-[var(--text-primary)] tracking-tight">
-                AI Studio v0.4.1
+                AI Studio
               </h1>
               {getReadinessBadge()}
             </div>

@@ -2,7 +2,11 @@
 
 # 🤖 Signal Market Bot
 
-### 面向 Signal 生态的智能客服与对话式电商自动化中台
+### 面向 Signal 生态的智能客服与对话式电商 AI 智能体平台
+
+<p align="center">
+  面向生产环境的 AI 智能体平台，深度集成 <strong>Signal 即时通讯</strong> 与 <strong>LangGraph 有状态智能体</strong>、<strong>细粒度作用域 RAG 检索</strong> (Qdrant)、<strong>可扩展 MCP 工具协议</strong>、<strong>人机协同 Copilot 审核工作台</strong> 以及 <strong>全链路运行时可观测性</strong>，专注客户服务与对话式电商自动化。
+</p>
 
 [![Release](https://img.shields.io/github/v/release/yuanweize/signal-market-bot?color=7c3aed&label=Release)](https://github.com/yuanweize/signal-market-bot/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/yuanweize/signal-market-bot/ci.yml?branch=main&label=CI)](https://github.com/yuanweize/signal-market-bot/actions)
@@ -17,16 +21,14 @@
 
 ---
 
----
-
 <div align="center">
   <img src="assets/screenshots/admin-overview.png" width="900" alt="Signal Market Bot 管理控制台概览" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
   <p><em>Signal Market Bot 运营全景看板 — 实时业务指标、消息流量统计、核心模块健康度与商品目录分析</em></p>
 </div>
 
 <div align="center">
-  <img src="assets/screenshots/ai-studio-overview.png" width="900" alt="Signal Market Bot AI Studio v0.4.1" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
-  <p><em>AI Studio 可观测性与运营控制台 (v0.4.1) — 真实运行时 Token 消耗分解、分位耗时统计、结构化用量看板与四大业务分组中台</em></p>
+  <img src="assets/screenshots/ai-studio-overview.png" width="900" alt="Signal Market Bot AI Studio" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
+  <p><em>AI Studio 可观测性与运营控制台 — 真实运行时 Token 消耗分解、分位耗时统计、结构化用量看板与四大业务分组中台</em></p>
 </div>
 
 ### 📸 产品导览 (Product Tour)
@@ -78,7 +80,7 @@
 - **持续学习闭环**：捕获人工坐席对 AI 草稿的修改，自动聚合并推荐高质量知识候选，支持一键沉淀为标准 FAQ 或导出微调 JSONL 数据集。
 - **确定性契约评测套件**：内置 32 项确定性契约测试案例（`python evals/run_evals.py`），覆盖 Prompt 注入防御、人工转接、退款审批、跨语言支持与隐私隔离边界，CI 持续全绿验证。
 
-### 🎛️ AI Studio 可观测性与运营控制台 (v0.4.1 / v0.4.2)
+### 🎛️ AI Studio 可观测性与运营控制台
 - **真实运行时度量**：看板指标、组件就绪徽章与 Token 消耗严格来源于真实运行时健康诊断与执行记录，拒绝虚假假装。
 - **中立多维度 Token 遥测**：完整追踪与展示 Prompt 输入、输出、缓存复用与推理思考 Token 细分，配合中立定价矩阵真实核算成本（未配置模型严谨显示未配置，不报虚假 0 元）。
 - **层级化信息架构 (IA)**：构建 4 大功能模块响应式布局：**Operate 运营**（总览、运行与轨迹、健康诊断）、**Knowledge 知识**（RAG 知识库与测试场、记忆隔离、渐进式技能）、**Automation 自动化**（工具与 MCP 治理）、**Improve 调优**（学习闭环、Prompt 版本、评测套件）。
@@ -229,7 +231,7 @@ npm run dev
 | **前端技术栈** | [React](https://react.dev/) 18 + [Vite](https://vitejs.dev/) + [TypeScript](https://www.typescriptlang.org/) + [React Router](https://reactrouter.com/) 7.18+ |
 | **UI 样式体系** | [Tailwind CSS](https://tailwindcss.com/) + [DaisyUI](https://daisyui.com/) |
 | **安全与认证** | Scrypt KDF 密码哈希 + Fernet 数据库密钥加密 + [PyOTP](https://github.com/pyauth/pyotp) (TOTP 2FA) + [python-jose](https://github.com/mpdavis/python-jose) (JWT) |
-| **测试与质量网关** | [pytest](https://docs.pytest.org/) (109 项后端测试) + [Vitest](https://vitest.dev/) (18 项前端测试) + 32 项确定性契约评测 + Docker 容器运行时冒烟 |
+| **测试与质量网关** | [pytest](https://docs.pytest.org/) (141 项后端测试) + [Vitest](https://vitest.dev/) (20 项前端测试 / 6 组文件) + 32 项确定性契约评测 + 5 阶段迁移生命周期测试 + Docker 容器运行时冒烟 ([详见文档](docs/TESTING.md)) |
 | **容器化交付** | Docker 多阶段构建 + Docker Compose + GitHub Container Registry (GHCR) |
 
 ---
