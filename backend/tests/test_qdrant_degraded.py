@@ -61,6 +61,7 @@ async def test_agent_runtime_retrieval_failure_marks_degraded_and_records_airun_
     await session.refresh(conv)
 
     try:
+
         class FailingVectorStore:
             async def search(
                 self, collection: str, query_vector: list[float], limit: int = 5, **kwargs

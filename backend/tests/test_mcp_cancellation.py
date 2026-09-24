@@ -88,9 +88,7 @@ async def test_mcp_connect_enabled_servers_degrades_operational_failure(session)
         # Verify server status in DB is marked as error
         updated = (
             await session.execute(
-                select(MCPServerConfig).where(
-                    MCPServerConfig.name == "test_operational_err_server"
-                )
+                select(MCPServerConfig).where(MCPServerConfig.name == "test_operational_err_server")
             )
         ).scalar_one()
         assert updated.status == "error"

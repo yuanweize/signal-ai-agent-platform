@@ -112,8 +112,9 @@ jobs:
       - name: Probe Qdrant readiness
         run: |
           for i in {1..30}; do
-            if curl -s http://127.0.0.1:6333/healthz | grep -q "ok"; then
-              echo "Qdrant is healthy"
+            q_status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:6333/healthz || true)
+            if [ "$q_status" = "200" ]; then
+              echo "Qdrant is healthy (HTTP 200)"
               exit 0
             fi
             sleep 2
