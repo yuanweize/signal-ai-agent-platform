@@ -113,10 +113,13 @@ class SkillRegistry:
     def get_skill(self, name: str) -> Skill | None:
         return self._skills.get(name)
 
+    def get(self, name: str) -> Skill | None:
+        return self.get_skill(name)
+
     def load_body(self, name: str) -> str:
         """Progressively load full skill instructions on demand."""
         skill = self._skills.get(name)
-        if not skill:
+        if not skill or not skill.is_enabled:
             return ""
         if not skill.body and skill.path and skill.path.exists():
             parsed = self._parse_skill_file(skill.path)

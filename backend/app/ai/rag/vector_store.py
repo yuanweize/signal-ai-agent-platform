@@ -13,6 +13,14 @@ class VectorStoreError(RuntimeError):
     """Raised when vector store upsert, search, or deletion fails."""
 
 
+class VectorStoreUnavailableError(VectorStoreError):
+    """Raised when vector store is unreachable, down, or fails due to infrastructure."""
+
+
+class VectorSearchError(VectorStoreError):
+    """Raised when vector search query execution fails."""
+
+
 @dataclass
 class VectorSearchResult:
     """Result of a vector similarity search."""
@@ -54,6 +62,10 @@ class VectorStore(Protocol):
 
     async def delete_collection(self, collection: str) -> bool:
         """Delete an entire collection."""
+        ...
+
+    async def check_health(self) -> bool:
+        """Check if vector store is reachable and available."""
         ...
 
 
@@ -136,4 +148,7 @@ class FakeVectorStore:
 
     async def delete_collection(self, collection: str) -> bool:
         self.collections.pop(collection, None)
+        return True
+
+    async def check_health(self) -> bool:
         return True

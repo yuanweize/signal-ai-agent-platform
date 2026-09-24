@@ -327,6 +327,16 @@ class MCPClientManager:
                 logger.info(
                     f"Auto-connected enabled MCP server '{server.name}' ({len(tools)} tools)"
                 )
+            except asyncio.CancelledError:
+                raise
+            except BaseExceptionGroup as eg:
+                cancelled, _ = eg.split(asyncio.CancelledError)
+                if cancelled is not None:
+                    raise cancelled
+                server.status = "error"
+                server.error_message = str(eg)
+                results[server.name] = 0
+                logger.warning(f"Failed to auto-connect enabled MCP server '{server.name}': {eg}")
             except Exception as e:
                 server.status = "error"
                 server.error_message = str(e)

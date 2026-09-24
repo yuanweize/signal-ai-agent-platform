@@ -13,7 +13,7 @@ from alembic.script import ScriptDirectory
 
 logger = logging.getLogger("services.migration")
 
-EXPECTED_HEAD_FALLBACK = "f3b4c5d6e7f8"
+EXPECTED_HEAD_FALLBACK = "g4c5d6e7f8a9"
 
 
 @functools.lru_cache(maxsize=1)
