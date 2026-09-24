@@ -1,10 +1,34 @@
 [project]
 name = "signal-market-bot"
 version = "0.4.2"
-description = "AI-powered Signal group market bot with admin dashboard"
+description = "Signal-native AI agent platform for customer support and conversational commerce"
 readme = "README.md"
 license = {text = "MIT"}
+authors = [
+    {name = "Weize Yuan", email = "iyuanweize@gmail.com"},
+]
+keywords = [
+    "signal",
+    "ai-agent",
+    "langgraph",
+    "rag",
+    "mcp",
+    "customer-support",
+    "conversational-commerce",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications :: Chat",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 requires-python = ">=3.11"
+
 dependencies = [
     # Web framework
     "fastapi>=0.115.0",
@@ -33,6 +57,13 @@ dependencies = [
     # Utilities
     "python-multipart>=0.0.12",
 ]
+
+[project.urls]
+Homepage = "https://github.com/yuanweize/signal-market-bot"
+Repository = "https://github.com/yuanweize/signal-market-bot"
+Issues = "https://github.com/yuanweize/signal-market-bot/issues"
+Changelog = "https://github.com/yuanweize/signal-market-bot/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/yuanweize/signal-market-bot/blob/main/docs/ARCHITECTURE.md"
 
 [project.optional-dependencies]
 prod = []

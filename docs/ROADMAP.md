@@ -50,7 +50,7 @@ timeline
 - Learning curation idempotency with database-level uniqueness constraints.
 - Evaluation sandbox isolation preventing customer conversation contamination.
 
-### [v0.4.2] — Final Correctness & Production Hardening (Released / Frozen)
+### [v0.4.2] — Final Correctness & Production Hardening (Stable Release)
 - Front/backend API contract alignment & complete DTO drift elimination.
 - Atomic conditional state transitions for learning loop curation (HTTP 409 Conflict on race).
 - Strict skill disabled filtering and graceful vector store unavailability degradation.

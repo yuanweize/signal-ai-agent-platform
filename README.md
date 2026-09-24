@@ -2,7 +2,11 @@
 
 # 🤖 Signal Market Bot
 
-### Conversational Commerce & AI Customer Support Platform for Signal
+### Signal-native AI Agent Platform for Customer Support & Conversational Commerce
+
+<p align="center">
+  A production-oriented AI agent platform bridging <strong>Signal messaging</strong> with <strong>LangGraph stateful agents</strong>, <strong>scoped RAG retrieval</strong> (Qdrant), <strong>extensible MCP tools</strong>, <strong>human-in-the-loop Copilot</strong> review, and <strong>deep runtime observability</strong> for customer support and conversational commerce.
+</p>
 
 [![Release](https://img.shields.io/github/v/release/yuanweize/signal-market-bot?color=7c3aed&label=Release)](https://github.com/yuanweize/signal-market-bot/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/yuanweize/signal-market-bot/ci.yml?branch=main&label=CI)](https://github.com/yuanweize/signal-market-bot/actions)
@@ -17,16 +21,14 @@
 
 ---
 
----
-
 <div align="center">
   <img src="assets/screenshots/admin-overview.png" width="900" alt="Signal Market Bot Admin Overview" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
   <p><em>Signal Market Bot Executive Console — Real-time operational telemetry, messaging volume, module health, and catalog metrics</em></p>
 </div>
 
 <div align="center">
-  <img src="assets/screenshots/ai-studio-overview.png" width="900" alt="Signal Market Bot AI Studio v0.4.1" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
-  <p><em>AI Studio Observability & Operations Console (v0.4.1) — Truthful token telemetry, latency percentiles, structured usage breakdown, and 4-group management workflow</em></p>
+  <img src="assets/screenshots/ai-studio-overview.png" width="900" alt="Signal Market Bot AI Studio" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
+  <p><em>AI Studio Observability & Operations Console — Truthful token telemetry, latency percentiles, structured usage breakdown, and 4-group management workflow</em></p>
 </div>
 
 ### 📸 Product Tour
@@ -78,7 +80,7 @@ With **AI Platform v0.4**, the system introduces an agentic architecture powered
 - **Human-in-the-Loop Learning Loop**: Detects operator edits, curates learning candidates, allows one-click FAQ promotion, and exports fine-tuning JSONL datasets.
 - **Deterministic Contract Evaluation**: 32-case deterministic evaluation suite (`python evals/run_evals.py`) scoring pass rate, decision accuracy, keyword recall, and latency passing in CI.
 
-### 🎛️ AI Studio Observability & Operations Console (v0.4.1 / v0.4.2)
+### 🎛️ AI Studio Observability & Operations Console
 - **Truthful Runtime Telemetry**: Dashboard metrics, component status badges, and token usage reflect real runtime diagnostics rather than decorative mock values.
 - **Provider-Neutral Token Telemetry**: Complete token breakdowns (`input`, `output`, `cached`, `reasoning`) and realistic pricing estimation with fallback for unconfigured models.
 - **Hierarchical Information Architecture**: Streamlined 4-group workflow: **Operate** (Overview, Runs & Traces, Diagnostics), **Knowledge** (RAG Knowledge, Memory, Skills), **Automation** (Tools & MCP), and **Improve** (Learning Loop, Prompts, Evaluations).
@@ -229,7 +231,7 @@ npm run dev
 | **Frontend Stack** | [React](https://react.dev/) 18 + [Vite](https://vitejs.dev/) + [TypeScript](https://www.typescriptlang.org/) + [React Router](https://reactrouter.com/) 7.18+ |
 | **Styling System** | [Tailwind CSS](https://tailwindcss.com/) + [DaisyUI](https://daisyui.com/) |
 | **Security & Auth** | Scrypt KDF + Fernet DB secret encryption + [PyOTP](https://github.com/pyauth/pyotp) (TOTP 2FA) + [python-jose](https://github.com/mpdavis/python-jose) (JWT) |
-| **Quality Gates** | [pytest](https://docs.pytest.org/) (109 passing tests) + [Vitest](https://vitest.dev/) (18 passing tests) + Deterministic AI eval (32 cases) + Docker runtime smoke |
+| **Quality Gates** | [pytest](https://docs.pytest.org/) (141 passing tests) + [Vitest](https://vitest.dev/) (20 passing tests across 6 files) + Deterministic AI eval (32 cases) + Migration lifecycle (5/5) + Docker Compose runtime smoke ([Details](docs/TESTING.md)) |
 | **Deployment** | Docker multi-stage builds + Docker Compose + GitHub Container Registry (GHCR) |
 
 ---
