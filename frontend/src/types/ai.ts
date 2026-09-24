@@ -170,7 +170,7 @@ export interface AIRunDTO {
     status?: string;
   }>;
   model_calls?: AIModelCallDTO[];
-  errors: string[];
+  errors?: string | null;
   created_at: string;
 }
 
@@ -239,11 +239,10 @@ export interface KnowledgeDocumentDTO {
   id: number;
   source_id: number;
   title: string;
+  content: string;
   scope_type: string;
   scope_id?: string | null;
   chunk_count: number;
-  status: string;
-  last_error?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -304,8 +303,8 @@ export interface ProviderLiveTestResultDTO {
 
 export interface EvaluationRunDTO {
   id: number;
-  eval_type: 'deterministic' | 'live';
-  status: 'running' | 'completed' | 'failed';
+  eval_type: string;
+  status: string;
   provider?: string | null;
   model?: string | null;
   prompt_version?: string | null;
@@ -314,19 +313,17 @@ export interface EvaluationRunDTO {
   passed_cases: number;
   pass_rate: number;
   decision_accuracy: number;
-  avg_latency_ms: number;
-  total_tokens: number;
-  input_tokens?: number | null;
-  output_tokens?: number | null;
+  average_latency_ms: number;
+  total_tokens: number | null;
   estimated_cost?: number | null;
-  cost_currency?: string;
-  created_at: string;
+  started_at: string;
   completed_at?: string | null;
+  results: EvaluationResultCaseDTO[] | Record<string, unknown>[];
 }
 
 export interface TrainingStatsDTO {
   total_approved_examples: number;
-  languages: Record<string, number>;
+  languages?: Record<string, number>;
 }
 
 export interface KnowledgeSourceDTO {
@@ -421,7 +418,7 @@ export interface EvaluationSummaryDTO {
   pass_rate: number;
   decision_accuracy: number;
   average_latency_ms: number;
-  total_tokens: number;
+  total_tokens: number | null;
   results: EvaluationResultCaseDTO[];
 }
 
