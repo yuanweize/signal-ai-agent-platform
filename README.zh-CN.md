@@ -76,15 +76,18 @@
 - **规范身份持久化记忆**：提取并沉淀客户长期偏好与事实，严格绑定规范用户身份（手机号与 Signal UUID 归一到同一命名空间），支持单条安全删除。
 - **受控工具与官方 MCP SDK 集成**：使用官方 Python `mcp` SDK 实现 stdio 客户端会话与工具动态发现；敏感/写操作（如退款）强制触发主管审核草稿（`draft_for_human`），禁止模型擅自执行。
 - **持续学习闭环**：捕获人工坐席对 AI 草稿的修改，自动聚合并推荐高质量知识候选，支持一键沉淀为标准 FAQ 或导出微调 JSONL 数据集。
-- **确定性契约评测套件**：内置 32 项确定性契约测试案例（`python evals/run_evals.py`），覆盖 Prompt 注入防御、人工转接、退款审批、跨语言支持与隐私隔离边界，CI 准确率保持 100%。
+- **确定性契约评测套件**：内置 32 项确定性契约测试案例（`python evals/run_evals.py`），覆盖 Prompt 注入防御、人工转接、退款审批、跨语言支持与隐私隔离边界，CI 持续全绿验证。
 
-### 🎛️ AI Studio 可观测性与运营控制台 (v0.4.1)
-- **真实运行时度量**：杜绝虚假演示数据与装饰性 0 值，看板指标、组件就绪徽章与 Token 消耗严格来源于真实运行时健康诊断与执行记录。
+### 🎛️ AI Studio 可观测性与运营控制台 (v0.4.1 / v0.4.2)
+- **真实运行时度量**：看板指标、组件就绪徽章与 Token 消耗严格来源于真实运行时健康诊断与执行记录，拒绝虚假假装。
 - **中立多维度 Token 遥测**：完整追踪与展示 Prompt 输入、输出、缓存复用与推理思考 Token 细分，配合中立定价矩阵真实核算成本（未配置模型严谨显示未配置，不报虚假 0 元）。
 - **层级化信息架构 (IA)**：构建 4 大功能模块响应式布局：**Operate 运营**（总览、运行与轨迹、健康诊断）、**Knowledge 知识**（RAG 知识库与测试场、记忆隔离、渐进式技能）、**Automation 自动化**（工具与 MCP 治理）、**Improve 调优**（学习闭环、Prompt 版本、评测套件）。
 - **执行轨迹与单次模型调用深度排查**：完整执行日志下钻，支持决策/错误/RAG/工具多维筛选与分页，滑动抽屉呈现包含每次底层模型调用（`ai_model_calls`）的精确遥测与引用事实。
 - **实时模型连接探针与一键连通性测试**：一键发起真实探测，核验大模型往返耗时、工具调用能力、Embedding 连通性与回复预览，杜绝 Mock 伪装。
 - **评测套件持久化运行**：支持 32 项确定性契约测试与真实大模型黄金案例抽样评测（支持自定义样本量），评测历史全量落库可供比对。
+
+> [!NOTE]
+> **演示数据与真实遥测说明**：本地开发环境可使用安全合成数据生成脚本 (`python backend/scripts/seed_demo_data.py`) 为控制台与客服收件箱填充演示数据以供评估体验；生产运行状态下，所有统计、遥测与链路均严格由底层真实模型和数据库执行产出。
 
 ### 📥 现代客服收件箱与接管
 - **双栏客服控制台**：全量会话可视化视图，支持未读计数徽标、全局会话检索与多维筛选（单聊 / 群聊 / 未读）。
@@ -226,7 +229,7 @@ npm run dev
 | **前端技术栈** | [React](https://react.dev/) 18 + [Vite](https://vitejs.dev/) + [TypeScript](https://www.typescriptlang.org/) + [React Router](https://reactrouter.com/) 7.18+ |
 | **UI 样式体系** | [Tailwind CSS](https://tailwindcss.com/) + [DaisyUI](https://daisyui.com/) |
 | **安全与认证** | Scrypt KDF 密码哈希 + Fernet 数据库密钥加密 + [PyOTP](https://github.com/pyauth/pyotp) (TOTP 2FA) + [python-jose](https://github.com/mpdavis/python-jose) (JWT) |
-| **测试与质量网关** | [pytest](https://docs.pytest.org/) (109 项后端测试) + [Vitest](https://vitest.dev/) (18 项前端测试) + 32 项确定性契约测试 |
+| **测试与质量网关** | [pytest](https://docs.pytest.org/) (109 项后端测试) + [Vitest](https://vitest.dev/) (18 项前端测试) + 32 项确定性契约评测 + Docker 容器运行时冒烟 |
 | **容器化交付** | Docker 多阶段构建 + Docker Compose + GitHub Container Registry (GHCR) |
 
 ---

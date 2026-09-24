@@ -76,15 +76,18 @@ With **AI Platform v0.4**, the system introduces an agentic architecture powered
 - **Durable Scoped Memory**: Automated customer preference extraction bound to canonical user identity (phone number & Signal UUID map to the same namespace) with individual deletion support.
 - **Governed Tools & Model Context Protocol (MCP)**: Official Python `mcp` SDK stdio client integration. Sensitive tools (e.g. refunds) trigger supervisor drafts (`draft_for_human`) rather than autonomous execution.
 - **Human-in-the-Loop Learning Loop**: Detects operator edits, curates learning candidates, allows one-click FAQ promotion, and exports fine-tuning JSONL datasets.
-- **Deterministic Contract Evaluation**: 32-case deterministic evaluation suite (`python evals/run_evals.py`) scoring pass rate, decision accuracy, keyword recall, and latency with 100% CI pass rate.
+- **Deterministic Contract Evaluation**: 32-case deterministic evaluation suite (`python evals/run_evals.py`) scoring pass rate, decision accuracy, keyword recall, and latency passing in CI.
 
-### 🎛️ AI Studio Observability & Operations Console (v0.4.1)
-- **Truthful Runtime Telemetry**: Zero mock data, zero placeholder metrics. Dashboard metrics, component status badges, and token usage reflect real runtime diagnostics.
+### 🎛️ AI Studio Observability & Operations Console (v0.4.1 / v0.4.2)
+- **Truthful Runtime Telemetry**: Dashboard metrics, component status badges, and token usage reflect real runtime diagnostics rather than decorative mock values.
 - **Provider-Neutral Token Telemetry**: Complete token breakdowns (`input`, `output`, `cached`, `reasoning`) and realistic pricing estimation with fallback for unconfigured models.
 - **Hierarchical Information Architecture**: Streamlined 4-group workflow: **Operate** (Overview, Runs & Traces, Diagnostics), **Knowledge** (RAG Knowledge, Memory, Skills), **Automation** (Tools & MCP), and **Improve** (Learning Loop, Prompts, Evaluations).
 - **Runs & Model-Call Trace Explorer**: Full execution tracing with decision/error filters, token inspection, and per-turn model call breakdown (`ai_model_calls`).
 - **Interactive Live Diagnostics**: Instant probe testing for live LLM providers verifying connection latency, tool execution, embeddings, and token consumption.
 - **Golden Evaluation Suite**: Persisted evaluation runs with dual-mode benchmark support (32 deterministic invariant test cases + configurable live LLM evaluations).
+
+> [!NOTE]
+> **Demo Data vs. Live Telemetry**: Safe synthetic demo data can be populated using `python backend/scripts/seed_demo_data.py` to preview the AI Studio dashboard and Inbox experience in local developer environments. In live deployments, all metrics and traces are strictly produced by actual runtime executions.
 
 ### 📥 Support Inbox & Takeover
 - **Dual-Pane Conversation Console**: Complete customer conversation visibility with unread counters, message search, and type filters (DMs / Groups / Unread).
@@ -226,7 +229,7 @@ npm run dev
 | **Frontend Stack** | [React](https://react.dev/) 18 + [Vite](https://vitejs.dev/) + [TypeScript](https://www.typescriptlang.org/) + [React Router](https://reactrouter.com/) 7.18+ |
 | **Styling System** | [Tailwind CSS](https://tailwindcss.com/) + [DaisyUI](https://daisyui.com/) |
 | **Security & Auth** | Scrypt KDF + Fernet DB secret encryption + [PyOTP](https://github.com/pyauth/pyotp) (TOTP 2FA) + [python-jose](https://github.com/mpdavis/python-jose) (JWT) |
-| **Quality Gates** | [pytest](https://docs.pytest.org/) (109 passing tests) + [Vitest](https://vitest.dev/) (18 passing tests) + Deterministic AI eval (32 cases) |
+| **Quality Gates** | [pytest](https://docs.pytest.org/) (109 passing tests) + [Vitest](https://vitest.dev/) (18 passing tests) + Deterministic AI eval (32 cases) + Docker runtime smoke |
 | **Deployment** | Docker multi-stage builds + Docker Compose + GitHub Container Registry (GHCR) |
 
 ---

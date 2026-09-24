@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.4.2] - 2026-09-24
+
+### Final Correctness & Production Hardening Patch (v0.4.2 Project Freeze)
+
+#### Highlights
+- **API Contract & DTO Drift Elimination (P0)**:
+  - Synchronized frontend `EvaluationRunDTO` with backend schema (`average_latency_ms`, nullable `total_tokens`, `started_at`).
+  - Corrected `AIRunDTO.errors` type definition to nullable string (`string | null`).
+  - Aligned Knowledge Document DTOs by removing non-existent fields (`status`, `last_error`).
+  - Added formal `TrainingStatsDTO` declaration and verified full OpenAPI contract compatibility.
+  - Eliminated legacy dual parameter transmission in frontend API client (`used_rag`, `used_tools`).
+- **Learning Curation Atomic Concurrency (P0)**:
+  - Replaced read-modify-write patterns in learning curation with atomic conditional state claims (`UPDATE ... WHERE id = :id AND status = 'pending'`).
+  - Added `CandidateConflictError` mapped to HTTP 409 Conflict for concurrent review attempts.
+  - Added dedicated failed state transitions (`failed_knowledge`, `failed_training`) on downstream promotion errors.
+- **Progressive Skills & RAG Degradation Semantics (P1)**:
+  - Enforced strict skill registry check: disabled skills immediately return empty body (`load_body()`), preventing dormant skills from influencing prompt context.
+  - Introduced typed vector store exceptions (`VectorStoreUnavailableError`, `VectorSearchError`) with zero silent swallowing.
+  - Orchestration graph detects vector store unavailability and gracefully marks retrieval as `degraded`, triggering safe policy handoff without leaking internal stack traces.
+  - Added live health check probe (`check_health()`) for Qdrant vector store in AI Studio diagnostics.
+- **CORS & MCP Cancellation Propagation (P1)**:
+  - Added `"PATCH"` to CORS allowed methods and exposed `"X-Total-Count"` header for browser clients.
+  - Added `@router.patch("/{product_id}")` route alias in product catalog API.
+  - Upgraded MCP server connection loop and app lifespan to faithfully propagate `asyncio.CancelledError` and `BaseExceptionGroup`, ensuring clean shutdown during cancellations.
+- **Truthful Telemetry & Pagination (P1)**:
+  - Real pagination support for execution runs (`/api/ai-studio/runs`) with `X-Total-Count` header and responsive UI controls.
+  - Evaluation history honors nullable `total_tokens` without fabricating legacy metrics or defaulting missing values to 0.
+  - Migration `g4c5d6e7f8a9`: Corrected historical data drift by setting `llm_call_count = NULL` for legacy runs with `usage_source = 'legacy_total_only'` and no model call records.
+- **Docker Runtime Smoke & Quality Gates (P1)**:
+  - Added full Docker Compose runtime smoke verification in CI and local workflows, testing Qdrant, backend ready/live endpoints, and frontend HTTP service with container log diagnostics on failure.
+  - Hardened live smoke test suite with explicit exit codes and strict assert-free validation.
+
+#### Known Limitations
+- **Signal Hardware Gateway E2E**: Real end-to-end Signal messaging requires a reachable external `signal-cli-rest-api` daemon and a registered phone number. In environments without an active external Signal gateway, AI Studio, Copilot drafts, Knowledge RAG, Scoped Memory, and MCP execution remain fully functional and validated locally.
+
+---
+
 ## [v0.4.1] - 2026-09-23
 
 ### AI Studio Product Completion & Observability (v0.4.1 Release)
