@@ -43,3 +43,5 @@ class AgentState(TypedDict, total=False):
     # Telemetry & per-call model execution records
     model_calls: list[dict[str, Any]]
     usage: dict[str, Any]
+    retrieval_status: str | None  # ok | success | degraded
+    errors: list[str] | None

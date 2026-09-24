@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import case as sa_case
 
 from app.ai.evals.runner import eval_runner
-from app.ai.learning.curation import learning_service
+from app.ai.learning.curation import CandidateConflictError, learning_service
 from app.ai.learning.examples import dataset_exporter
 from app.ai.mcp.client import mcp_manager, parse_and_decrypt_env
 from app.ai.prompts.manager import prompt_manager
@@ -72,6 +72,7 @@ from app.schemas.ai import (
     ProviderLiveTestResponse,
     SkillDTO,
     ToggleSkillRequest,
+    TrainingStatsDTO,
     UpdateMCPServerRequest,
     UsageSummaryDTO,
     UsageTimeseriesPointDTO,
@@ -471,7 +472,13 @@ async def get_ai_diagnostics(
     else:
         vec_provider = type(vec_store).__name__
         vec_status = "configured"
-        if hasattr(vec_store, "client") and getattr(vec_store, "client") is not None:
+        if hasattr(vec_store, "check_health"):
+            try:
+                is_healthy = await vec_store.check_health()
+                vec_status = "connected" if is_healthy else "degraded"
+            except Exception:
+                vec_status = "degraded"
+        elif hasattr(vec_store, "client") and getattr(vec_store, "client") is not None:
             try:
                 await vec_store.client.get_collections()
                 vec_status = "connected"
@@ -1021,8 +1028,10 @@ async def list_ai_runs(
     prompt_version: str | None = None,
     has_error: bool | None = None,
     has_rag: bool | None = None,
+    # deprecated compatibility alias; remove in future major/minor API cleanup
     used_rag: bool | None = None,
     has_tools: bool | None = None,
+    # deprecated compatibility alias; remove in future major/minor API cleanup
     used_tools: bool | None = None,
     conversation_id: int | None = None,
     traffic_source: str | None = None,
@@ -2126,7 +2135,7 @@ async def promote_candidate(
     session: AsyncSession = Depends(get_session),
     admin: AdminUser = Depends(get_current_admin),
 ):
-    """Promote learning candidate to Knowledge or Training dataset based on requested action."""
+    """Promote learning candidate to Knowledge or Training dataset based on requested action with atomic claim semantics."""
     cand = await session.get(LearningCandidate, candidate_id)
     if not cand:
         raise HTTPException(status_code=404, detail="Candidate not found")
@@ -2151,8 +2160,11 @@ async def promote_candidate(
                 status_code=409,
                 detail=f"Candidate #{candidate_id} has already been promoted to training.",
             )
-        except ValueError as e:
-            raise HTTPException(status_code=409, detail=str(e))
+        except (CandidateConflictError, ValueError) as e:
+            err_msg = str(e)
+            if "not found" in err_msg:
+                raise HTTPException(status_code=404, detail=err_msg)
+            raise HTTPException(status_code=409, detail=err_msg)
         if not ok:
             raise HTTPException(status_code=404, detail="Candidate not found")
         return {
@@ -2187,10 +2199,12 @@ async def promote_candidate(
                 status_code=409,
                 detail=f"Candidate #{candidate_id} has already been promoted.",
             )
-        except ValueError as e:
+        except (CandidateConflictError, ValueError) as e:
             err_msg = str(e)
             if "privacy confirmation" in err_msg:
                 raise HTTPException(status_code=400, detail=err_msg)
+            if "not found" in err_msg:
+                raise HTTPException(status_code=404, detail=err_msg)
             raise HTTPException(status_code=409, detail=err_msg)
 
         if not ok:
@@ -2214,30 +2228,24 @@ async def reject_candidate(
     session: AsyncSession = Depends(get_session),
     admin: AdminUser = Depends(get_current_admin),
 ):
-    cand = await session.get(LearningCandidate, candidate_id)
-    if not cand:
-        raise HTTPException(status_code=404, detail="Candidate not found")
-    if cand.status != "pending":
-        raise HTTPException(
-            status_code=409,
-            detail=f"Candidate #{candidate_id} has already been {cand.status}.",
-        )
-
     try:
         ok = await learning_service.reject_candidate(
             session=session,
             candidate_id=candidate_id,
             reviewer_name=admin.username,
         )
-    except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+    except (CandidateConflictError, ValueError) as e:
+        err_msg = str(e)
+        if "not found" in err_msg:
+            raise HTTPException(status_code=404, detail=err_msg)
+        raise HTTPException(status_code=409, detail=err_msg)
 
     if not ok:
         raise HTTPException(status_code=404, detail="Candidate not found")
     return {"ok": True, "rejected_candidate_id": candidate_id}
 
 
-@router.get("/learning/training-stats")
+@router.get("/learning/training-stats", response_model=TrainingStatsDTO)
 async def get_training_dataset_stats(
     session: AsyncSession = Depends(get_session),
     _admin: AdminUser = Depends(get_current_admin),
@@ -2331,11 +2339,13 @@ async def list_evaluation_runs(
                     "case_id": cr.case_id,
                     "case_name": det.get("case_name") or cr.case_id,
                     "passed": (cr.status == "PASS"),
-                    "decision_correct": det.get("decision_correct", (cr.status == "PASS")),
+                    "decision_correct": det.get("decision_correct")
+                    if "decision_correct" in det
+                    else None,
                     "expected_decision": cr.expected_decision or "",
                     "actual_decision": cr.actual_decision or "",
-                    "keyword_score": det.get("keyword_score", 1.0 if cr.status == "PASS" else 0.0),
-                    "latency_ms": cr.latency_ms or 0,
+                    "keyword_score": det.get("keyword_score") if "keyword_score" in det else None,
+                    "latency_ms": cr.latency_ms if cr.latency_ms is not None else None,
                     "tokens": cr.tokens,
                 }
             )

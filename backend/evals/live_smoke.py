@@ -189,8 +189,10 @@ async def run_live_smoke(
             in_tok = usage_data.get("prompt_tokens")
             out_tok = usage_data.get("completion_tokens")
             tot_tok = usage_data.get("total_tokens")
-            cached_tok = usage_data.get("prompt_tokens_details", {}).get("cached_tokens")
-            reasoning_tok = usage_data.get("completion_tokens_details", {}).get("reasoning_tokens")
+            cached_tok = (usage_data.get("prompt_tokens_details") or {}).get("cached_tokens")
+            reasoning_tok = (usage_data.get("completion_tokens_details") or {}).get(
+                "reasoning_tokens"
+            )
 
             print(f"  PASS: HTTP 200 ({lat1}ms) - Preview: {content!r}")
             print(f"        Finish Reason: {finish_reason}")
@@ -224,7 +226,9 @@ async def run_live_smoke(
             max_tokens=20,
         )
         lat2 = int((time.perf_counter() - t0) * 1000)
-        assert isinstance(gen_result, LLMResult), f"Expected LLMResult, got {type(gen_result)}"
+        if not isinstance(gen_result, LLMResult):
+            print(f"  FAILED: Expected LLMResult, got {type(gen_result)}")
+            return 1
         print(f"  PASS: Provider generated ({lat2}ms) - Result: {gen_result.content.strip()!r}")
         print(
             f"        Usage Source: {gen_result.usage.usage_source}, Total: {gen_result.usage.total_tokens}"
@@ -294,10 +298,12 @@ async def run_live_smoke(
             await session.execute(select(AIRun).where(AIRun.id == run_res.ai_run_id))
         ).scalar_one_or_none()
 
-        assert persisted_run is not None, "AIRun record was not persisted to database"
-        assert persisted_run.traffic_source == "provider_test", (
-            f"Unexpected traffic source: {persisted_run.traffic_source}"
-        )
+        if persisted_run is None:
+            print("  FAILED: AIRun record was not persisted to database")
+            return 1
+        if persisted_run.traffic_source != "provider_test":
+            print(f"  FAILED: Unexpected traffic source: {persisted_run.traffic_source}")
+            return 1
         print(
             f"  PASS: Runtime completed (Run ID: {run_res.ai_run_id}, Model: {persisted_run.model})"
         )
@@ -344,11 +350,14 @@ async def run_live_smoke(
             ],
         )
         res2 = await runtime.run(session=session, context=ctx2)
-        has_context = "alpine" in res2.answer.lower() or "coffee" in res2.answer.lower()
-        if has_context:
-            print(f"  PASS: Turn 2 context retained: {res2.answer[:80]!r}")
-        else:
-            print(f"  WARN: Turn 2 reply did not mention Alpine Coffee: {res2.answer[:80]!r}")
+        ans_lower = res2.answer.lower()
+        has_alpine_coffee = "alpine coffee" in ans_lower or (
+            "alpine" in ans_lower and "coffee" in ans_lower
+        )
+        if not has_alpine_coffee:
+            print(f"  FAILED: Turn 2 reply did not identify 'Alpine Coffee': {res2.answer[:80]!r}")
+            return 1
+        print(f"  PASS: Turn 2 context retained (Alpine Coffee): {res2.answer[:80]!r}")
 
     # -----------------------------------------------------------------------
     # Level 5: Active PromptVersion Injection & Provenance Tracking
@@ -379,9 +388,9 @@ async def run_live_smoke(
             await session.execute(select(AIRun).where(AIRun.id == res_v2.ai_run_id))
         ).scalar_one()
 
-        assert run_v2.prompt_version == "LIVE_SMOKE_V2", (
-            f"Expected PromptVersion LIVE_SMOKE_V2, got {run_v2.prompt_version}"
-        )
+        if run_v2.prompt_version != "LIVE_SMOKE_V2":
+            print(f"  FAILED: Expected PromptVersion LIVE_SMOKE_V2, got {run_v2.prompt_version}")
+            return 1
         print("  PASS: PromptVersion LIVE_SMOKE_V2 successfully tracked in AIRun provenance")
         print(f"        Output: {res_v2.answer[:80]!r}")
 

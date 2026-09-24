@@ -58,8 +58,8 @@ type StudioTab =
   | 'prompts'
   | 'evaluation';
 
-export default function AIStudioPage() {
-  const [activeTab, setActiveTab] = useState<StudioTab>('overview');
+export default function AIStudioPage({ initialTab = 'overview' }: { initialTab?: StudioTab } = {}) {
+  const [activeTab, setActiveTab] = useState<StudioTab>(initialTab);
   const [timeRange, setTimeRange] = useState<'24h' | '7d' | '30d' | 'all'>('24h');
   const [loading, setLoading] = useState(false);
   const [overviewLoading, setOverviewLoading] = useState(false);
@@ -79,6 +79,7 @@ export default function AIStudioPage() {
     usedTools?: boolean;
   }>({});
   const [runsOffset, setRunsOffset] = useState(0);
+  const [runsTotal, setRunsTotal] = useState(0);
 
   // Live Provider Testing
   const [liveTesting, setLiveTesting] = useState(false);
@@ -171,16 +172,17 @@ export default function AIStudioPage() {
       if (tab === 'overview') {
         await loadOverview(timeRange);
       } else if (tab === 'runs') {
-        const data = await api.getAIRuns({
+        const page = await api.getAIRunsPage({
           time_range: timeRange,
           decision: runFilters.decision || undefined,
           has_error: runFilters.hasError,
-          used_rag: runFilters.usedRag,
-          used_tools: runFilters.usedTools,
+          has_rag: runFilters.usedRag,
+          has_tools: runFilters.usedTools,
           limit: 25,
           offset: runsOffset,
         });
-        setRuns(data);
+        setRuns(page.items);
+        setRunsTotal(page.total);
       } else if (tab === 'diagnostics') {
         await loadDiagnostics();
       } else if (tab === 'knowledge') {
@@ -1106,7 +1108,9 @@ export default function AIStudioPage() {
                 </table>
                 {/* Pagination Controls */}
                 <div className="flex items-center justify-between p-3 border-t border-[var(--border)] text-xs text-[var(--text-secondary)]">
-                  <span>Showing {runs.length} runs (offset: {runsOffset})</span>
+                  <span>
+                    Showing {runs.length} of {runsTotal} runs • Page {Math.floor(runsOffset / 25) + 1} of {Math.max(1, Math.ceil(runsTotal / 25))}
+                  </span>
                   <div className="flex items-center gap-2">
                     <Button
                       size="sm"
@@ -1119,7 +1123,7 @@ export default function AIStudioPage() {
                     <Button
                       size="sm"
                       variant="secondary"
-                      disabled={runs.length < 25}
+                      disabled={runsOffset + 25 >= runsTotal}
                       onClick={() => setRunsOffset(runsOffset + 25)}
                     >
                       Next
@@ -1189,11 +1193,15 @@ export default function AIStudioPage() {
                       </div>
                       <div>
                         <span className="text-[var(--text-muted)] text-[10px]">TOTAL</span>
-                        <div className="text-sky-400 font-bold">{selectedRun.total_tokens ?? selectedRun.tokens ?? '0'}</div>
+                        <div className="text-sky-400 font-bold">
+                          {selectedRun.total_tokens != null
+                            ? selectedRun.total_tokens.toLocaleString()
+                            : (selectedRun.tokens != null ? selectedRun.tokens.toLocaleString() : '—')}
+                        </div>
                       </div>
                     </div>
                     <div className="text-[11px] text-[var(--text-muted)] pt-1 border-t border-[var(--border)]">
-                      Source: {selectedRun.usage_source || 'unavailable'} • Cached: {selectedRun.cached_input_tokens ?? 0} • Reasoning: {selectedRun.reasoning_tokens ?? 0}
+                      Source: {selectedRun.usage_source || 'unavailable'} • Cached: {selectedRun.cached_input_tokens != null ? selectedRun.cached_input_tokens : '—'} • Reasoning: {selectedRun.reasoning_tokens != null ? selectedRun.reasoning_tokens : '—'}
                     </div>
                   </div>
 
@@ -1217,7 +1225,9 @@ export default function AIStudioPage() {
                       </div>
                     ) : (
                       <div className="p-3 rounded-xl bg-[var(--bg-input)] text-xs text-[var(--text-muted)]">
-                        Single aggregate model turn recorded ({selectedRun.llm_call_count ?? 1} call).
+                        {selectedRun.llm_call_count == null
+                          ? 'Call count unavailable'
+                          : `Single aggregate model turn recorded (${selectedRun.llm_call_count} ${selectedRun.llm_call_count === 1 ? 'call' : 'calls'}).`}
                       </div>
                     )}
                   </div>
@@ -1598,7 +1608,7 @@ export default function AIStudioPage() {
                           <div className="space-y-1">
                             <div className="font-bold text-[var(--text-primary)]">{doc.title}</div>
                             <div className="text-[11px] text-[var(--text-secondary)]">
-                              Scope: <span className="font-mono text-purple-400">{doc.scope_type}</span> {doc.scope_id ? `(${doc.scope_id})` : ''} • {doc.chunk_count} chunks • Status: {doc.status}
+                              Scope: <span className="font-mono text-purple-400">{doc.scope_type}</span> {doc.scope_id ? `(${doc.scope_id})` : ''} • {doc.chunk_count} chunks
                             </div>
                           </div>
                           <button
@@ -2166,7 +2176,9 @@ export default function AIStudioPage() {
                   </div>
                   <div>
                     <span className="text-[var(--text-muted)] text-[10px]">TOTAL TOKENS</span>
-                    <div className="font-mono text-[var(--text-secondary)]">{evalSummary.total_tokens.toLocaleString()}</div>
+                    <div className="font-mono text-[var(--text-secondary)]">
+                      {evalSummary.total_tokens != null ? evalSummary.total_tokens.toLocaleString() : '—'}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2204,9 +2216,15 @@ export default function AIStudioPage() {
                           <td className="py-3 px-4 font-mono text-[var(--text-secondary)]">{run.model || 'default'}</td>
                           <td className="py-3 px-4 font-bold text-emerald-400">{(run.pass_rate * 100).toFixed(0)}%</td>
                           <td className="py-3 px-4 font-bold text-[var(--text-primary)]">{(run.decision_accuracy * 100).toFixed(0)}%</td>
-                          <td className="py-3 px-4 font-mono text-[var(--text-secondary)]">{run.avg_latency_ms} ms</td>
-                          <td className="py-3 px-4 font-mono text-[var(--text-secondary)]">{run.total_tokens.toLocaleString()}</td>
-                          <td className="py-3 px-4 text-[var(--text-muted)]">{new Date(run.created_at).toLocaleString()}</td>
+                          <td className="py-3 px-4 font-mono text-[var(--text-secondary)]">
+                            {run.average_latency_ms != null ? `${run.average_latency_ms.toFixed(0)} ms` : '—'}
+                          </td>
+                          <td className="py-3 px-4 font-mono text-[var(--text-secondary)]">
+                            {run.total_tokens != null ? run.total_tokens.toLocaleString() : '—'}
+                          </td>
+                          <td className="py-3 px-4 text-[var(--text-muted)]">
+                            {run.started_at ? new Date(run.started_at).toLocaleString() : '—'}
+                          </td>
                         </tr>
                       ))
                     )}

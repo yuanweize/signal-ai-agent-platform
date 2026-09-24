@@ -11,7 +11,11 @@ from typing import Any
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http import models as qmodels
 
-from app.ai.rag.vector_store import VectorSearchResult, VectorStoreError
+from app.ai.rag.vector_store import (
+    VectorSearchResult,
+    VectorStoreError,
+    VectorStoreUnavailableError,
+)
 
 logger = logging.getLogger("ai.rag.qdrant")
 
@@ -105,7 +109,7 @@ class QdrantVectorStore:
             return True
         except Exception as e:
             logger.error(f"Qdrant upsert failed: {e}")
-            raise VectorStoreError(f"Qdrant upsert failed: {e}") from e
+            raise VectorStoreUnavailableError(f"Qdrant upsert failed: {e}") from e
 
     async def search(
         self,
@@ -156,7 +160,17 @@ class QdrantVectorStore:
             ]
         except Exception as e:
             logger.error(f"Qdrant search error: {e}")
-            return []
+            raise VectorStoreUnavailableError(f"Qdrant search failed: {e}") from e
+
+    async def check_health(self) -> bool:
+        """Check if Qdrant instance is reachable and healthy."""
+        try:
+            client = self._get_client()
+            await client.get_collections()
+            return True
+        except Exception as e:
+            logger.debug(f"Qdrant health check failed: {e}")
+            return False
 
     async def delete(
         self,

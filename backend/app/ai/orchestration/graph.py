@@ -72,9 +72,6 @@ def build_agent_graph(
         if not selected and "customer-support" in active_names:
             selected.append("customer-support")
 
-        if not selected:
-            selected.append("customer-support")
-
         # Progressive loading: load bodies only for selected skills
         for sname in selected:
             body = skill_registry.load_body(sname)
@@ -87,29 +84,41 @@ def build_agent_graph(
         }
 
     async def retrieve_knowledge_node(state: AgentState) -> dict[str, Any]:
-        """Perform scope-isolated RAG retrieval."""
+        """Perform scope-isolated RAG retrieval with degraded state tracking."""
         if not retriever:
-            return {"retrieved_chunks": [], "citations": []}
+            return {"retrieved_chunks": [], "citations": [], "retrieval_status": "disabled"}
 
         text = state.get("text") or ""
         group_id = state.get("group_id")
         user_id = state.get("user_id")
         is_group = bool(state.get("is_group"))
 
-        chunks = await retriever.retrieve(
-            query=text,
-            limit=3,
-            is_group=is_group,
-            group_id=group_id,
-            user_id=user_id,
-        )
-        citations = [c.to_citation() for c in chunks]
-        return {
-            "retrieved_chunks": [
-                {"title": c.title, "content": c.content, "score": c.score} for c in chunks
-            ],
-            "citations": citations,
-        }
+        try:
+            chunks = await retriever.retrieve(
+                query=text,
+                limit=3,
+                is_group=is_group,
+                group_id=group_id,
+                user_id=user_id,
+            )
+            citations = [c.to_citation() for c in chunks]
+            return {
+                "retrieved_chunks": [
+                    {"title": c.title, "content": c.content, "score": c.score} for c in chunks
+                ],
+                "citations": citations,
+                "retrieval_status": "success",
+            }
+        except Exception as e:
+            logger.error(f"Retrieval failed due to vector store error: {e}")
+            existing_errors = list(state.get("errors") or [])
+            existing_errors.append(f"retrieval_degraded: vector store error ({type(e).__name__})")
+            return {
+                "retrieved_chunks": [],
+                "citations": [],
+                "retrieval_status": "degraded",
+                "errors": existing_errors,
+            }
 
     async def plan_tools_node(state: AgentState) -> dict[str, Any]:
         """Check if tools or actions should be invoked with bounded execution & permission gating."""
@@ -338,6 +347,24 @@ def build_agent_graph(
                 "usage": agg_handoff.to_dict(),
             }
 
+        # Check if retrieval degraded on a policy/terms inquiry
+        if state.get("retrieval_status") == "degraded" and any(
+            w in text for w in ["policy", "return", "refund", "terms", "warranty", "rules", "faq"]
+        ):
+            agg_handoff = TokenUsage.combine(
+                TokenUsage(**(mc.get("usage") or {})) for mc in model_call_records
+            )
+            return {
+                "draft": "I am having trouble accessing our knowledge base right now. Let me connect you with an agent who can help.",
+                "decision": AgentDecision.handoff.value,
+                "decision_reason": "knowledge_retrieval_degraded",
+                "confidence": None,
+                "tokens": agg_handoff.total_tokens or 0,
+                "model_calls": model_call_records,
+                "usage": agg_handoff.to_dict(),
+                "errors": state.get("errors") or ["retrieval_degraded: vector store unavailable"],
+            }
+
         # 2. Build prompt context
         system_prompt = state.get("prompt_template") or DEFAULT_SYSTEM_PROMPT_TEMPLATE
         messages = [{"role": "system", "content": system_prompt}]
@@ -453,6 +480,7 @@ def build_agent_graph(
             "tokens": aggregated_usage.total_tokens or 0,
             "model_calls": model_call_records,
             "usage": aggregated_usage.to_dict(),
+            "errors": state.get("errors"),
         }
 
     # Assemble Graph

@@ -300,6 +300,14 @@ class AgentRuntime:
             model_calls = output_state.get("model_calls") or []
             traffic_source = getattr(context, "traffic_source", "production")
 
+            state_errors = output_state.get("errors")
+            combined_errors = error_msg
+            if state_errors:
+                se_str = (
+                    "; ".join(state_errors) if isinstance(state_errors, list) else str(state_errors)
+                )
+                combined_errors = f"{error_msg}; {se_str}" if error_msg else se_str
+
             # 7. Record AIRun trace
             run_record = await local_tracer.record_run(
                 session=session,
@@ -317,7 +325,7 @@ class AgentRuntime:
                 confidence=output_state.get("confidence"),
                 latency_ms=latency_ms,
                 tokens=output_state.get("tokens", 0),
-                errors=error_msg,
+                errors=combined_errors,
                 input_tokens=usage_dict.get("input_tokens"),
                 output_tokens=usage_dict.get("output_tokens"),
                 total_tokens=usage_dict.get("total_tokens") or output_state.get("tokens"),

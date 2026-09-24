@@ -4,6 +4,7 @@ FastAPI application entry point.
 Registers lifespan events, CORS, routes, and health check.
 """
 
+import asyncio
 import logging
 import os
 import time
@@ -102,7 +103,14 @@ async def lifespan(app: FastAPI):
             await skill_registry.sync_persisted_states(startup_session)
             await mcp_manager.connect_enabled_servers(startup_session)
         logger.info("✅ Unified AgentRuntime & MCP lifecycle active")
-    except (Exception, BaseExceptionGroup) as e:
+    except asyncio.CancelledError:
+        raise
+    except BaseExceptionGroup as eg:
+        cancelled, _ = eg.split(asyncio.CancelledError)
+        if cancelled is not None:
+            raise cancelled
+        logger.warning(f"⚠️  AI lifecycle warmup partial: {eg}")
+    except Exception as e:
         logger.warning(f"⚠️  AI lifecycle warmup partial: {e}")
 
     yield
@@ -156,8 +164,9 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
+    expose_headers=["X-Total-Count"],
 )
 
 

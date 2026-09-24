@@ -67,6 +67,11 @@ class ApiClient {
   }
 
   async request<T>(endpoint: string, options: ApiOptions = {}): Promise<T> {
+    const raw = await this.requestRaw<T>(endpoint, options);
+    return raw.data;
+  }
+
+  private async requestRaw<T>(endpoint: string, options: ApiOptions = {}): Promise<{ data: T; headers: Headers }> {
     const { method = 'GET', body, headers = {}, retryCount = 2 } = options;
 
     const token = this.getToken();
@@ -83,7 +88,6 @@ class ApiClient {
     // (risk of duplicate sends, double-charge, etc.).
     // retryCount is ignored for mutating methods unless caller explicitly overrides.
     const effectiveRetries = (method === 'GET') ? retryCount : 0;
-
     let lastError: unknown = null;
 
     for (let attempt = 0; attempt <= effectiveRetries; attempt += 1) {
@@ -101,7 +105,7 @@ class ApiClient {
         }
 
         if (response.status === 204) {
-          return undefined as T;
+          return { data: undefined as T, headers: response.headers };
         }
 
         if (!response.ok) {
@@ -116,7 +120,8 @@ class ApiClient {
           throw new Error(message);
         }
 
-        return response.json();
+        const data = await response.json();
+        return { data, headers: response.headers };
       } catch (error) {
         lastError = error;
         const retriable = method === 'GET' && attempt < effectiveRetries;
@@ -504,6 +509,42 @@ class ApiClient {
     return this.request<AIOverviewMetricsDTO>(`/ai-studio/overview?time_range=${encodeURIComponent(timeRange)}`);
   }
 
+  async getAIRunsPage(params: {
+    limit?: number;
+    offset?: number;
+    time_range?: string;
+    decision?: string;
+    model?: string;
+    provider?: string;
+    prompt_version?: string;
+    has_error?: boolean;
+    has_rag?: boolean;
+    has_tools?: boolean;
+    conversation_id?: number;
+    traffic_source?: string;
+  } = {}): Promise<{ items: AIRunDTO[]; total: number }> {
+    const q = new URLSearchParams();
+    if (params.limit !== undefined) q.append('limit', String(params.limit));
+    if (params.offset !== undefined) q.append('offset', String(params.offset));
+    if (params.time_range) q.append('time_range', params.time_range);
+    if (params.decision) q.append('decision', params.decision);
+    if (params.model) q.append('model', params.model);
+    if (params.provider) q.append('provider', params.provider);
+    if (params.prompt_version) q.append('prompt_version', params.prompt_version);
+    if (params.has_error !== undefined) q.append('has_error', String(params.has_error));
+    if (params.has_rag !== undefined) q.append('has_rag', String(params.has_rag));
+    if (params.has_tools !== undefined) q.append('has_tools', String(params.has_tools));
+    if (params.conversation_id !== undefined) q.append('conversation_id', String(params.conversation_id));
+    if (params.traffic_source) q.append('traffic_source', params.traffic_source);
+    const qs = q.toString() ? `?${q.toString()}` : '';
+
+    const { data, headers } = await this.requestRaw<AIRunDTO[]>(`/ai-studio/runs${qs}`);
+    const items = Array.isArray(data) ? data : [];
+    const totalHeader = headers.get('x-total-count') || headers.get('X-Total-Count');
+    const total = totalHeader ? parseInt(totalHeader, 10) : items.length;
+    return { items, total: isNaN(total) ? items.length : total };
+  }
+
   async getAIRuns(params: {
     limit?: number;
     offset?: number;
@@ -520,29 +561,15 @@ class ApiClient {
     conversation_id?: number;
     traffic_source?: string;
   } = {}) {
-    const q = new URLSearchParams();
-    if (params.limit !== undefined) q.append('limit', String(params.limit));
-    if (params.offset !== undefined) q.append('offset', String(params.offset));
-    if (params.time_range) q.append('time_range', params.time_range);
-    if (params.decision) q.append('decision', params.decision);
-    if (params.model) q.append('model', params.model);
-    if (params.provider) q.append('provider', params.provider);
-    if (params.prompt_version) q.append('prompt_version', params.prompt_version);
-    if (params.has_error !== undefined) q.append('has_error', String(params.has_error));
-    const ragFilter = params.has_rag !== undefined ? params.has_rag : params.used_rag;
-    if (ragFilter !== undefined) {
-      q.append('has_rag', String(ragFilter));
-      q.append('used_rag', String(ragFilter));
-    }
-    const toolsFilter = params.has_tools !== undefined ? params.has_tools : params.used_tools;
-    if (toolsFilter !== undefined) {
-      q.append('has_tools', String(toolsFilter));
-      q.append('used_tools', String(toolsFilter));
-    }
-    if (params.conversation_id !== undefined) q.append('conversation_id', String(params.conversation_id));
-    if (params.traffic_source) q.append('traffic_source', params.traffic_source);
-    const qs = q.toString() ? `?${q.toString()}` : '';
-    return this.request<AIRunDTO[]>(`/ai-studio/runs${qs}`);
+    const canonicalParams = {
+      ...params,
+      has_rag: params.has_rag !== undefined ? params.has_rag : params.used_rag,
+      has_tools: params.has_tools !== undefined ? params.has_tools : params.used_tools,
+    };
+    delete canonicalParams.used_rag;
+    delete canonicalParams.used_tools;
+    const page = await this.getAIRunsPage(canonicalParams);
+    return page.items;
   }
 
   async getAIRunDetail(runId: number) {
@@ -729,10 +756,7 @@ class ApiClient {
       body: {
         name: data.name,
         transport,
-        transport_type: transport,
         command_or_url,
-        command: transport === 'stdio' ? command_or_url : undefined,
-        endpoint_url: transport !== 'stdio' ? command_or_url : undefined,
         args: data.args || [],
         env: data.env || {},
       },

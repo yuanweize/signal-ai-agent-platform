@@ -64,14 +64,16 @@ Command:
 cd frontend
 npm test
 ```
-- **Total Test Cases**: 18 passing tests across 5 test suites.
-- **Components Covered**: `AIPlatform.test.tsx`, `DevicesPage.test.tsx`, `InboxPage.test.tsx`, `LoginPage.test.tsx`, `SettingsPage.test.tsx`.
+- **Total Test Cases**: 20 passing tests across 6 test suites.
+- **Components Covered**: `AIPlatform.test.tsx`, `AIStudioContract.test.tsx`, `DevicesPage.test.tsx`, `InboxPage.test.tsx`, `LoginPage.test.tsx`, `SettingsPage.test.tsx`.
 
 ### D. Database Migration Tests
-Verified across 3 distinct lifecycles:
+Verified across 5 distinct lifecycles (`backend/tests/test_migrations.py`):
 1. **Fresh Install**: Empty database → `alembic upgrade head`.
 2. **Legacy Upgrade**: `112aa6e29383` → `alembic upgrade head`.
 3. **v0.3 → v0.4 Upgrade**: `c8927140f12a` → `alembic upgrade head`.
+4. **v0.4.0 → v0.4.1 Upgrade**: `e1f2a3b4c5d6` → `f3b4c5d6e7f8`.
+5. **v0.4.1 → v0.4.2 Hardening & Downgrade**: `f3b4c5d6e7f8` → `g4c5d6e7f8a9` (correcting legacy `llm_call_count` heuristics) and rollback verification.
 
 ---
 
@@ -79,8 +81,8 @@ Verified across 3 distinct lifecycles:
 
 Every push and pull request validates the following sequential pipeline:
 1. **Backend Lint & Format**: `ruff check app tests evals` and `ruff format --check app tests evals`.
-2. **Backend Unit & Integration**: `pytest -q`.
-3. **Deterministic Evaluation Suite**: `python evals/run_evals.py`.
-4. **Database Migrations**: Verification of linear revision head.
-5. **Frontend Lint & Build**: `npm run lint`, `npx tsc --noEmit`, `npm test`, `npm run build`.
-6. **Docker Compose Build**: Validates backend, frontend, and Qdrant container configurations.
+2. **Backend Unit & Integration**: `pytest -q` (117+ tests).
+3. **Deterministic Evaluation Suite**: `python evals/run_evals.py` (32 invariant cases).
+4. **Database Migrations**: Verification of full linear revision upgrade and downgrade chain.
+5. **Frontend Lint & Build**: `npm run lint`, `npx tsc --noEmit`, `npm test -- --run`, `npm run build`.
+6. **Docker Compose Runtime Smoke**: Builds and launches real Qdrant, backend, and frontend containers, verifying `/health/ready`, `/health/live`, Qdrant cluster readiness, and frontend HTTP response, with automatic container diagnostics on failure.

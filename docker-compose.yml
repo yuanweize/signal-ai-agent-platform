@@ -3,6 +3,9 @@ services:
   # Backend — FastAPI + Signal Bot Engine
   # ============================================================
   backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     image: ghcr.io/yuanweize/signal-market-bot-backend:${APP_VERSION:-latest}
     container_name: smb-backend
     restart: unless-stopped
@@ -43,6 +46,9 @@ services:
   # Frontend — React Admin Dashboard (Nginx)
   # ============================================================
   frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
     image: ghcr.io/yuanweize/signal-market-bot-frontend:${APP_VERSION:-latest}
     container_name: smb-frontend
     restart: unless-stopped

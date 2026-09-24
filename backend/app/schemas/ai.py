@@ -311,6 +311,10 @@ class PromoteCandidateRequest(BaseModel):
     confirm_global_privacy: bool = False
 
 
+class TrainingStatsDTO(BaseModel):
+    total_approved_examples: int
+
+
 # --- Prompts ---
 
 

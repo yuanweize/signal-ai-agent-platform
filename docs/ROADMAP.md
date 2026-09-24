@@ -42,13 +42,22 @@ timeline
 - Deterministic Agent Contract Evaluation Suite (32 cases, 100% decision accuracy).
 - Scoped durable memory and progressive skill loading.
 
-### [v0.4.1] — AI Studio Observability & Operations (Current Release)
+### [v0.4.1] — AI Studio Observability & Operations (Released)
 - AI Studio unified management console (Overview, Runs, Knowledge, Memory, Skills, MCP, Learning, Prompts, Evals, Diagnostics).
 - Truthful multi-source token usage & cost telemetry (`provider`, `estimated`, `unavailable`, `partial`).
 - Model call tracking with latency breakdown, reasoning tokens, and failed tool attempt observability.
 - MCP client lifecycle management with automatic tool unregistration upon disconnect.
 - Learning curation idempotency with database-level uniqueness constraints.
 - Evaluation sandbox isolation preventing customer conversation contamination.
+
+### [v0.4.2] — Final Correctness & Production Hardening (Released / Frozen)
+- Front/backend API contract alignment & complete DTO drift elimination.
+- Atomic conditional state transitions for learning loop curation (HTTP 409 Conflict on race).
+- Strict skill disabled filtering and graceful vector store unavailability degradation.
+- Real execution run pagination (`X-Total-Count`) and nullable token telemetry preservation.
+- CORS PATCH support and faithful MCP/lifespan `CancelledError` propagation.
+- Migration `g4c5d6e7f8a9` correcting legacy `llm_call_count` heuristics.
+- Production Docker Compose runtime smoke gate in CI.
 
 ### [v0.5.0] — Realtime & Multimodal Intelligence (Planned)
 - Server-Sent Events (SSE) for instantaneous inbox and notification updates.

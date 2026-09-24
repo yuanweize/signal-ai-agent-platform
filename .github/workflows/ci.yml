@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: ["main", "refactor/**", "feat/**"]
+    branches: ["main", "refactor/**", "feat/**", "fix/**"]
   pull_request:
 
 jobs:
@@ -92,7 +92,7 @@ jobs:
         run: npm run build
 
   # ============================================================
-  # Docker — compose config and image build smoke
+  # Docker — compose config and real ephemeral runtime smoke
   # ============================================================
   docker-smoke:
     runs-on: ubuntu-latest
@@ -103,8 +103,64 @@ jobs:
       - name: Validate Docker Compose Config
         run: docker compose config
 
-      - name: Build backend Docker image
-        run: docker build -t smb-backend:smoke ./backend
+      - name: Create local data directory
+        run: mkdir -p data
 
-      - name: Build frontend Docker image
-        run: docker build -t smb-frontend:smoke ./frontend
+      - name: Ephemeral Docker Compose Up & Build
+        run: docker compose up -d --build
+
+      - name: Probe Qdrant readiness
+        run: |
+          for i in {1..30}; do
+            q_status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:6333/healthz || true)
+            if [ "$q_status" = "200" ]; then
+              echo "Qdrant is healthy (HTTP 200)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Qdrant readiness probe timed out"
+          exit 1
+
+      - name: Probe Backend readiness (/health/ready)
+        run: |
+          for i in {1..40}; do
+            status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/health/ready || true)
+            if [ "$status" = "200" ]; then
+              echo "Backend is ready (HTTP 200)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Backend readiness probe timed out"
+          exit 1
+
+      - name: Probe Backend liveness (/health/live)
+        run: |
+          live_status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/health/live)
+          if [ "$live_status" != "200" ]; then
+            echo "Backend liveness probe failed: HTTP $live_status"
+            exit 1
+          fi
+          echo "Backend liveness passed (HTTP 200)"
+
+      - name: Probe Frontend HTTP
+        run: |
+          for i in {1..20}; do
+            fe_status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/ || true)
+            if [ "$fe_status" = "200" ]; then
+              echo "Frontend is serving (HTTP 200)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Frontend probe failed"
+          exit 1
+
+      - name: Dump Compose logs
+        if: always()
+        run: docker compose logs --no-color
+
+      - name: Cleanup ephemeral containers and volumes
+        if: always()
+        run: docker compose down -v --remove-orphans

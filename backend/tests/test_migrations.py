@@ -40,6 +40,25 @@ def _run_alembic_upgrade_head(db_path: str) -> subprocess.CompletedProcess:
     return _run_alembic_upgrade(db_path, "head")
 
 
+def _run_alembic_downgrade(db_path: str, revision: str) -> subprocess.CompletedProcess:
+    """Run alembic downgrade <revision> against the specified SQLite database."""
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    alembic_bin = os.path.join(backend_dir, ".venv", "bin", "alembic")
+    if not os.path.exists(alembic_bin):
+        alembic_bin = sys.executable.replace("python", "alembic")
+
+    env = os.environ.copy()
+    env["DATABASE_URL"] = f"sqlite+aiosqlite:///{db_path}"
+
+    return subprocess.run(
+        [alembic_bin, "downgrade", revision],
+        cwd=backend_dir,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+
 class TestFreshDBMigration:
     """Test A: Fresh DB starts empty, runs alembic upgrade head, reaches head cleanly."""
 
@@ -56,7 +75,7 @@ class TestFreshDBMigration:
 
             # Check alembic revision is at head
             ver = cur.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-            assert ver == "f3b4c5d6e7f8", f"Expected revision f3b4c5d6e7f8, got {ver}"
+            assert ver == "g4c5d6e7f8a9", f"Expected revision g4c5d6e7f8a9, got {ver}"
 
             # Check all tables exist (16 base + 12 AI platform = 28 tables)
             tables = {
@@ -337,7 +356,7 @@ class TestLegacy112aa6eMigration:
             cur2 = con2.cursor()
 
             ver = cur2.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-            assert ver == "f3b4c5d6e7f8"
+            assert ver == "g4c5d6e7f8a9"
 
             # Check rows and IDs preserved
             assert cur2.execute(
@@ -449,7 +468,7 @@ class TestV03ToV04Migration:
             cur2 = con2.cursor()
             assert (
                 cur2.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-                == "f3b4c5d6e7f8"
+                == "g4c5d6e7f8a9"
             )
 
             # Check pre-existing data preserved and origin column backfilled
@@ -482,7 +501,7 @@ class TestV03ToV04Migration:
 
 
 class TestV04ToV041Migration:
-    """Test D: Database at v0.4 (e1f2a3b4c5d6) upgrades to v0.4.1 (f3b4c5d6e7f8) with clean backfill."""
+    """Test D: Database at v0.4 (e1f2a3b4c5d6) upgrades to head with clean backfill."""
 
     def test_v04_to_v041_migration(self):
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
@@ -508,29 +527,32 @@ class TestV04ToV041Migration:
             con.commit()
             con.close()
 
-            # 3. Upgrade to v0.4.1 head
+            # 3. Upgrade to head (g4c5d6e7f8a9)
             res2 = _run_alembic_upgrade_head(db_path)
-            assert res2.returncode == 0, f"Upgrade to v0.4.1 head failed: {res2.stderr}"
+            assert res2.returncode == 0, f"Upgrade to head failed: {res2.stderr}"
 
             # 4. Verify backfill semantics
             con2 = sqlite3.connect(db_path)
             cur2 = con2.cursor()
             ver = cur2.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-            assert ver == "f3b4c5d6e7f8"
+            assert ver == "g4c5d6e7f8a9"
 
             r1 = cur2.execute(
-                "SELECT total_tokens, usage_source, traffic_source FROM ai_runs WHERE id=1"
+                "SELECT total_tokens, usage_source, traffic_source, llm_call_count FROM ai_runs WHERE id=1"
             ).fetchone()
             assert r1[0] == 350
             assert r1[1] == "legacy_total_only"
             assert r1[2] == "production"
+            # In v0.4.2, legacy rows without ai_model_calls have llm_call_count corrected to NULL
+            assert r1[3] is None
 
             r2 = cur2.execute(
-                "SELECT total_tokens, usage_source, traffic_source FROM ai_runs WHERE id=2"
+                "SELECT total_tokens, usage_source, traffic_source, llm_call_count FROM ai_runs WHERE id=2"
             ).fetchone()
             assert r2[0] is None
             assert r2[1] == "unavailable"
             assert r2[2] == "production"
+            assert r2[3] is None
 
             # Check new tables exist
             cur2.execute("SELECT count(*) FROM ai_model_calls")
@@ -538,6 +560,95 @@ class TestV04ToV041Migration:
             cur2.execute("SELECT count(*) FROM evaluation_case_results")
 
             con2.close()
+        finally:
+            if os.path.exists(db_path):
+                os.remove(db_path)
+
+
+class TestV041ToV042Migration:
+    """Test E: Database at v0.4.1 (f3b4c5d6e7f8) upgrades to v0.4.2 (g4c5d6e7f8a9), correcting legacy llm_call_count."""
+
+    def test_v041_to_v042_upgrade_and_downgrade(self):
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+
+        try:
+            # 1. Upgrade to v0.4.1
+            res1 = _run_alembic_upgrade(db_path, "f3b4c5d6e7f8")
+            assert res1.returncode == 0, f"Upgrade to v0.4.1 failed: {res1.stderr}"
+
+            # 2. Insert test data representing:
+            # - Run 1: legacy row where v0.4.1 guessed llm_call_count = 1 (no model calls)
+            # - Run 2: v0.4.1 measured telemetry with actual call count
+            # - Run 3: legacy row that actually has an ai_model_call attached
+            con = sqlite3.connect(db_path)
+            cur = con.cursor()
+            cur.execute(
+                "INSERT INTO conversations (id, type, signal_id, mode) VALUES (1, 'dm', '+100', 'auto')"
+            )
+            cur.execute(
+                """
+                INSERT INTO ai_runs (id, trace_id, conversation_id, decision, total_tokens, usage_source, llm_call_count, traffic_source)
+                VALUES (1, 'tr_legacy_nocalls', 1, 'reply', 350, 'legacy_total_only', 1, 'production')
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO ai_runs (id, trace_id, conversation_id, decision, total_tokens, usage_source, llm_call_count, traffic_source)
+                VALUES (2, 'tr_measured', 1, 'reply', 500, 'direct_provider_reported', 1, 'production')
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO ai_runs (id, trace_id, conversation_id, decision, total_tokens, usage_source, llm_call_count, traffic_source)
+                VALUES (3, 'tr_legacy_withcalls', 1, 'reply', 400, 'legacy_total_only', 1, 'production')
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO ai_model_calls (id, ai_run_id, phase, model, latency_ms, total_tokens, usage_source)
+                VALUES (1, 3, 'generation', 'gpt-4o-mini', 150, 400, 'direct_provider_reported')
+                """
+            )
+            con.commit()
+            con.close()
+
+            # 3. Upgrade to v0.4.2 head
+            res2 = _run_alembic_upgrade(db_path, "g4c5d6e7f8a9")
+            assert res2.returncode == 0, f"Upgrade to v0.4.2 failed: {res2.stderr}"
+
+            con2 = sqlite3.connect(db_path)
+            cur2 = con2.cursor()
+            ver = cur2.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+            assert ver == "g4c5d6e7f8a9"
+
+            # Run 1: legacy row without model calls -> llm_call_count corrected to NULL
+            c1 = cur2.execute("SELECT llm_call_count FROM ai_runs WHERE id=1").fetchone()[0]
+            assert c1 is None, f"Expected None for legacy run 1, got {c1}"
+
+            # Run 2: measured telemetry -> llm_call_count preserved as 1
+            c2 = cur2.execute("SELECT llm_call_count FROM ai_runs WHERE id=2").fetchone()[0]
+            assert c2 == 1, f"Expected 1 for measured run 2, got {c2}"
+
+            # Run 3: legacy row with model calls -> llm_call_count preserved as 1
+            c3 = cur2.execute("SELECT llm_call_count FROM ai_runs WHERE id=3").fetchone()[0]
+            assert c3 == 1, f"Expected 1 for run 3 with model calls, got {c3}"
+            con2.close()
+
+            # 4. Test downgrade back to v0.4.1
+            res3 = _run_alembic_downgrade(db_path, "f3b4c5d6e7f8")
+            assert res3.returncode == 0, f"Downgrade to v0.4.1 failed: {res3.stderr}"
+
+            con3 = sqlite3.connect(db_path)
+            cur3 = con3.cursor()
+            ver_down = cur3.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+            assert ver_down == "f3b4c5d6e7f8"
+
+            # Run 1 should have llm_call_count = 1 restored
+            c1_down = cur3.execute("SELECT llm_call_count FROM ai_runs WHERE id=1").fetchone()[0]
+            assert c1_down == 1
+            con3.close()
+
         finally:
             if os.path.exists(db_path):
                 os.remove(db_path)
