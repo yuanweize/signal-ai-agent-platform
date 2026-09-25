@@ -176,9 +176,68 @@ class MessageHandler:
                         signal_event_id=signal_event_id,
                     )
                     self._store_attachments(session, msg, envelope)
+                    await session.flush()
+
+                    from app.services.multimodal import multimodal_processor
+                    from app.services.runtime_config import get_runtime_settings
+
+                    cfg = await get_runtime_settings(session)
+                    att_res = await session.execute(
+                        select(MessageAttachment).where(MessageAttachment.message_id == msg.id)
+                    )
+                    attachments = att_res.scalars().all()
+                    for att in attachments:
+                        await multimodal_processor.process_attachment(
+                            session=session,
+                            attachment=att,
+                            settings_dict=cfg,
+                            llm_provider=getattr(self._agent_runtime, "llm_provider", None),
+                        )
+
                     conversation.message_count += 1
                     conversation.last_message_at = utc_now()
                     await session.commit()
+
+                    # Publish realtime event
+                    try:
+                        from app.realtime.broker import event_broker
+                        from app.realtime.events import RealtimeEvent, RealtimeEventType
+
+                        await event_broker.publish(
+                            RealtimeEvent(
+                                type=RealtimeEventType.MESSAGE_RECEIVED,
+                                conversation_id=conversation.id,
+                                payload={
+                                    "message_id": msg.id,
+                                    "conversation_id": conversation.id,
+                                    "role": msg.role,
+                                    "content": msg.content,
+                                    "direction": msg.direction,
+                                    "sender_id": msg.sender_id,
+                                    "created_at": msg.created_at.isoformat()
+                                    if msg.created_at
+                                    else None,
+                                    "has_attachments": True,
+                                },
+                            )
+                        )
+                        await event_broker.publish(
+                            RealtimeEvent(
+                                type=RealtimeEventType.CONVERSATION_UPDATED,
+                                conversation_id=conversation.id,
+                                payload={
+                                    "conversation_id": conversation.id,
+                                    "last_message_at": conversation.last_message_at.isoformat()
+                                    if conversation.last_message_at
+                                    else None,
+                                    "message_count": conversation.message_count,
+                                },
+                            )
+                        )
+                    except Exception as eb_err:
+                        logger.warning(
+                            f"Failed to publish realtime inbound attachment event: {eb_err}"
+                        )
                 except IntegrityError:
                     logger.debug(f"Duplicate attachment event suppressed: {signal_event_id}")
                     await session.rollback()
@@ -235,8 +294,37 @@ class MessageHandler:
                     inbound_msg = await self._store_inbound_message(
                         session, conversation, parsed, user=user, signal_event_id=signal_event_id
                     )
+                    attachment_context_parts: list[str] = []
                     if envelope.has_attachments:
                         self._store_attachments(session, inbound_msg, envelope)
+                        await session.flush()
+
+                        from app.services.multimodal import multimodal_processor
+                        from app.services.runtime_config import get_runtime_settings
+
+                        cfg = await get_runtime_settings(session)
+                        att_res = await session.execute(
+                            select(MessageAttachment).where(
+                                MessageAttachment.message_id == inbound_msg.id
+                            )
+                        )
+                        attachments = att_res.scalars().all()
+                        for att in attachments:
+                            m_res = await multimodal_processor.process_attachment(
+                                session=session,
+                                attachment=att,
+                                settings_dict=cfg,
+                                llm_provider=getattr(self._agent_runtime, "llm_provider", None),
+                            )
+                            if m_res.extracted_text:
+                                prefix = (
+                                    "Image Analysis"
+                                    if m_res.processor_type == "vision_model"
+                                    else "Audio Transcript"
+                                )
+                                attachment_context_parts.append(
+                                    f"[{prefix} ({att.filename or 'file'})]: {m_res.extracted_text}"
+                                )
 
                     conversation.message_count += 1
                     conversation.last_message_at = utc_now()
@@ -245,6 +333,45 @@ class MessageHandler:
                         group.total_messages += 1
                         group.last_activity = utc_now()
                     await session.commit()
+
+                    # Publish realtime events
+                    try:
+                        from app.realtime.broker import event_broker
+                        from app.realtime.events import RealtimeEvent, RealtimeEventType
+
+                        await event_broker.publish(
+                            RealtimeEvent(
+                                type=RealtimeEventType.MESSAGE_RECEIVED,
+                                conversation_id=conversation.id,
+                                payload={
+                                    "message_id": inbound_msg.id,
+                                    "conversation_id": conversation.id,
+                                    "role": inbound_msg.role,
+                                    "content": inbound_msg.content,
+                                    "direction": inbound_msg.direction,
+                                    "sender_id": inbound_msg.sender_id,
+                                    "created_at": inbound_msg.created_at.isoformat()
+                                    if inbound_msg.created_at
+                                    else None,
+                                    "has_attachments": bool(envelope.has_attachments),
+                                },
+                            )
+                        )
+                        await event_broker.publish(
+                            RealtimeEvent(
+                                type=RealtimeEventType.CONVERSATION_UPDATED,
+                                conversation_id=conversation.id,
+                                payload={
+                                    "conversation_id": conversation.id,
+                                    "last_message_at": conversation.last_message_at.isoformat()
+                                    if conversation.last_message_at
+                                    else None,
+                                    "message_count": conversation.message_count,
+                                },
+                            )
+                        )
+                    except Exception as eb_err:
+                        logger.warning(f"Failed to publish realtime inbound event: {eb_err}")
                 except IntegrityError:
                     logger.debug(f"Duplicate inbound event suppressed: {signal_event_id}")
                     await session.rollback()
@@ -315,12 +442,16 @@ class MessageHandler:
 
                 runtime = self._agent_runtime or await get_production_agent_runtime(session)
 
+                attachment_context_str = (
+                    "\n\n".join(attachment_context_parts) if attachment_context_parts else None
+                )
                 context = AgentContext(
                     conversation_id=conversation.id,
                     message_id=inbound_msg.id,
                     sender_id=parsed.sender_id,
                     user_id=user.id if user else None,
                     text=parsed.text,
+                    attachment_context=attachment_context_str,
                     is_group=parsed.is_group,
                     group_id=parsed.group_id,
                     mode=conversation.mode,

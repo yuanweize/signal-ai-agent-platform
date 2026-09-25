@@ -11,10 +11,10 @@ import {
   Info,
   X,
   ArrowLeft,
-  Paperclip,
   RotateCw,
   SlidersHorizontal,
   Inbox,
+  Sparkles,
 } from 'lucide-react';
 import SidebarLayout from './SidebarLayout';
 import {
@@ -32,8 +32,13 @@ import { ProvenanceBadge } from './components/ProvenanceBadge';
 import { ExplainabilityDrawer } from './components/ExplainabilityDrawer';
 import { CopilotDraftCard } from './components/CopilotDraftCard';
 import { TakeoverModeSelector } from './components/TakeoverModeSelector';
+import { InboxAttachmentItem } from './components/InboxAttachmentItem';
+import { StreamingCopilotCard } from './components/StreamingCopilotCard';
+import { useRealtime } from './context/RealtimeContext';
 
 export default function InboxPage() {
+  const { status: realtimeStatus, lastEvent } = useRealtime();
+
   // Conversations list state
   const [conversations, setConversations] = useState<ConversationDTO[]>([]);
   const [totalUnread, setTotalUnread] = useState(0);
@@ -54,6 +59,9 @@ export default function InboxPage() {
   // Copilot state
   const [pendingSuggestion, setPendingSuggestion] = useState<AISuggestionDTO | null>(null);
   const [suggestionLoading, setSuggestionLoading] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingText, setStreamingText] = useState<string | null>(null);
+  const [streamingAbortController, setStreamingAbortController] = useState<AbortController | null>(null);
 
   // Explainability drawer state
   const [selectedAIRun, setSelectedAIRun] = useState<AIRunExplainabilityDTO | null>(null);
@@ -95,13 +103,59 @@ export default function InboxPage() {
     fetchConversations();
   }, [fetchConversations]);
 
-  // Periodic polling for conversations list (every 10s)
+  // Realtime SSE event listener
   useEffect(() => {
+    if (!lastEvent) return;
+    const event = lastEvent;
+
+    if (
+      event.type === 'message.received' ||
+      event.type === 'message.sent' ||
+      event.type === 'message.updated'
+    ) {
+      const payload = event.payload as any;
+      if (payload?.conversation_id === activeConvId && payload?.message) {
+        const incomingMsg = payload.message as MessageDTO;
+        setMessages(prev => {
+          const exists = prev.some(m => m.id === incomingMsg.id);
+          if (exists) {
+            return prev.map(m => (m.id === incomingMsg.id ? incomingMsg : m));
+          }
+          return [...prev, incomingMsg];
+        });
+      }
+      fetchConversations(true);
+    } else if (event.type === 'conversation.updated') {
+      const payload = event.payload as any;
+      if (payload?.conversation_id === activeConvId) {
+        if (payload.mode && activeConv) {
+          setActiveConv(prev => (prev ? { ...prev, mode: payload.mode } : null));
+        }
+      }
+      fetchConversations(true);
+    } else if (
+      event.type === 'copilot.suggestion.created' ||
+      event.type === 'copilot.suggestion.updated'
+    ) {
+      const payload = event.payload as any;
+      if (payload?.conversation_id === activeConvId) {
+        if (payload.suggestion) {
+          setPendingSuggestion(payload.suggestion);
+        } else if (activeConvId) {
+          api.getPendingSuggestion(activeConvId).then(s => setPendingSuggestion(s)).catch(() => {});
+        }
+      }
+    }
+  }, [lastEvent, activeConvId, fetchConversations, activeConv]);
+
+  // Periodic polling for conversations list (adaptive: 20s if SSE connected, 8s if disconnected)
+  useEffect(() => {
+    const intervalMs = realtimeStatus === 'connected' ? 20000 : 8000;
     const timer = setInterval(() => {
       fetchConversations(true);
-    }, 10000);
+    }, intervalMs);
     return () => clearInterval(timer);
-  }, [fetchConversations]);
+  }, [fetchConversations, realtimeStatus]);
 
   // Fetch active conversation detail and messages
   const fetchActiveMessages = useCallback(
@@ -173,17 +227,52 @@ export default function InboxPage() {
     }
   };
 
-  const handleRegenerateSuggestion = async () => {
-    if (!activeConvId) return;
-    setSuggestionLoading(true);
+  // Streaming Copilot Draft Generation
+  const handleGenerateStream = useCallback(async () => {
+    if (!activeConvId || isStreaming) return;
+    setIsStreaming(true);
+    setStreamingText('');
+    setPendingSuggestion(null);
+    const ac = new AbortController();
+    setStreamingAbortController(ac);
     try {
-      const newSug = await api.generateSuggestion(activeConvId);
-      setPendingSuggestion(newSug);
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to generate AI draft');
-    } finally {
-      setSuggestionLoading(false);
+      const finalPayload = await api.generateSuggestionStream(
+        activeConvId,
+        (chunk) => {
+          setStreamingText(chunk.accumulated || chunk.delta);
+        },
+        ac.signal
+      );
+      if (finalPayload && finalPayload.suggestion) {
+        setPendingSuggestion(finalPayload.suggestion);
+      } else {
+        const refreshed = await api.getPendingSuggestion(activeConvId);
+        setPendingSuggestion(refreshed);
+      }
+      setIsStreaming(false);
+      setStreamingText(null);
+      setStreamingAbortController(null);
+    } catch (e: any) {
+      if (e.name !== 'AbortError') {
+        setErrorMsg(e.message || 'Streaming failed');
+      }
+      setIsStreaming(false);
+      setStreamingText(null);
+      setStreamingAbortController(null);
     }
+  }, [activeConvId, isStreaming]);
+
+  const handleCancelStream = useCallback(() => {
+    if (streamingAbortController) {
+      streamingAbortController.abort();
+      setStreamingAbortController(null);
+    }
+    setIsStreaming(false);
+    setStreamingText(null);
+  }, [streamingAbortController]);
+
+  const handleRegenerateSuggestion = async () => {
+    await handleGenerateStream();
   };
 
   const handleOpenExplainability = async (aiRunId: number) => {
@@ -212,14 +301,15 @@ export default function InboxPage() {
     }
   }, [activeConvId, fetchActiveMessages]);
 
-  // Real-time polling of active conversation messages (every 5s)
+  // Real-time polling fallback of active conversation messages (25s if SSE connected, 5s if disconnected)
   useEffect(() => {
     if (activeConvId === null) return;
+    const intervalMs = realtimeStatus === 'connected' ? 25000 : 5000;
     const timer = setInterval(() => {
       fetchActiveMessages(activeConvId, true);
-    }, 5000);
+    }, intervalMs);
     return () => clearInterval(timer);
-  }, [activeConvId, fetchActiveMessages]);
+  }, [activeConvId, fetchActiveMessages, realtimeStatus]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -318,14 +408,33 @@ export default function InboxPage() {
                   </span>
                 )}
               </div>
-              <button
-                type="button"
-                className="w-7 h-7 flex items-center justify-center rounded-lg text-xs bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-muted)] hover:text-white hover:border-[rgba(255,255,255,0.2)] transition-all cursor-pointer"
-                onClick={() => fetchConversations()}
-                title="Refresh conversations"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <div
+                  className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono border bg-[var(--bg-input)] border-[var(--border)]"
+                  title={`Realtime transport: ${realtimeStatus}`}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      realtimeStatus === 'connected'
+                        ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]'
+                        : realtimeStatus === 'connecting'
+                        ? 'bg-amber-400 animate-pulse'
+                        : 'bg-zinc-400'
+                    }`}
+                  />
+                  <span className="text-[var(--text-muted)] text-[9px] uppercase tracking-wider">
+                    {realtimeStatus === 'connected' ? 'SSE' : 'Poll'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-xs bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-muted)] hover:text-white hover:border-[rgba(255,255,255,0.2)] transition-all cursor-pointer"
+                  onClick={() => fetchConversations()}
+                  title="Refresh conversations"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
 
             <div className="inbox-search-wrap">
@@ -680,22 +789,9 @@ export default function InboxPage() {
 
                           {/* Attachments */}
                           {msg.attachments && msg.attachments.length > 0 && (
-                            <div className="mt-2 space-y-1">
+                            <div className="mt-2 space-y-1.5 w-full">
                               {msg.attachments.map(att => (
-                                <div
-                                  key={att.id}
-                                  className="flex items-center gap-2 p-2 bg-[rgba(0,0,0,0.25)] rounded-lg text-xs border border-[rgba(255,255,255,0.06)]"
-                                >
-                                  <Paperclip className="w-3.5 h-3.5 text-[var(--text-muted)]" />
-                                  <span className="font-medium truncate">
-                                    {att.filename || 'attachment'}
-                                  </span>
-                                  {att.size && (
-                                    <span className="opacity-75">
-                                      ({Math.round(att.size / 1024)} KB)
-                                    </span>
-                                  )}
-                                </div>
+                                <InboxAttachmentItem key={att.id} attachment={att} />
                               ))}
                             </div>
                           )}
@@ -739,8 +835,16 @@ export default function InboxPage() {
 
               {/* Composer */}
               <div className="inbox-composer">
+                {/* Streaming Copilot Card */}
+                {isStreaming && (
+                  <StreamingCopilotCard
+                    text={streamingText}
+                    onCancel={handleCancelStream}
+                  />
+                )}
+
                 {/* Copilot Draft Suggestion Card */}
-                {pendingSuggestion && (
+                {!isStreaming && pendingSuggestion && (
                   <CopilotDraftCard
                     suggestion={pendingSuggestion}
                     loading={suggestionLoading}
@@ -749,6 +853,21 @@ export default function InboxPage() {
                     onReject={handleRejectSuggestion}
                     onRegenerate={handleRegenerateSuggestion}
                   />
+                )}
+
+                {/* Generator Trigger when in Copilot/Manual mode and no draft */}
+                {!isStreaming && !pendingSuggestion && (activeConv.mode === 'copilot' || activeConv.mode === 'manual') && (
+                  <div className="mb-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={handleGenerateStream}
+                      disabled={suggestionLoading || sending}
+                      className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-[rgba(108,92,231,0.12)] hover:bg-[rgba(108,92,231,0.22)] text-[var(--accent-light)] border border-[rgba(108,92,231,0.25)] transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <Sparkles className="w-3 h-3 text-[var(--accent)]" />
+                      <span>Generate AI Draft (Stream)</span>
+                    </button>
+                  </div>
                 )}
 
                 <form onSubmit={handleSendMessage} className="space-y-2">

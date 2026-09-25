@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import difflib
 import json
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import desc, select, update
 from sqlalchemy import func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -809,6 +811,93 @@ async def generate_suggestion_manually(
     )
 
 
+@router.post("/{conversation_id}/suggestion/generate-stream")
+async def generate_suggestion_stream(
+    conversation_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    admin: AdminUser = Depends(get_current_admin),
+) -> StreamingResponse:
+    """Stream AI Copilot draft suggestion incrementally via Server-Sent Events."""
+    import asyncio
+    import logging
+
+    req_logger = logging.getLogger("app.api.conversations.stream")
+
+    conv = await session.get(Conversation, conversation_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    stmt = (
+        select(Message)
+        .where(
+            Message.conversation_id == conversation_id,
+            Message.direction == MessageDirection.inbound.value,
+        )
+        .order_by(desc(Message.id))
+        .limit(1)
+    )
+    res = await session.execute(stmt)
+    last_inbound = res.scalar_one_or_none()
+    if not last_inbound:
+        raise HTTPException(
+            status_code=400, detail="No inbound customer message found to respond to"
+        )
+
+    # Check for attachment context
+    att_stmt = select(MessageAttachment).where(MessageAttachment.message_id == last_inbound.id)
+    att_res = await session.execute(att_stmt)
+    attachments = att_res.scalars().all()
+    att_context_parts = []
+    for att in attachments:
+        if att.extracted_text:
+            prefix = (
+                "Image Analysis" if att.processor_type == "vision_model" else "Audio Transcript"
+            )
+            att_context_parts.append(f"[{prefix} ({att.filename or 'file'})]: {att.extracted_text}")
+    att_context = "\n\n".join(att_context_parts) if att_context_parts else None
+
+    context = AgentContext(
+        conversation_id=conv.id,
+        message_id=last_inbound.id,
+        sender_id=last_inbound.sender_id or conv.signal_id,
+        text=last_inbound.content,
+        attachment_context=att_context,
+        is_group=conv.type == ConversationType.group.value or bool(conv.group_id),
+        group_id=conv.group_id,
+        mode="copilot",
+    )
+    runtime = await get_production_agent_runtime(session)
+
+    async def stream_generator() -> AsyncIterator[str]:
+        try:
+            async for chunk in runtime.stream_copilot_draft(session, context):
+                if await request.is_disconnected():
+                    req_logger.info(
+                        f"Client disconnected during Copilot streaming for conv #{conversation_id}"
+                    )
+                    break
+                event_type = chunk.get("type", "chunk")
+                data_json = json.dumps(chunk, ensure_ascii=False)
+                yield f"event: {event_type}\ndata: {data_json}\n\n"
+        except (GeneratorExit, asyncio.CancelledError):
+            req_logger.info(f"Stream cancelled for conv #{conversation_id}")
+        except Exception as e:
+            req_logger.error(f"Error in Copilot stream: {e}", exc_info=True)
+            err_json = json.dumps({"type": "error", "error": str(e)})
+            yield f"event: error\ndata: {err_json}\n\n"
+
+    return StreamingResponse(
+        stream_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 def _to_message_dto(msg: Message, sender_name: str | None = None) -> MessageDTO:
     return MessageDTO(
         id=msg.id,
@@ -959,6 +1048,24 @@ async def accept_suggestion(
             ai_run.final_message_id = msg.id
 
     await session.commit()
+
+    try:
+        from app.realtime.broker import event_broker
+        from app.realtime.events import RealtimeEvent, RealtimeEventType
+
+        await event_broker.publish(
+            RealtimeEvent(
+                type=RealtimeEventType.COPILOT_SUGGESTION_UPDATED,
+                conversation_id=conv.id,
+                payload={
+                    "suggestion_id": sug.id,
+                    "status": sug.status,
+                    "conversation_id": conv.id,
+                },
+            )
+        )
+    except Exception:
+        pass
 
     await feedback_service.record_event(
         session=session,
@@ -1111,6 +1218,24 @@ async def edit_and_send_suggestion(
 
     await session.commit()
 
+    try:
+        from app.realtime.broker import event_broker
+        from app.realtime.events import RealtimeEvent, RealtimeEventType
+
+        await event_broker.publish(
+            RealtimeEvent(
+                type=RealtimeEventType.COPILOT_SUGGESTION_UPDATED,
+                conversation_id=conv.id,
+                payload={
+                    "suggestion_id": sug.id,
+                    "status": sug.status,
+                    "conversation_id": conv.id,
+                },
+            )
+        )
+    except Exception:
+        pass
+
     await feedback_service.record_event(
         session=session,
         event_type="suggestion_edited",
@@ -1201,6 +1326,23 @@ async def reject_suggestion(
         )
 
     sug = await session.get(AISuggestion, target_sug_id)
+    try:
+        from app.realtime.broker import event_broker
+        from app.realtime.events import RealtimeEvent, RealtimeEventType
+
+        await event_broker.publish(
+            RealtimeEvent(
+                type=RealtimeEventType.COPILOT_SUGGESTION_UPDATED,
+                conversation_id=conversation_id,
+                payload={
+                    "suggestion_id": target_sug_id,
+                    "status": "rejected",
+                    "conversation_id": conversation_id,
+                },
+            )
+        )
+    except Exception:
+        pass
     await feedback_service.record_event(
         session=session,
         event_type="suggestion_rejected",
@@ -1231,6 +1373,34 @@ async def get_ai_run_explainability(
     mem = json.loads(run.memory) if run.memory else []
     tools = json.loads(run.tool_calls) if run.tool_calls else []
 
+    att_list = []
+    if run.input_message_id:
+        from app.models.conversation import MessageAttachment
+
+        atts = (
+            (
+                await session.execute(
+                    select(MessageAttachment).where(
+                        MessageAttachment.message_id == run.input_message_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for a in atts:
+            att_list.append(
+                {
+                    "id": a.id,
+                    "filename": a.filename,
+                    "mime_type": a.mime_type,
+                    "processing_status": a.processing_status,
+                    "extracted_text": a.extracted_text,
+                    "processor_model": a.processor_model,
+                    "processor_type": a.processor_type,
+                }
+            )
+
     return AIRunDTO(
         id=run.id,
         trace_id=run.trace_id,
@@ -1243,6 +1413,7 @@ async def get_ai_run_explainability(
         retrieval=retrieval,
         memory=mem,
         tool_calls=tools,
+        attachments=att_list,
         decision=run.decision,
         confidence=run.confidence,
         latency_ms=run.latency_ms,

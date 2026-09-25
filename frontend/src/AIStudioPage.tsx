@@ -1433,6 +1433,57 @@ export default function AIStudioPage({ initialTab = 'overview' }: { initialTab?:
                   <div>Total: <span className="font-mono text-[var(--text-primary)]">{diagnostics?.mcp?.total_servers ?? 0}</span></div>
                 </div>
               </div>
+
+              {/* Realtime Event Stream (v0.5) */}
+              <div className="p-5 rounded-2xl bg-[var(--bg-card)] border border-[var(--border)] space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-bold text-[var(--text-primary)]">Realtime SSE Stream</span>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/20 text-cyan-400">
+                    {diagnostics?.realtime?.status || 'active'}
+                  </span>
+                </div>
+                <div className="text-xs space-y-1 text-[var(--text-secondary)]">
+                  <div>Subscribers: <span className="font-mono text-[var(--text-primary)]">{diagnostics?.realtime?.active_subscribers ?? 0}</span></div>
+                  <div>Events Emitted: <span className="font-mono text-[var(--text-primary)]">{diagnostics?.realtime?.total_events_emitted ?? 0}</span></div>
+                  <div>Dropped / Overflow: <span className="font-mono text-[var(--text-primary)]">{diagnostics?.realtime?.dropped_events ?? 0}</span></div>
+                </div>
+              </div>
+
+              {/* Multimodal & Streaming Capabilities (v0.5) */}
+              <div className="p-5 rounded-2xl bg-[var(--bg-card)] border border-[var(--border)] space-y-3 md:col-span-2 lg:col-span-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-bold text-[var(--text-primary)]">v0.5 Runtime Capabilities Matrix</span>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300">
+                    Observable State
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+                  <div className="p-3 rounded-xl bg-[rgba(255,255,255,0.02)] border border-[var(--border)]">
+                    <span className="text-[11px] text-[var(--text-muted)] block">Text Generation</span>
+                    <span className="text-xs font-mono font-semibold uppercase text-emerald-400">
+                      {diagnostics?.capabilities?.text || diagnostics?.llm_provider?.status || 'configured'}
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-[rgba(255,255,255,0.02)] border border-[var(--border)]">
+                    <span className="text-[11px] text-[var(--text-muted)] block">Streaming Copilot</span>
+                    <span className="text-xs font-mono font-semibold uppercase text-cyan-400">
+                      {diagnostics?.capabilities?.streaming || 'supported'}
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-[rgba(255,255,255,0.02)] border border-[var(--border)]">
+                    <span className="text-[11px] text-[var(--text-muted)] block">Vision / Image</span>
+                    <span className="text-xs font-mono font-semibold uppercase text-indigo-400">
+                      {diagnostics?.capabilities?.vision || 'supported'}
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-[rgba(255,255,255,0.02)] border border-[var(--border)]">
+                    <span className="text-[11px] text-[var(--text-muted)] block">Audio Transcription</span>
+                    <span className="text-xs font-mono font-semibold uppercase text-amber-400">
+                      {diagnostics?.capabilities?.audio || 'supported'}
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}

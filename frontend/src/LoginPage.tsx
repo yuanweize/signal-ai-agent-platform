@@ -79,7 +79,7 @@ export default function LoginPage() {
             <Lock className="w-7 h-7 text-[var(--accent)]" />
           </div>
         </div>
-        <h1>Signal Market Bot</h1>
+        <h1>Signal AI Agent Platform</h1>
         <p className="login-subtitle">{bootstrapRequired ? 'First-time setup' : 'Admin Access'}</p>
 
         {bootstrapRequired ? (

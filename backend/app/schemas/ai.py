@@ -79,6 +79,7 @@ class AIRunDTO(BaseModel):
     final_message_id: int | None = None
     created_at: datetime
     model_calls: list[dict[str, Any]] = Field(default_factory=list)
+    attachments: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class AIRunListResponse(BaseModel):
@@ -397,6 +398,9 @@ class ProviderLiveTestResponse(BaseModel):
     native_tool_calling: str = "not_verified"
     embedding_status: str = "not_configured"
     embeddings: str = "not_configured"
+    streaming_status: str = "not_verified"
+    vision_status: str = "not_verified"
+    audio_status: str = "not_verified"
     tested_at: datetime
     error: str | None = None
     error_message: str | None = None

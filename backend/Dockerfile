@@ -1,5 +1,5 @@
 # ============================================================
-# Signal Market Bot — Backend
+# Signal AI Agent Platform — Backend
 # Multi-stage build for minimal image size
 # ============================================================
 
@@ -30,9 +30,10 @@ RUN pip install --no-cache-dir --upgrade pip && \
 FROM base AS runtime
 
 ARG APP_VERSION=dev
-LABEL org.opencontainers.image.title="signal-market-bot-backend"
+LABEL org.opencontainers.image.title="signal-ai-agent-platform-backend"
 LABEL org.opencontainers.image.version="${APP_VERSION}"
-LABEL org.opencontainers.image.description="Signal Market Bot backend API"
+LABEL org.opencontainers.image.description="Signal AI Agent Platform backend API"
+LABEL org.opencontainers.image.source="https://github.com/yuanweize/signal-ai-agent-platform"
 
 # Copy installed packages from deps stage
 COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages

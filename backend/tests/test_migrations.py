@@ -75,7 +75,7 @@ class TestFreshDBMigration:
 
             # Check alembic revision is at head
             ver = cur.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-            assert ver == "g4c5d6e7f8a9", f"Expected revision g4c5d6e7f8a9, got {ver}"
+            assert ver == "h5d6e7f8a9b0", f"Expected revision h5d6e7f8a9b0, got {ver}"
 
             # Check all tables exist (16 base + 12 AI platform = 28 tables)
             tables = {
@@ -356,7 +356,7 @@ class TestLegacy112aa6eMigration:
             cur2 = con2.cursor()
 
             ver = cur2.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-            assert ver == "g4c5d6e7f8a9"
+            assert ver == "h5d6e7f8a9b0"
 
             # Check rows and IDs preserved
             assert cur2.execute(
@@ -468,7 +468,7 @@ class TestV03ToV04Migration:
             cur2 = con2.cursor()
             assert (
                 cur2.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-                == "g4c5d6e7f8a9"
+                == "h5d6e7f8a9b0"
             )
 
             # Check pre-existing data preserved and origin column backfilled
@@ -527,7 +527,7 @@ class TestV04ToV041Migration:
             con.commit()
             con.close()
 
-            # 3. Upgrade to head (g4c5d6e7f8a9)
+            # 3. Upgrade to head (h5d6e7f8a9b0)
             res2 = _run_alembic_upgrade_head(db_path)
             assert res2.returncode == 0, f"Upgrade to head failed: {res2.stderr}"
 
@@ -535,7 +535,7 @@ class TestV04ToV041Migration:
             con2 = sqlite3.connect(db_path)
             cur2 = con2.cursor()
             ver = cur2.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-            assert ver == "g4c5d6e7f8a9"
+            assert ver == "h5d6e7f8a9b0"
 
             r1 = cur2.execute(
                 "SELECT total_tokens, usage_source, traffic_source, llm_call_count FROM ai_runs WHERE id=1"
@@ -647,6 +647,72 @@ class TestV041ToV042Migration:
             # Run 1 should have llm_call_count = 1 restored
             c1_down = cur3.execute("SELECT llm_call_count FROM ai_runs WHERE id=1").fetchone()[0]
             assert c1_down == 1
+            con3.close()
+
+        finally:
+            if os.path.exists(db_path):
+                os.remove(db_path)
+
+
+class TestV042ToV050Migration:
+    """Test F: Database at v0.4.2 (g4c5d6e7f8a9) upgrades to v0.5.0 (h5d6e7f8a9b0), adding multimodal columns."""
+
+    def test_v042_to_v050_upgrade_and_downgrade(self):
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+
+        try:
+            # 1. Upgrade to v0.4.2
+            res1 = _run_alembic_upgrade(db_path, "g4c5d6e7f8a9")
+            assert res1.returncode == 0, f"Upgrade to v0.4.2 failed: {res1.stderr}"
+
+            con = sqlite3.connect(db_path)
+            cur = con.cursor()
+            cur.execute(
+                "INSERT INTO conversations (id, type, signal_id, mode) VALUES (1, 'dm', '+100', 'auto')"
+            )
+            cur.execute(
+                "INSERT INTO messages (id, conversation_id, content, direction, role) VALUES (1, 1, 'photo', 'inbound', 'customer')"
+            )
+            cur.execute(
+                "INSERT INTO message_attachments (id, message_id, mime_type, filename) VALUES (1, 1, 'image/jpeg', 'test.jpg')"
+            )
+            con.commit()
+            con.close()
+
+            # 2. Upgrade to v0.5.0 head
+            res2 = _run_alembic_upgrade(db_path, "h5d6e7f8a9b0")
+            assert res2.returncode == 0, f"Upgrade to v0.5.0 failed: {res2.stderr}"
+
+            con2 = sqlite3.connect(db_path)
+            cur2 = con2.cursor()
+            ver = cur2.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+            assert ver == "h5d6e7f8a9b0"
+
+            # Check new columns exist with default
+            row = cur2.execute(
+                "SELECT processing_status, extracted_text, processor_model FROM message_attachments WHERE id=1"
+            ).fetchone()
+            assert row[0] == "pending"
+            assert row[1] is None
+            assert row[2] is None
+            con2.close()
+
+            # 3. Test downgrade back to v0.4.2
+            res3 = _run_alembic_downgrade(db_path, "g4c5d6e7f8a9")
+            assert res3.returncode == 0, f"Downgrade to v0.4.2 failed: {res3.stderr}"
+
+            con3 = sqlite3.connect(db_path)
+            cur3 = con3.cursor()
+            ver_down = cur3.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+            assert ver_down == "g4c5d6e7f8a9"
+
+            # Verify columns are dropped
+            cols_down = {
+                r[1] for r in cur3.execute("PRAGMA table_info(message_attachments)").fetchall()
+            }
+            assert "processing_status" not in cols_down
+            assert "extracted_text" not in cols_down
             con3.close()
 
         finally:

@@ -4,7 +4,7 @@
 
 ```mermaid
 timeline
-    title Signal Market Bot Evolution
+    title Signal AI Agent Platform Evolution
     section v0.3
         Messaging Foundation : Full Signal webhook pipeline
                              : Message deduplication & state tracking
@@ -15,7 +15,7 @@ timeline
                              : Human-in-the-loop Copilot mode
                              : Official MCP Python SDK tool discovery
                              : Group privacy invariants
-    section v0.5 (Planned)
+    section v0.5
         Realtime & Multimodal : Server-Sent Events (SSE) live updates
                               : Inbound image & voice note comprehension
                               : Streaming LLM token delivery
@@ -59,10 +59,12 @@ timeline
 - Migration `g4c5d6e7f8a9` correcting legacy `llm_call_count` heuristics.
 - Production Docker Compose runtime smoke gate in CI.
 
-### [v0.5.0] — Realtime & Multimodal Intelligence (Planned)
-- Server-Sent Events (SSE) for instantaneous inbox and notification updates.
-- Inbound attachment processing (receipt OCR, product image inspection).
-- Streaming token completion to the frontend Copilot editor.
+### [v0.5.0] — Realtime & Multimodal Intelligence (Released)
+- **Realtime SSE Architecture**: Enterprise application event broker with bounded queue backpressure (100 events/subscriber) and replay buffer (150 events). Authenticated `/api/realtime/events` endpoint with Bearer header support.
+- **Streaming Copilot Drafts**: Incremental token generation with live cancellation (`POST /api/conversations/{id}/suggestion/generate-stream`). Model call telemetry tracks partial latencies and cancellation events without throwing 500 errors.
+- **Multimodal Attachment Pipeline**: Inbound visual image understanding (10MB limit) and audio transcription (25MB limit, 0600 secure file hygiene). Truthful provider capability diagnostics (`LIVE_VERIFIED`, `SUPPORTED`, `UNSUPPORTED`).
+- **Explainability & Provenance**: Evidence drawer surfaces attachment provenance, OCR/transcript text, and processor model breakdown under untrusted context blocks.
+- **Migration `h5d6e7f8a9b0`**: Adds multimodal processing columns to `message_attachments`.
 
 ### [v0.6.0] — Commerce Automation & Integrations (Planned)
 - Conversational cart management and checkout link dispatch.

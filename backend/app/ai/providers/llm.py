@@ -7,11 +7,12 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import AsyncIterator
 from typing import Any, Protocol, runtime_checkable
 
 from openai import AsyncOpenAI
 
-from app.ai.types.usage import LLMResult, LLMToolResult, TokenUsage
+from app.ai.types.usage import LLMResult, LLMStreamChunk, LLMToolResult, TokenUsage
 
 logger = logging.getLogger("ai.providers.llm")
 
@@ -37,6 +38,16 @@ class LLMProvider(Protocol):
         model: str | None = None,
     ) -> LLMToolResult | tuple[str | None, list[dict[str, Any]], int]:
         """Generate response with optional tool calls. Returns LLMToolResult (or unpackable tuple)."""
+        ...
+
+    async def stream_generate(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 800,
+    ) -> AsyncIterator[LLMStreamChunk]:
+        """Stream text completion chunks from messages."""
         ...
 
 
@@ -147,6 +158,52 @@ class OpenAICompatibleProvider:
             latency_ms=latency_ms,
         )
 
+    async def stream_generate(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> AsyncIterator[LLMStreamChunk]:
+        client = self._get_client()
+        target_model = model or self.default_model
+        temp = temperature if temperature is not None else self.temperature
+        tokens_limit = max_tokens if max_tokens is not None else self.max_tokens
+
+        stream = await client.chat.completions.create(
+            model=target_model,
+            messages=messages,  # type: ignore[arg-type]
+            temperature=temp,
+            max_tokens=tokens_limit,
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+        accumulated: list[str] = []
+        async for chunk in stream:
+            delta = ""
+            finish_reason = None
+            if chunk.choices and len(chunk.choices) > 0:
+                choice = chunk.choices[0]
+                delta = choice.delta.content or ""
+                finish_reason = getattr(choice, "finish_reason", None)
+
+            accumulated.append(delta)
+            full_text = "".join(accumulated)
+
+            usage = None
+            if getattr(chunk, "usage", None):
+                usage = parse_openai_usage(chunk.usage)
+
+            is_final = finish_reason is not None or (chunk.usage is not None and not delta)
+            yield LLMStreamChunk(
+                delta=delta,
+                accumulated_content=full_text,
+                is_final=is_final,
+                usage=usage,
+                finish_reason=finish_reason,
+                model=target_model,
+            )
+
     async def tool_generate(
         self,
         messages: list[dict[str, Any]],
@@ -202,8 +259,8 @@ class OpenAICompatibleProvider:
 class FakeLLMProvider:
     """Deterministic fake LLM provider for unit tests and local evaluation."""
 
-    def __init__(self, fixed_reply: str | None = None) -> None:
-        self.fixed_reply = fixed_reply
+    def __init__(self, fixed_reply: str | None = None, canned_response: str | None = None) -> None:
+        self.fixed_reply = fixed_reply or canned_response
         self.default_model = "fake-eval-v1"
         self.provider_name = "fake"
         self.invocations: list[dict[str, Any]] = []
@@ -388,6 +445,40 @@ class FakeLLMProvider:
             latency_ms=gen_res.latency_ms,
         )
 
+    async def stream_generate(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 800,
+    ) -> AsyncIterator[LLMStreamChunk]:
+        self.invocations.append(
+            {
+                "messages": messages,
+                "model": model,
+                "temperature": temperature,
+                "streaming": True,
+            }
+        )
+        res = await self.generate(
+            messages, model=model, temperature=temperature, max_tokens=max_tokens
+        )
+        full_text = res.content
+        words = full_text.split(" ")
+        accumulated: list[str] = []
+        for i, word in enumerate(words):
+            delta = word if i == 0 else " " + word
+            accumulated.append(delta)
+            is_final = i == len(words) - 1
+            yield LLMStreamChunk(
+                delta=delta,
+                accumulated_content="".join(accumulated),
+                is_final=is_final,
+                usage=res.usage if is_final else None,
+                finish_reason="stop" if is_final else None,
+                model=res.model,
+            )
+
 
 class DisabledLLMProvider:
     """Explicit provider when AI is disabled or unconfigured in Settings."""
@@ -413,3 +504,13 @@ class DisabledLLMProvider:
         model: str | None = None,
     ) -> tuple[str | None, list[dict[str, Any]], int]:
         raise RuntimeError(f"AI provider call prohibited: {self.reason}")
+
+    async def stream_generate(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 800,
+    ) -> AsyncIterator[LLMStreamChunk]:
+        raise RuntimeError(f"AI provider call prohibited: {self.reason}")
+        yield  # type: ignore[unreachable]

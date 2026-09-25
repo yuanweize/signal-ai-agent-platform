@@ -1,5 +1,17 @@
 import React from 'react';
-import { X, Sparkles, Database, Wrench, Brain, Clock, Cpu, ShieldAlert } from 'lucide-react';
+import {
+  X,
+  Sparkles,
+  Database,
+  Wrench,
+  Brain,
+  Clock,
+  Cpu,
+  ShieldAlert,
+  Paperclip,
+  Mic,
+  Image as ImageIcon,
+} from 'lucide-react';
 import type { AIRunExplainabilityDTO } from '../types/ai';
 
 interface ExplainabilityDrawerProps {
@@ -198,6 +210,55 @@ export const ExplainabilityDrawer: React.FC<ExplainabilityDrawerProps> = ({
                   </p>
                 )}
               </div>
+
+              {/* Multimodal Attachments Provenance (v0.5) */}
+              {run.attachments && run.attachments.length > 0 && (
+                <div className="space-y-2">
+                  <span className="font-bold text-[var(--text-primary)] flex items-center gap-1.5">
+                    <Paperclip className="w-3.5 h-3.5 text-indigo-400" />
+                    Multimodal Context Inputs ({run.attachments.length})
+                  </span>
+                  <div className="space-y-1.5">
+                    {run.attachments.map((att, i) => {
+                      const mime = (att.mime_type || '').toLowerCase();
+                      const isImg = mime.startsWith('image/');
+                      const isAud = mime.startsWith('audio/');
+                      return (
+                        <div
+                          key={i}
+                          className="p-2.5 rounded-lg bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.06)] text-[11px] space-y-1"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold text-[var(--text-primary)] flex items-center gap-1.5 truncate max-w-[200px]">
+                              {isImg ? (
+                                <ImageIcon className="w-3 h-3 text-indigo-400" />
+                              ) : isAud ? (
+                                <Mic className="w-3 h-3 text-amber-400" />
+                              ) : (
+                                <Paperclip className="w-3 h-3 text-zinc-400" />
+                              )}
+                              {att.filename || 'Attachment'}
+                            </span>
+                            <span className="text-[9px] px-1.5 py-0.5 rounded font-mono uppercase bg-white/5 text-[var(--text-muted)]">
+                              {att.processing_status || 'unsupported'}
+                            </span>
+                          </div>
+                          {att.extracted_text && (
+                            <p className="text-[10px] text-[var(--text-secondary)] italic bg-black/30 p-1.5 rounded">
+                              "{att.extracted_text}"
+                            </p>
+                          )}
+                          {att.processor_model && (
+                            <div className="text-[9px] text-[var(--text-muted)] font-mono">
+                              Model: {att.processor_model} ({att.processor_type || 'vision'})
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Safety & Chain-of-Thought Boundary */}
               <div className="p-2.5 rounded-lg bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.06)] flex items-start gap-2 text-[10px] text-[var(--text-muted)]">

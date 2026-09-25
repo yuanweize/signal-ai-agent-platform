@@ -61,6 +61,15 @@ export interface AIRunExplainabilityDTO {
     name?: string;
     arguments?: Record<string, unknown>;
   }>;
+  attachments?: Array<{
+    id?: number;
+    filename?: string | null;
+    mime_type?: string | null;
+    processing_status?: string | null;
+    extracted_text?: string | null;
+    processor_model?: string | null;
+    processor_type?: string | null;
+  }>;
   created_at: string;
 }
 
@@ -442,6 +451,19 @@ export interface AIDiagnosticsDTO {
   rag_index: { documents_count: number; chunks_count: number; status: string };
   mcp: { active_servers: number; total_servers: number; status: string };
   signal_gateway: { status: string; api_url?: string; phone_number?: string };
+  realtime?: {
+    active_subscribers: number;
+    total_events_emitted: number;
+    dropped_events: number;
+    status?: string;
+  };
+  capabilities?: {
+    text?: string;
+    streaming?: string;
+    vision?: string;
+    audio?: string;
+    multimodal?: string;
+  };
 }
 
 

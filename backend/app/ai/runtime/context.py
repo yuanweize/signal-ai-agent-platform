@@ -22,6 +22,7 @@ class AgentContext:
     language: str = "en"
     mode: str = "auto"  # auto | copilot | manual | paused
     traffic_source: str = "production"  # production | copilot | evaluation | provider_test
+    attachment_context: str | None = None
     recent_messages: list[dict] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
 

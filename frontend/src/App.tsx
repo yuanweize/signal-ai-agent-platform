@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { api } from './api';
+import { RealtimeProvider } from './context/RealtimeContext';
 import LoginPage from './LoginPage';
 import DashboardPage from './DashboardPage';
 import ProductsPage from './ProductsPage';
@@ -24,7 +25,8 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function App() {
   return (
     <BrowserRouter>
-      <Routes>
+      <RealtimeProvider>
+        <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route
           path="/"
@@ -105,6 +107,7 @@ function App() {
         {/* Catch-all redirect */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </RealtimeProvider>
     </BrowserRouter>
   );
 }

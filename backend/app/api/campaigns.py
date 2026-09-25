@@ -267,6 +267,27 @@ async def run_broadcast(
     )
     await session.commit()
 
+    try:
+        from app.realtime.broker import event_broker
+        from app.realtime.events import RealtimeEvent, RealtimeEventType
+
+        await event_broker.publish(
+            RealtimeEvent(
+                type=RealtimeEventType.CAMPAIGN_UPDATED,
+                payload={
+                    "campaign_name": payload.campaign_name,
+                    "attempted": attempted,
+                    "sent": sent,
+                    "skipped": skipped,
+                    "failed": failed,
+                    "dry_run": payload.dry_run,
+                    "status": audit_status,
+                },
+            )
+        )
+    except Exception:
+        pass
+
     return CampaignBroadcastResponse(
         campaign_name=payload.campaign_name,
         attempted=attempted,

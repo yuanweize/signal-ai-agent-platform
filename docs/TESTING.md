@@ -14,8 +14,26 @@ Command:
 cd backend
 .venv/bin/pytest -v
 ```
-- **Current Release Baseline**: 141 backend passing tests.
+- **Current Release Baseline**: 157 backend passing tests.
 - **Coverage Highlights**:
+  - `tests/test_v050_realtime.py` (6 tests):
+    - Realtime event serialization, payload validation, and system connection ping.
+    - SSE authentication enforcement (Bearer token requirement, no JWT in URL).
+    - Client disconnect detection, subscriber unregistration, and memory cleanup.
+    - Bounded queue backpressure (dropping oldest upon 100 events saturation).
+    - Event replay with `Last-Event-ID` across disconnections.
+    - Sensitive credential and private key filtering at the broker boundary.
+  - `tests/test_v050_streaming.py` (3 tests):
+    - Full streaming token accumulation and final suggestion persistence.
+    - Frontend client abort and cancellation telemetry (`decision='cancelled'`).
+    - Non-streaming fallback when LLM provider lacks streaming capability.
+  - `tests/test_v050_multimodal.py` (6 tests):
+    - Inbound image attachment processing with vision LLM context extraction.
+    - Audio attachment transcription and temp file hygiene (0600 mode and cleanup).
+    - MIME type whitelist and file size boundaries (10MB image, 25MB audio).
+    - SSRF prevention (strictly enforcing local storage paths).
+    - Untrusted user context injection guarding against prompt injection.
+    - Group privacy isolation for multimodal attachments.
   - `tests/test_v04_final_production_hardening.py` (15 tests):
     - `test_real_app_startup_routes_ai_through_agent_runtime_factory`: Asserts real app lifespan routes all AI traffic via AgentRuntime.
     - `test_non_test_runtime_rejects_fake_vector_store`: Asserts runtime rejects Fake providers in non-test mode.
@@ -64,16 +82,17 @@ Command:
 cd frontend
 npm test
 ```
-- **Total Test Cases**: 20 passing tests across 6 test suites.
-- **Components Covered**: `AIPlatform.test.tsx`, `AIStudioContract.test.tsx`, `DevicesPage.test.tsx`, `InboxPage.test.tsx`, `LoginPage.test.tsx`, `SettingsPage.test.tsx`.
+- **Total Test Cases**: 23 passing tests across 7 test suites.
+- **Components Covered**: `v050Features.test.tsx` (Realtime SSE, streaming Copilot cancellation, multimodal attachments), `AIPlatform.test.tsx`, `AIStudioContract.test.tsx`, `DevicesPage.test.tsx`, `InboxPage.test.tsx`, `LoginPage.test.tsx`, `SettingsPage.test.tsx`.
 
 ### D. Database Migration Tests
-Verified across 5 distinct lifecycles (`backend/tests/test_migrations.py`):
+Verified across 6 distinct lifecycles (`backend/tests/test_migrations.py`):
 1. **Fresh Install**: Empty database → `alembic upgrade head`.
 2. **Legacy Upgrade**: `112aa6e29383` → `alembic upgrade head`.
 3. **v0.3 → v0.4 Upgrade**: `c8927140f12a` → `alembic upgrade head`.
 4. **v0.4.0 → v0.4.1 Upgrade**: `e1f2a3b4c5d6` → `f3b4c5d6e7f8`.
 5. **v0.4.1 → v0.4.2 Hardening & Downgrade**: `f3b4c5d6e7f8` → `g4c5d6e7f8a9` (correcting legacy `llm_call_count` heuristics) and rollback verification.
+6. **v0.4.2 → v0.5.0 Multimodal Attachments**: `g4c5d6e7f8a9` → `h5d6e7f8a9b0` adding processing status and extracted text metadata to `message_attachments`, with bi-directional rollback tests.
 
 ---
 
@@ -81,8 +100,8 @@ Verified across 5 distinct lifecycles (`backend/tests/test_migrations.py`):
 
 Every push and pull request validates the following sequential pipeline:
 1. **Backend Lint & Format**: `ruff check app tests evals` and `ruff format --check app tests evals`.
-2. **Backend Unit & Integration**: `pytest -q` (141 tests).
+2. **Backend Unit & Integration**: `pytest -q` (157 tests).
 3. **Deterministic Evaluation Suite**: `python evals/run_evals.py` (32 invariant cases).
-4. **Database Migrations**: Verification of full linear revision upgrade and downgrade chain.
+4. **Database Migrations**: Verification of full linear revision upgrade and downgrade chain (6 lifecycles).
 5. **Frontend Lint & Build**: `npm run lint`, `npx tsc --noEmit`, `npm test -- --run`, `npm run build`.
 6. **Docker Compose Runtime Smoke**: Builds and launches real Qdrant, backend, and frontend containers, verifying `/health/ready`, `/health/live`, Qdrant cluster readiness, and frontend HTTP response, with automatic container diagnostics on failure.

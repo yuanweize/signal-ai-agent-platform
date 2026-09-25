@@ -1,8 +1,8 @@
-# AI Platform Subsystems — Signal Market Bot v0.4
+# AI Platform Subsystems — Signal AI Agent Platform v0.5
 
 ## Overview
 
-The v0.4 AI Platform upgrade modernizes Signal Market Bot into a multi-tier, verifiable, enterprise customer service architecture. This document details each AI subsystem, its code pathways, configuration contracts, and testing evidence.
+The AI Platform modernizes Signal AI Agent Platform into a multi-tier, verifiable, enterprise customer service architecture. This document details each AI subsystem, its code pathways, configuration contracts, and testing evidence.
 
 ---
 
@@ -109,4 +109,36 @@ Organized into 4 operational groups in `AIStudioPage.tsx`:
    - **Learning Loop**: Curation of operator edits into learning candidates, privacy-guarded promotion to knowledge FAQ, and fine-tuning dataset export (JSONL).
    - **Prompt Management**: Versioned system prompt history and activation.
    - **Evaluation Suite**: Deterministic 32-case invariant benchmark runner and live LLM golden case evaluator with persistent run history.
+
+---
+
+## 8. Realtime Architecture & Server-Sent Events (v0.5)
+
+Located in [`backend/app/realtime/`](../backend/app/realtime/) and [`backend/app/api/realtime.py`](../backend/app/api/realtime.py):
+- **RealtimeEventBroker**: In-process pub/sub event layer managing connected subscribers.
+- **Bounded Queue & Backpressure**: Subscriber queues are capped at 100 events. If a slow client saturates its queue, the oldest event is dropped and a `resync_required` marker is queued.
+- **Replay Buffer**: Maintains the latest 150 events in memory, enabling clients to resume using the standard `Last-Event-ID` header upon reconnect.
+- **Secure Transport**: Authenticated via HTTP Bearer tokens (never in query parameters). Payloads are filtered at the broker boundary to prevent leaking API secrets or TOTP keys.
+- **Diagnostics & Metrics**: `GET /api/realtime/stats` exposes connected subscriber count, total emitted events, dropped event count, and queue depths.
+
+---
+
+## 9. Streaming Copilot Generation (v0.5)
+
+Located in [`backend/app/ai/providers/llm.py`](../backend/app/ai/providers/llm.py) and [`backend/app/ai/runtime/agent_runtime.py`](../backend/app/ai/runtime/agent_runtime.py):
+- **Provider Streaming Abstraction**: `stream_generate` yields token chunks incrementally with fallback to non-streaming execution when unavailable.
+- **Copilot Draft Streaming**: `POST /api/conversations/{id}/suggestion/generate-stream` yields SSE stream chunks (`type: chunk`, `type: complete`, `type: cancelled`).
+- **Telemetry on Abort**: If an operator clicks Cancel, the backend intercepts the disconnection, records latency up to abort, and logs `AIRun` with `decision='cancelled'` without throwing HTTP 500 errors.
+- **Signal Network Safety**: Streaming tokens are strictly displayed within the operator's admin UI. Partial tokens are never sent to external Signal contacts.
+
+---
+
+## 10. Multimodal Attachment Processing (v0.5)
+
+Located in [`backend/app/services/multimodal.py`](../backend/app/services/multimodal.py):
+- **Visual Image Inspection**: Supports image attachments (PNG, JPEG, WebP, max 10MB). Uses OpenAI-compatible vision models to extract visual descriptions, product details, and invoice/receipt content.
+- **Audio Voice Transcription**: Supports audio voice notes (max 25MB). Writes audio files temporarily with `0600` permissions and cleans them up unconditionally in `finally` blocks.
+- **SSRF Immunity**: Attachments are referenced exclusively by local disk path IDs managed by the Signal gateway. Remote web URLs and cloud metadata endpoints are strictly rejected.
+- **Untrusted Context Injection**: Extracted image descriptions and voice transcripts enter the LangGraph pipeline strictly framed as untrusted user inputs.
+- **Persistent Provenance**: Extracted text, processing status (`understood`, `failed`, `unsupported`), processor model, and error details are stored directly in `message_attachments` via migration `h5d6e7f8a9b0`.
 

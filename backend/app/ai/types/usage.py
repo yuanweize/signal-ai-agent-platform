@@ -196,3 +196,25 @@ class ModelCallRecord:
             "estimated_cost": self.estimated_cost,
             "currency": self.currency,
         }
+
+
+@dataclass
+class LLMStreamChunk:
+    """A streaming chunk from an LLM provider."""
+
+    delta: str
+    accumulated_content: str
+    is_final: bool = False
+    usage: TokenUsage | None = None
+    finish_reason: str | None = None
+    model: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "delta": self.delta,
+            "accumulated_content": self.accumulated_content,
+            "is_final": self.is_final,
+            "usage": self.usage.to_dict() if self.usage else None,
+            "finish_reason": self.finish_reason,
+            "model": self.model,
+        }

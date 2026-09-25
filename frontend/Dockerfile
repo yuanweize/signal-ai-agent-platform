@@ -1,5 +1,5 @@
 # ============================================================
-# Signal Market Bot — Frontend (Admin Dashboard)
+# Signal AI Agent Platform — Frontend (Admin Dashboard)
 # Multi-stage build: Node build → Nginx serve
 # ============================================================
 
@@ -22,9 +22,10 @@ RUN npm run build
 FROM nginx:alpine AS production
 
 ARG APP_VERSION=dev
-LABEL org.opencontainers.image.title="signal-market-bot-frontend"
+LABEL org.opencontainers.image.title="signal-ai-agent-platform-frontend"
 LABEL org.opencontainers.image.version="${APP_VERSION}"
-LABEL org.opencontainers.image.description="Signal Market Bot admin dashboard"
+LABEL org.opencontainers.image.description="Signal AI Agent Platform admin dashboard"
+LABEL org.opencontainers.image.source="https://github.com/yuanweize/signal-ai-agent-platform"
 
 # Copy custom nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf

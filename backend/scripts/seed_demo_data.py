@@ -1,5 +1,5 @@
 """
-Safe synthetic demo data seed script for Signal Market Bot.
+Safe synthetic demo data seed script for Signal AI Agent Platform.
 Populates clean showcase records without any private or real customer information.
 """
 

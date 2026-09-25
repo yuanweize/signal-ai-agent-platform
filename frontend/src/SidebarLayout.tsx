@@ -22,7 +22,7 @@ interface SidebarLayoutProps {
 
 export default function SidebarLayout({ children, title }: SidebarLayoutProps) {
   const navigate = useNavigate();
-  const [botName, setBotName] = useState('Signal Market');
+  const [botName, setBotName] = useState('Signal AI Agent');
 
   useEffect(() => {
     let cancelled = false;
@@ -38,8 +38,8 @@ export default function SidebarLayout({ children, title }: SidebarLayoutProps) {
       })
       .catch(() => {
         if (!cancelled) {
-          setBotName('Signal Market');
-          document.title = `${title} | Signal Market`;
+          setBotName('Signal AI Agent');
+          document.title = `${title} | Signal AI Agent`;
         }
       });
 

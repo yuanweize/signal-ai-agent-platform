@@ -22,7 +22,8 @@ graph TD
     R3 --> R4["c8927140f12a (Identity & Group Roster Persistence)"]
     R4 --> R5["e1f2a3b4c5d6 (AI Platform v0.4 Core Tables)"]
     R5 --> R6["f3b4c5d6e7f8 (AI Studio v0.4.1 Observability)"]
-    R6 --> R7["g4c5d6e7f8a9 (v0.4.2 Hardening - HEAD)"]
+    R6 --> R7["g4c5d6e7f8a9 (v0.4.2 Hardening)"]
+    R7 --> R8["h5d6e7f8a9b0 (v0.5.0 Multimodal Attachments - HEAD)"]
 ```
 
 ### Detailed Revisions
@@ -36,6 +37,7 @@ graph TD
 | `e1f2a3b4c5d6` | `c8927140f12a` | **AI Platform v0.4**: Added tables for `ai_runs`, `ai_suggestions`, `knowledge_sources`, `knowledge_documents`, `knowledge_chunks`, `durable_memories`, `skills`, `feedback_events`, `learning_candidates`. |
 | `f3b4c5d6e7f8` | `e1f2a3b4c5d6` | **AI Studio v0.4.1**: Added structured token usage breakdown, model pricing estimates, `ai_model_calls`, `evaluation_runs`, and `evaluation_case_results`. |
 | `g4c5d6e7f8a9` | `f3b4c5d6e7f8` | **v0.4.2 Hardening**: Corrected legacy `llm_call_count` heuristics by resetting `llm_call_count = NULL` on historical `usage_source = 'legacy_total_only'` rows without model call telemetry. |
+| `h5d6e7f8a9b0` | `g4c5d6e7f8a9` | **v0.5.0 Multimodal Attachments**: Added multimodal processing fields to `message_attachments` (`processing_status`, `extracted_text`, `processor_model`, `processor_type`, `processing_error`). |
 
 ---
 
@@ -74,7 +76,7 @@ alembic current
 
 Expected output of `alembic current`:
 ```text
-g4c5d6e7f8a9 (head)
+h5d6e7f8a9b0 (head)
 ```
 
 ### 3. Verifying Migration Chain
@@ -95,11 +97,17 @@ alembic heads
 
 ## Rollback Policy
 
-To downgrade one step (e.g. back to v0.4.1):
+To downgrade one step (e.g. back to v0.4.2):
 
 ```bash
 alembic downgrade -1
 # or explicitly:
+alembic downgrade g4c5d6e7f8a9
+```
+
+To downgrade back to the v0.4.1 head:
+
+```bash
 alembic downgrade f3b4c5d6e7f8
 ```
 

@@ -1,1 +1,1 @@
-# Signal Market Bot — Backend Application
+# Signal AI Agent Platform — Backend Application

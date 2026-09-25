@@ -2,6 +2,42 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.5.0] - 2026-09-25
+
+### Realtime & Multimodal Intelligence (v0.5.0 Milestone Release)
+
+#### Highlights
+- **Repository Rebranding & Migration**:
+  - GitHub repository renamed from `signal-market-bot` to `signal-ai-agent-platform`.
+  - Python distribution package renamed to `signal-ai-agent-platform` version `0.5.0`.
+  - Frontend admin package renamed to `signal-ai-agent-platform-admin` version `0.5.0`.
+  - Docker images updated to canonical names (`ghcr.io/yuanweize/signal-ai-agent-platform-backend`, `ghcr.io/yuanweize/signal-ai-agent-platform-frontend`) with backward-compatible legacy aliases.
+- **Realtime SSE Architecture**:
+  - Reusable `RealtimeEventBroker` with bounded per-client queues (max 100) preventing unbounded memory usage under backpressure.
+  - Authenticated `/api/realtime/events` route using standard Bearer authorization header (zero JWT in URL queries).
+  - Resilient reconnection with bounded replay buffer (150 events) and `Last-Event-ID` resume semantics.
+  - Heartbeat keepalive every 15s with automatic disconnect detection and subscriber cleanup.
+  - Domain event coverage across messages, conversation states, Copilot suggestions, AI runs, and campaign updates.
+  - Unified frontend `RealtimeProvider` and hook with exponential backoff and adaptive polling fallback.
+- **Streaming Copilot Generation**:
+  - Provider abstraction extended with `stream_generate` async generator across `OpenAICompatibleProvider`, `FakeLLMProvider`, and `DisabledLLMProvider`.
+  - Dedicated endpoint `POST /api/conversations/{id}/suggestion/generate-stream` streaming incremental tokens.
+  - Interactive typewriter draft formulation in Inbox with client-side Cancel support.
+  - Full telemetry tracking: provider token usage, prompt/completion tokens, and cancellation metrics (`decision="cancelled"`).
+  - Strict Signal transport safety: stream tokens are strictly confined to the admin UI; partial tokens are never transmitted over the Signal network.
+- **Multimodal Signal Message Pipeline**:
+  - Visual understanding for customer-submitted images (`image/jpeg`, `image/png`, `image/webp`, `image/gif`) using vision-capable models.
+  - Speech-to-text audio transcription for voice notes (`audio/ogg`, `audio/mp3`, `audio/wav`, `audio/aac`, `audio/mp4`) using audio transcription models.
+  - Attachment safety guards: strict MIME type whitelist, 10MB image limit, 25MB audio limit, processing timeouts, and trusted Signal internal identifiers preventing SSRF.
+  - Temporary file hygiene: temporary audio files created with `0600` permissions and guaranteed cleanup in `finally` blocks.
+  - Prompt injection protection: extracted multimodal text is strictly injected as untrusted customer input and never elevated to system instructions.
+  - Linear Alembic migration `h5d6e7f8a9b0` adding `processing_status`, `extracted_text`, `processor_model`, `processor_type`, and `processing_error` to `message_attachments`.
+- **Observable AI Studio Diagnostics**:
+  - Expanded Diagnostics to cover Realtime SSE stream statistics, Text LLM, Streaming, Vision, Audio, Embedding, Qdrant, MCP, and Signal Gateway.
+  - Truthful capability states (`live_verified`, `supported`, `unsupported`, `not_validated`, `disabled`) with zero fake green statuses.
+
+---
+
 ## [v0.4.2] - 2026-09-24
 
 ### Final Correctness & Production Hardening Patch (v0.4.2 Stable Production Hardening Release)
