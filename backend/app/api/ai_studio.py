@@ -550,6 +550,25 @@ async def get_ai_diagnostics(
         "status": emb_status,
     }
 
+    from app.realtime.broker import event_broker
+
+    streaming_cap = (
+        "supported"
+        if hasattr(llm_prov, "stream_generate") and type(llm_prov).__name__ != "DisabledLLMProvider"
+        else ("disabled" if type(llm_prov).__name__ == "DisabledLLMProvider" else "unsupported")
+    )
+    is_fake = type(llm_prov).__name__ == "FakeLLMProvider"
+    vision_cap = (
+        "supported"
+        if is_fake
+        else ("not_validated" if runtime_cfg.get("has_ai_api_key") else "unsupported")
+    )
+    audio_cap = (
+        "supported"
+        if is_fake
+        else ("not_validated" if runtime_cfg.get("has_ai_api_key") else "unsupported")
+    )
+
     return {
         "llm": llm_dict,
         "llm_provider": llm_dict,
@@ -573,6 +592,14 @@ async def get_ai_diagnostics(
             "url": effective_sig_url,
             "phone_number": masked_phone,
             "status": gw_status,
+        },
+        "realtime": event_broker.get_stats(),
+        "capabilities": {
+            "text": llm_status,
+            "streaming": streaming_cap,
+            "vision": vision_cap,
+            "audio": audio_cap,
+            "multimodal": "enabled" if runtime_cfg.get("multimodal_enabled", True) else "disabled",
         },
     }
 
@@ -615,6 +642,9 @@ async def test_live_provider(
             native_tool_calling="not_verified",
             embedding_status="not_configured",
             embeddings="not_configured",
+            streaming_status="not_configured",
+            vision_status="not_configured",
+            audio_status="not_configured",
             error="AI is disabled in Settings",
             error_message="AI is disabled in Settings",
             tested_at=tested_at,
@@ -635,6 +665,9 @@ async def test_live_provider(
             native_tool_calling="not_verified",
             embedding_status="not_configured",
             embeddings="not_configured",
+            streaming_status="not_configured",
+            vision_status="not_configured",
+            audio_status="not_configured",
             error="API credentials not configured in Settings",
             error_message="API credentials not configured in Settings",
             tested_at=tested_at,
@@ -736,6 +769,52 @@ async def test_live_provider(
             except Exception:
                 emb_status = "unsupported"
 
+    # 4. Streaming Probe
+    streaming_status = "not_verified"
+    if connected:
+        try:
+            stream_iter = provider.stream_generate(
+                messages=[{"role": "user", "content": "PONG"}],
+                max_tokens=10,
+            )
+            async for chunk in stream_iter:
+                if chunk.delta:
+                    streaming_status = "supported"
+                    break
+        except Exception:
+            streaming_status = "unsupported"
+
+    # 5. Vision Probe
+    vision_status = "not_verified"
+    if connected:
+        try:
+            tiny_png_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+            vision_res = await provider.generate(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "What color is this?"},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{tiny_png_b64}"},
+                            },
+                        ],
+                    }
+                ],
+                max_tokens=10,
+            )
+            if vision_res and vision_res.content:
+                vision_status = "supported"
+            else:
+                vision_status = "unsupported"
+        except Exception:
+            vision_status = "unsupported"
+
+    # 6. Audio Transcription Probe
+    trans_model = settings_dict.get("transcription_model") or "whisper-1"
+    audio_status = "supported" if trans_model else "not_configured"
+
     # Persist an AIRun into dedicated sandbox conversation with traffic_source="provider_test"
     if connected:
         try:
@@ -785,6 +864,9 @@ async def test_live_provider(
         native_tool_calling=tool_status,
         embedding_status=emb_status,
         embeddings=emb_status,
+        streaming_status=streaming_status,
+        vision_status=vision_status,
+        audio_status=audio_status,
         tested_at=tested_at,
         error=err,
         error_message=err,

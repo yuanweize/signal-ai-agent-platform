@@ -1,16 +1,16 @@
 <div align="center">
 
-# 🤖 Signal Market Bot
+# 🤖 Signal AI Agent Platform
 
-### Signal-native AI Agent Platform for Customer Support & Conversational Commerce
+### Signal-native AI Agent Platform for Realtime Customer Support & Conversational Commerce
 
 <p align="center">
-  A production-oriented AI agent platform bridging <strong>Signal messaging</strong> with <strong>LangGraph stateful agents</strong>, <strong>scoped RAG retrieval</strong> (Qdrant), <strong>extensible MCP tools</strong>, <strong>human-in-the-loop Copilot</strong> review, and <strong>deep runtime observability</strong> for customer support and conversational commerce.
+  A production-grade AI agent platform bridging <strong>Signal messaging</strong> with <strong>realtime SSE event streams</strong>, <strong>streaming Copilot generation</strong>, <strong>multimodal attachments (vision & audio)</strong>, <strong>LangGraph stateful agents</strong>, <strong>scoped RAG retrieval</strong> (Qdrant), <strong>extensible MCP tools</strong>, and <strong>deep runtime observability</strong>.
 </p>
 
-[![Release](https://img.shields.io/github/v/release/yuanweize/signal-market-bot?color=7c3aed&label=Release)](https://github.com/yuanweize/signal-market-bot/releases)
-[![CI](https://img.shields.io/github/actions/workflow/status/yuanweize/signal-market-bot/ci.yml?branch=main&label=CI)](https://github.com/yuanweize/signal-market-bot/actions)
-[![Docker Ready](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://github.com/yuanweize/signal-market-bot/pkgs/container/signal-market-bot-backend)
+[![Release](https://img.shields.io/github/v/release/yuanweize/signal-ai-agent-platform?color=7c3aed&label=Release)](https://github.com/yuanweize/signal-ai-agent-platform/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/yuanweize/signal-ai-agent-platform/ci.yml?branch=main&label=CI)](https://github.com/yuanweize/signal-ai-agent-platform/actions)
+[![Docker Ready](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://github.com/yuanweize/signal-ai-agent-platform/pkgs/container/signal-ai-agent-platform-backend)
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](backend/pyproject.toml)
 [![React](https://img.shields.io/badge/React-18%20%2B%20Vite-61DAFB?logo=react&logoColor=black)](frontend/package.json)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -22,8 +22,8 @@
 ---
 
 <div align="center">
-  <img src="assets/screenshots/admin-overview.png" width="900" alt="Signal Market Bot Admin Overview" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
-  <p><em>Signal Market Bot Executive Console — Real-time operational telemetry, messaging volume, module health, and catalog metrics</em></p>
+  <img src="assets/screenshots/admin-overview.png" width="900" alt="Signal AI Agent Platform Admin Overview" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35);">
+  <p><em>Signal AI Agent Platform Executive Console — Real-time operational telemetry, messaging volume, module health, and catalog metrics</em></p>
 </div>
 
 <div align="center">
@@ -60,42 +60,49 @@
 
 ## 🌟 Overview
 
-**Signal Market Bot** is a **Signal-native AI customer service and conversational commerce platform** designed specifically for the Signal messaging ecosystem. It bridges end-to-end Signal messaging with modern LLM intelligence, human agent intervention, e-commerce catalog management, and automated broadcast campaigns.
+**Signal AI Agent Platform** is a **Signal-native AI customer support and conversational commerce platform** designed specifically for the Signal messaging ecosystem. It bridges end-to-end Signal messaging with modern LLM intelligence, human agent intervention, e-commerce catalog management, and automated broadcast campaigns.
 
-With **AI Platform v0.4**, the system introduces an agentic architecture powered by **LangGraph**, offering **Copilot mode with message provenance**, **Progressive Skills**, **Scoped RAG retrieval with cross-tenant isolation**, **Durable Scoped Memory**, **MCP tool governance**, and a **Human-in-the-Loop continuous learning loop**.
+With **v0.5 Realtime & Multimodal Intelligence**, the system delivers:
+1. **Realtime SSE Event Architecture**: Low-latency reactive updates across Inbox, Copilot drafts, and AI runs with bounded queues and replay recovery.
+2. **Streaming Copilot Generation**: Live typewriter-style response formulation for human operators with instant cancellation and complete token telemetry.
+3. **Multimodal Signal Pipeline**: Secure visual understanding of product images/receipts and speech-to-text audio note transcription with strict SSRF and MIME controls.
+4. **LangGraph Agent Workflow**: Stateful agent orchestration combining Progressive Skills, Scoped RAG, Durable Memory, and MCP tool governance.
 
 ---
 
 ## 🚀 Key Features
 
-### 🤖 AI Platform & Agent Runtime (v0.4)
+### ⚡ Realtime & Multimodal Intelligence (v0.5)
+- **Realtime SSE Event Stream**: Production-grade `RealtimeEventBroker` with per-client bounded backpressure (100 event max), replay buffers with `Last-Event-ID`, automatic exponential backoff reconnection, and privacy-filtered event broadcast.
+- **Streaming Copilot Drafting**: Human-in-the-loop Copilot generation streams incremental tokens to the operator console with client abort cancellation. Stream tokens are strictly confined to the admin UI—partial tokens are never transmitted over the Signal network.
+- **Multimodal Image Understanding**: Vision-capable LLM analysis for customer-submitted images (products, receipts, screenshots). Images are treated as untrusted user inputs with prompt injection safeguards.
+- **Voice Note Transcription**: Speech-to-text audio pipeline transcribing customer voice notes with strict MIME validation, temporary file isolation (0600 mode, instant cleanup), and operator transcript inspection.
+- **Observable Capability Diagnostics**: Transparent status monitoring across Text LLM, Streaming, Vision, Audio, Qdrant Vector Store, MCP, and Signal Gateway.
+
+### 🤖 Agentic Architecture & Governance
 - **LangGraph Agent Workflow**: Directed state graph executing progressive skill discovery, multi-scope RAG, tool authorization, grounded generation, and decision classification (`reply`, `draft_for_human`, `handoff`, `no_reply`).
 - **Production Runtime Factory**: Eliminates silent fallback to fake providers in production. Production deployments connect directly to live OpenAI-compatible LLM/Embedding endpoints and Qdrant vector database.
 - **Strict Group Privacy Invariant (P0)**: Group chat conversations are strictly forbidden from retrieving private user documents or loading private user memories.
-- **Inbox Copilot Mode**: Real-time drafting assistant for human operators with one-click **Accept & Send**, **Edit in Composer**, **Discard**, and an **Evidence Drawer** revealing citations, memories, and tools used.
 - **Message Provenance Tracking**: Strict origin classification (`customer`, `ai_auto`, `human_ai_assisted`, `human_manual`, `system`, `campaign`) linked to `ai_run_id` for explainable AI auditing.
 - **Scoped RAG Knowledge Base**: Qdrant vector storage with point UUID mapping, dense retrieval, and full relational-to-vector reindexing (`POST /api/ai-studio/knowledge/reindex`).
 - **Durable Scoped Memory**: Automated customer preference extraction bound to canonical user identity (phone number & Signal UUID map to the same namespace) with individual deletion support.
 - **Governed Tools & Model Context Protocol (MCP)**: Official Python `mcp` SDK stdio client integration. Sensitive tools (e.g. refunds) trigger supervisor drafts (`draft_for_human`) rather than autonomous execution.
 - **Human-in-the-Loop Learning Loop**: Detects operator edits, curates learning candidates, allows one-click FAQ promotion, and exports fine-tuning JSONL datasets.
-- **Deterministic Contract Evaluation**: 32-case deterministic evaluation suite (`python evals/run_evals.py`) scoring pass rate, decision accuracy, keyword recall, and latency passing in CI.
+- **Deterministic Contract Evaluation**: 32-case deterministic evaluation suite (`python evals/run_evals.py`) scoring pass rate (100%), decision accuracy (100%), keyword recall, and latency in CI.
 
 ### 🎛️ AI Studio Observability & Operations Console
 - **Truthful Runtime Telemetry**: Dashboard metrics, component status badges, and token usage reflect real runtime diagnostics rather than decorative mock values.
 - **Provider-Neutral Token Telemetry**: Complete token breakdowns (`input`, `output`, `cached`, `reasoning`) and realistic pricing estimation with fallback for unconfigured models.
 - **Hierarchical Information Architecture**: Streamlined 4-group workflow: **Operate** (Overview, Runs & Traces, Diagnostics), **Knowledge** (RAG Knowledge, Memory, Skills), **Automation** (Tools & MCP), and **Improve** (Learning Loop, Prompts, Evaluations).
 - **Runs & Model-Call Trace Explorer**: Full execution tracing with decision/error filters, token inspection, and per-turn model call breakdown (`ai_model_calls`).
-- **Interactive Live Diagnostics**: Instant probe testing for live LLM providers verifying connection latency, tool execution, embeddings, and token consumption.
+- **Interactive Live Diagnostics**: Instant probe testing for live LLM providers verifying connection latency, streaming capability, vision support, audio transcription, embeddings, and token consumption.
 - **Golden Evaluation Suite**: Persisted evaluation runs with dual-mode benchmark support (32 deterministic invariant test cases + configurable live LLM evaluations).
 
-> [!NOTE]
-> **Demo Data vs. Live Telemetry**: Safe synthetic demo data can be populated using `python backend/scripts/seed_demo_data.py` to preview the AI Studio dashboard and Inbox experience in local developer environments. In live deployments, all metrics and traces are strictly produced by actual runtime executions.
-
 ### 📥 Support Inbox & Takeover
-- **Dual-Pane Conversation Console**: Complete customer conversation visibility with unread counters, message search, and type filters (DMs / Groups / Unread).
+- **Realtime Dual-Pane Console**: Complete customer conversation visibility with reactive SSE updates, unread counters, message search, and type filters.
 - **4-State Takeover Engine**: Seamlessly toggle between **Auto (AI)**, **Copilot (Assisted Drafts)**, **Manual (Human Only)**, and **Paused (Mute)** with pre-send state locks.
 - **Delivery State Machine**: Comprehensive message lifecycle tracking (`received` / `pending` -> `sent` / `failed` -> `delivered` -> `read`) with one-click failed message retries.
-- **Media & Reactions**: Native parsing and rendering of media attachments and emoji reactions.
+- **Multimodal Attachments & Reactions**: Native parsing and rendering of media attachments (with expandable vision analysis and voice transcripts) and emoji reactions.
 
 ### ⚡ Resilient Event Ingestion Pipeline
 - **Backpressure-Controlled Queue**: Bounded in-memory event pipeline (`maxsize=1000`) preventing memory spikes during message surges.
@@ -231,7 +238,7 @@ npm run dev
 | **Frontend Stack** | [React](https://react.dev/) 18 + [Vite](https://vitejs.dev/) + [TypeScript](https://www.typescriptlang.org/) + [React Router](https://reactrouter.com/) 7.18+ |
 | **Styling System** | [Tailwind CSS](https://tailwindcss.com/) + [DaisyUI](https://daisyui.com/) |
 | **Security & Auth** | Scrypt KDF + Fernet DB secret encryption + [PyOTP](https://github.com/pyauth/pyotp) (TOTP 2FA) + [python-jose](https://github.com/mpdavis/python-jose) (JWT) |
-| **Quality Gates** | [pytest](https://docs.pytest.org/) (141 passing tests) + [Vitest](https://vitest.dev/) (20 passing tests across 6 files) + Deterministic AI eval (32 cases) + Migration lifecycle (5/5) + Docker Compose runtime smoke ([Details](docs/TESTING.md)) |
+| **Quality Gates** | [pytest](https://docs.pytest.org/) (157 passing tests) + [Vitest](https://vitest.dev/) (23 passing tests across 7 files) + Deterministic AI eval (32 cases, 100% pass) + Migration lifecycle (6/6) + Docker Compose runtime smoke ([Details](docs/TESTING.md)) |
 | **Deployment** | Docker multi-stage builds + Docker Compose + GitHub Container Registry (GHCR) |
 
 ---

@@ -258,6 +258,15 @@ class MessageAttachment(Base):
     size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     file_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
+    # v0.5.0 Multimodal intelligence fields
+    processing_status: Mapped[str] = mapped_column(
+        String(32), default="pending", nullable=False, server_default="pending"
+    )
+    extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    processor_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    processor_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    processing_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )

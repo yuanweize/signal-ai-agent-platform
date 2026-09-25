@@ -33,14 +33,14 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
-logger = logging.getLogger("signal-market-bot")
+logger = logging.getLogger("signal-ai-agent-platform")
 APP_VERSION = get_app_version()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup and shutdown lifecycle."""
-    logger.info("🚀 Signal Market Bot starting up...")
+    logger.info("🚀 Signal AI Agent Platform starting up...")
     logger.info(f"   Signal API:  {settings.signal_api_url}")
     logger.info(f"   Database:    {settings.database_url}")
 
@@ -126,8 +126,8 @@ async def lifespan(app: FastAPI):
 
 # ---- FastAPI App ----
 app = FastAPI(
-    title="Signal Market Bot",
-    description="AI-powered Signal group market bot with admin dashboard",
+    title="Signal AI Agent Platform",
+    description="Signal-native AI agent platform for realtime customer support & conversational commerce",
     version=APP_VERSION,
     lifespan=lifespan,
     docs_url="/docs",
@@ -316,7 +316,7 @@ async def health_check():
 async def root():
     """API root — basic info."""
     return {
-        "name": "Signal Market Bot API",
+        "name": "Signal AI Agent Platform API",
         "version": APP_VERSION,
         "docs": "/docs",
         "health": "/health",

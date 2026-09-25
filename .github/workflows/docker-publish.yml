@@ -41,7 +41,9 @@ jobs:
         id: backend-meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/signal-market-bot-backend
+          images: |
+            ghcr.io/${{ github.repository_owner }}/signal-ai-agent-platform-backend
+            ghcr.io/${{ github.repository_owner }}/signal-market-bot-backend
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=sha-,enable={{is_default_branch}}
@@ -63,7 +65,9 @@ jobs:
         id: frontend-meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/signal-market-bot-frontend
+          images: |
+            ghcr.io/${{ github.repository_owner }}/signal-ai-agent-platform-frontend
+            ghcr.io/${{ github.repository_owner }}/signal-market-bot-frontend
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=sha-,enable={{is_default_branch}}

@@ -1,7 +1,7 @@
 [project]
-name = "signal-market-bot"
-version = "0.4.2"
-description = "Signal-native AI agent platform for customer support and conversational commerce"
+name = "signal-ai-agent-platform"
+version = "0.5.0"
+description = "Signal-native AI agent platform for realtime customer support & conversational commerce — multimodal messaging, LangGraph, RAG, MCP, Copilot, Qdrant, FastAPI & React."
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
@@ -10,6 +10,9 @@ authors = [
 keywords = [
     "signal",
     "ai-agent",
+    "agentic-ai",
+    "multimodal-ai",
+    "realtime-sse",
     "langgraph",
     "rag",
     "mcp",
@@ -59,11 +62,11 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yuanweize/signal-market-bot"
-Repository = "https://github.com/yuanweize/signal-market-bot"
-Issues = "https://github.com/yuanweize/signal-market-bot/issues"
-Changelog = "https://github.com/yuanweize/signal-market-bot/blob/main/CHANGELOG.md"
-Documentation = "https://github.com/yuanweize/signal-market-bot/blob/main/docs/ARCHITECTURE.md"
+Homepage = "https://github.com/yuanweize/signal-ai-agent-platform"
+Repository = "https://github.com/yuanweize/signal-ai-agent-platform"
+Issues = "https://github.com/yuanweize/signal-ai-agent-platform/issues"
+Changelog = "https://github.com/yuanweize/signal-ai-agent-platform/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/yuanweize/signal-ai-agent-platform/blob/main/docs/ARCHITECTURE.md"
 
 [project.optional-dependencies]
 prod = []

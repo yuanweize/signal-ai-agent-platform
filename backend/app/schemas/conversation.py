@@ -22,6 +22,11 @@ class AttachmentDTO(BaseModel):
     mime_type: str | None = None
     size: int | None = None
     external_attachment_id: str | None = None
+    processing_status: str = "pending"
+    extracted_text: str | None = None
+    processor_model: str | None = None
+    processor_type: str | None = None
+    processing_error: str | None = None
 
 
 class ReactionDTO(BaseModel):

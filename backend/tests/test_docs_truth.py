@@ -74,16 +74,18 @@ def test_readme_test_counts_accuracy():
     readme_en = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     readme_zh = (REPO_ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
 
-    assert "141 passing tests" in readme_en or "141" in readme_en
-    assert "20 passing tests" in readme_en or "20" in readme_en
+    assert "157 passing tests" in readme_en or "157" in readme_en
+    assert "23 passing tests" in readme_en or "23" in readme_en
     assert "32" in readme_en
 
-    assert "141" in readme_zh
-    assert "20" in readme_zh
+    assert "157" in readme_zh
+    assert "23" in readme_zh
     assert "32" in readme_zh
 
-    # Ensure stale old test counts (109/18/54/14/75) are not present in test specs
+    # Ensure stale old test counts (141/109/20/18/54/14/75) are not present in test specs
+    assert "141 passing tests" not in readme_en
     assert "109 passing tests" not in readme_en
+    assert "20 passing tests" not in readme_en
     assert "18 passing tests" not in readme_en
     assert "54+ suites" not in readme_en
     assert "14+ component suites" not in readme_en

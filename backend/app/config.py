@@ -66,7 +66,7 @@ class Settings(BaseSettings):
 
     # ---- Bot Behavior ----
     bot_default_language: str = "cs"
-    bot_name: str = "Signal Market Bot"
+    bot_name: str = "Signal AI Agent"
     bot_system_prompt: str = (
         "You are a helpful sales assistant. Reply naturally and professionally."
     )

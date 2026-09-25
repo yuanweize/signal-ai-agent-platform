@@ -15,12 +15,14 @@ from app.api.devices import router as devices_router
 from app.api.groups import router as groups_router
 from app.api.media import router as media_router
 from app.api.products import router as products_router
+from app.api.realtime import router as realtime_router
 from app.api.settings import router as settings_router
 from app.api.users import router as users_router
 
 api_router = APIRouter()
 
 api_router.include_router(auth_router)
+api_router.include_router(realtime_router)
 api_router.include_router(conversations_router)
 api_router.include_router(ai_studio_router)
 api_router.include_router(products_router)

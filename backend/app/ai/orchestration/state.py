@@ -30,6 +30,7 @@ class AgentState(TypedDict, total=False):
     history: list[dict[str, str]]
     prompt_template: str | None
     prompt_version: str | None
+    attachment_context: str | None
 
     # Response decision
     decision: str  # reply | draft_for_human | ask_clarifying | handoff | no_reply

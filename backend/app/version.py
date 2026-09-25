@@ -30,6 +30,11 @@ def get_app_version() -> str:
         pass
 
     try:
+        return metadata.version("signal-ai-agent-platform")
+    except Exception:
+        pass
+
+    try:
         return metadata.version("signal-market-bot")
     except Exception:
         pass

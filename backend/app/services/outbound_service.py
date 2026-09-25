@@ -123,6 +123,47 @@ class OutboundMessageService:
             logger.warning(f"⚠️ Outbound message {msg.id} failed: {msg.delivery_error}")
 
         await session.commit()
+
+        # Publish realtime events
+        try:
+            from app.realtime.broker import event_broker
+            from app.realtime.events import RealtimeEvent, RealtimeEventType
+
+            ev_type = (
+                RealtimeEventType.MESSAGE_SENT if success else RealtimeEventType.MESSAGE_UPDATED
+            )
+            await event_broker.publish(
+                RealtimeEvent(
+                    type=ev_type,
+                    conversation_id=conversation_id,
+                    payload={
+                        "message_id": msg.id,
+                        "conversation_id": conversation_id,
+                        "role": msg.role,
+                        "content": msg.content,
+                        "delivery_status": msg.delivery_status,
+                        "actor": msg.actor,
+                        "created_at": msg.created_at.isoformat() if msg.created_at else None,
+                    },
+                )
+            )
+            if conv:
+                await event_broker.publish(
+                    RealtimeEvent(
+                        type=RealtimeEventType.CONVERSATION_UPDATED,
+                        conversation_id=conversation_id,
+                        payload={
+                            "conversation_id": conversation_id,
+                            "last_message_at": conv.last_message_at.isoformat()
+                            if conv.last_message_at
+                            else None,
+                            "message_count": conv.message_count,
+                        },
+                    )
+                )
+        except Exception as eb_err:
+            logger.warning(f"Failed to publish realtime outbound event: {eb_err}")
+
         return msg
 
     async def retry_message(

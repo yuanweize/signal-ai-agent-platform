@@ -9,6 +9,8 @@ const API_BASE = '/api';
 
 export * from './types/inbox';
 export * from './types/ai';
+export * from './types/realtime';
+import type { RealtimeStats } from './types/realtime';
 import type {
   ConversationDTO,
   ConversationDetailDTO,
@@ -473,6 +475,80 @@ class ApiClient {
     return this.request<AISuggestionDTO>(`/conversations/${conversationId}/suggestion/generate`, {
       method: 'POST',
     });
+  }
+
+  async generateSuggestionStream(
+    conversationId: number,
+    onChunk: (chunk: { delta: string; accumulated: string }) => void,
+    signal?: AbortSignal
+  ): Promise<any> {
+    const token = this.getToken();
+    const response = await fetch(`${API_BASE}/conversations/${conversationId}/suggestion/generate-stream`, {
+      method: 'POST',
+      headers: {
+        Authorization: token ? `Bearer ${token}` : '',
+        Accept: 'text/event-stream',
+      },
+      signal,
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Streaming failed (${response.status}): ${errText}`);
+    }
+
+    if (!response.body) {
+      throw new Error('ReadableStream not supported on response');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let finalPayload: any = null;
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop() || '';
+
+      for (const block of parts) {
+        const lines = block.split('\n');
+        let eventType = 'chunk';
+        let eventData = '';
+
+        for (const line of lines) {
+          if (line.startsWith('event:')) {
+            eventType = line.slice(6).trim();
+          } else if (line.startsWith('data:')) {
+            eventData = line.slice(5).trim();
+          }
+        }
+
+        if (eventData) {
+          try {
+            const parsed = JSON.parse(eventData);
+            if (eventType === 'chunk') {
+              onChunk({ delta: parsed.delta || '', accumulated: parsed.accumulated || '' });
+            } else if (eventType === 'done') {
+              finalPayload = parsed;
+            } else if (eventType === 'error') {
+              throw new Error(parsed.error || 'Stream error');
+            }
+          } catch (e) {
+            if (eventType === 'error') throw e;
+          }
+        }
+      }
+    }
+
+    return finalPayload;
+  }
+
+  async getRealtimeStats() {
+    return this.request<RealtimeStats>('/realtime/stats');
   }
 
   async acceptSuggestion(conversationId: number, suggestionId?: number) {

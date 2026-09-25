@@ -20,6 +20,11 @@ export interface AttachmentDTO {
   mime_type?: string | null;
   size?: number | null;
   external_attachment_id?: string | null;
+  processing_status?: 'pending' | 'completed' | 'unsupported' | 'failed' | string;
+  extracted_text?: string | null;
+  processor_model?: string | null;
+  processor_type?: string | null;
+  processing_error?: string | null;
 }
 
 export interface ReactionDTO {
